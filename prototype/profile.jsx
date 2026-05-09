@@ -1,0 +1,599 @@
+// Personal profile page — rich info: identity, stats, skills, activity, achievements
+
+function ProfileStat({ label, value, sub, color = "var(--primary)" }) {
+  return (
+    <div style={{padding:"14px 18px",borderRight:"1px solid var(--border)",flex:1,minWidth:0}}>
+      <div style={{fontSize:12,color:"var(--text-subtle)",marginBottom:4}}>{label}</div>
+      <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+        <span className="num" style={{fontSize:22,fontWeight:700,letterSpacing:"-0.02em",lineHeight:1.1,color}}>{value}</span>
+        {sub && <span style={{fontSize:11.5,color:"var(--text-subtle)"}}>{sub}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ContribGraph() {
+  // 12 weeks × 7 days
+  const weeks = 16, days = 7;
+  const cells = [];
+  let seed = 17;
+  const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+  for (let w = 0; w < weeks; w++) {
+    const col = [];
+    for (let d = 0; d < days; d++) {
+      const r = rand();
+      let lvl = 0;
+      if (r > 0.3) lvl = 1;
+      if (r > 0.55) lvl = 2;
+      if (r > 0.75) lvl = 3;
+      if (r > 0.9) lvl = 4;
+      col.push(lvl);
+    }
+    cells.push(col);
+  }
+  const colors = [
+    "var(--bg-muted)",
+    "color-mix(in oklab, var(--primary), white 70%)",
+    "color-mix(in oklab, var(--primary), white 45%)",
+    "color-mix(in oklab, var(--primary), white 20%)",
+    "var(--primary)",
+  ];
+  const months = ["12月","1月","2月","3月"];
+  return (
+    <div>
+      <div style={{display:"flex",gap:32,fontSize:11,color:"var(--text-faint)",marginBottom:6,paddingLeft:24}}>
+        {months.map(m => <span key={m}>{m}</span>)}
+      </div>
+      <div style={{display:"flex",gap:6}}>
+        <div style={{display:"flex",flexDirection:"column",gap:3,fontSize:10,color:"var(--text-faint)",justifyContent:"space-between",paddingTop:2,paddingBottom:2}}>
+          <span>一</span><span></span><span>三</span><span></span><span>五</span><span></span><span></span>
+        </div>
+        <div style={{display:"flex",gap:3}}>
+          {cells.map((col, w) => (
+            <div key={w} style={{display:"flex",flexDirection:"column",gap:3}}>
+              {col.map((lvl, d) => (
+                <div key={d} title={`${lvl} 次贡献`} style={{
+                  width:12,height:12,borderRadius:2.5,background:colors[lvl],
+                  border:"1px solid color-mix(in oklab, var(--border), transparent 50%)"
+                }}/>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:14}}>
+        <span style={{fontSize:12,color:"var(--text-subtle)"}}>过去 16 周共 <strong style={{color:"var(--text)"}}>247</strong> 次贡献</span>
+        <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"var(--text-faint)"}}>
+          <span>少</span>
+          {colors.map((c, i) => <div key={i} style={{width:10,height:10,borderRadius:2,background:c,border:"1px solid color-mix(in oklab, var(--border), transparent 50%)"}}/>)}
+          <span>多</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActivityRow({ icon, color, title, time, meta }) {
+  return (
+    <div style={{display:"flex",gap:10,padding:"12px 16px",borderBottom:"1px solid var(--border)"}}>
+      <div style={{width:28,height:28,borderRadius:"50%",background:`var(--${color}-bg)`,color:`var(--${color}-text)`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+        {icon}
+      </div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:13,lineHeight:1.45}}>{title}</div>
+        <div style={{fontSize:11.5,color:"var(--text-faint)",marginTop:3,display:"flex",gap:8,alignItems:"center"}}>
+          <span>{time}</span>
+          {meta && <><span>·</span><span>{meta}</span></>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Achievement({ icon, name, desc, earned, rare }) {
+  return (
+    <div style={{
+      display:"flex",gap:12,padding:14,
+      border:"1px solid var(--border)",borderRadius:"var(--radius)",
+      background:earned ? "var(--bg-elevated)" : "var(--bg-muted)",
+      opacity: earned ? 1 : 0.55,
+      position:"relative"
+    }}>
+      <div style={{
+        width:44,height:44,borderRadius:10,flexShrink:0,
+        background: earned
+          ? `linear-gradient(135deg, ${rare ? "#f59e0b" : "var(--primary)"}, ${rare ? "#dc2626" : "color-mix(in oklab, var(--primary), #ec4899 30%)"})`
+          : "var(--bg)",
+        color:"white",display:"flex",alignItems:"center",justifyContent:"center",
+        fontSize:22,
+        boxShadow: earned ? `0 2px 8px ${rare ? "rgb(245 158 11 / 0.3)" : "rgb(79 70 229 / 0.25)"}` : "none",
+        filter: earned ? "none" : "grayscale(1)",
+      }}>{icon}</div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:6}}>
+          {name}
+          {rare && earned && <span className="tag amber" style={{fontSize:10}}>稀有</span>}
+        </div>
+        <div style={{fontSize:11.5,color:"var(--text-subtle)",lineHeight:1.4,marginTop:2}}>{desc}</div>
+      </div>
+    </div>
+  );
+}
+
+function Profile() {
+  const [tab, setTab] = useState("overview");
+  const [editing, setEditing] = useState(false);
+
+  const skills = [
+    { name: "go-code-review", ns: "platform-team", icon: "Go", iconClass: "blue", role: "Owner", activations: 1234, version: "1.2.3" },
+    { name: "k8s-debug", ns: "platform-team", icon: "k8", iconClass: "blue", role: "Owner", activations: 612, version: "1.5.0" },
+    { name: "deploy-helper", ns: "platform-team", icon: "🚀", iconClass: "violet", role: "Owner", activations: 0, version: "0.1.0-draft" },
+    { name: "old-deploy-flow", ns: "platform-team", icon: "Dp", iconClass: "red", role: "Owner", activations: 18, version: "0.9.4" },
+    { name: "data-import-csv", ns: "data-team", icon: "csv", iconClass: "green", role: "Maintainer", activations: 842, version: "2.0.1" },
+    { name: "sql-explain", ns: "data-team", icon: "SQ", iconClass: "green", role: "Reviewer", activations: 1502, version: "1.1.0" },
+  ];
+
+  const teams = [
+    { id: "platform-team", role: "Maintainer", members: 12, skills: 12 },
+    { id: "data-team", role: "Reviewer", members: 8, skills: 8 },
+    { id: "@core-reviewers", role: "Member", members: 24, skills: null },
+  ];
+
+  return (
+    <div className="content-inner">
+      {/* Cover + Avatar */}
+      <div style={{
+        height:140,borderRadius:"var(--radius-lg)",
+        background:"linear-gradient(135deg, var(--primary) 0%, color-mix(in oklab, var(--primary), #ec4899 40%) 60%, color-mix(in oklab, var(--primary), #f59e0b 30%) 100%)",
+        position:"relative",marginBottom:16,
+        overflow:"hidden"
+      }}>
+        <svg style={{position:"absolute",inset:0,width:"100%",height:"100%",opacity:0.25}} viewBox="0 0 800 140" preserveAspectRatio="none">
+          <defs>
+            <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+              <path d="M 32 0 L 0 0 0 32" fill="none" stroke="white" strokeWidth="0.5"/>
+            </pattern>
+          </defs>
+          <rect width="800" height="140" fill="url(#grid)"/>
+        </svg>
+        <button className="btn sm" style={{position:"absolute",top:12,right:12,background:"rgb(255 255 255 / 0.2)",color:"white",border:"1px solid rgb(255 255 255 / 0.3)",backdropFilter:"blur(4px)"}}>
+          编辑封面
+        </button>
+      </div>
+
+      {/* Avatar floats up over cover; identity sits fully below cover */}
+      <div style={{position:"relative",marginBottom:20,padding:"0 8px"}}>
+        <div style={{
+          width:104,height:104,borderRadius:"50%",
+          background:"linear-gradient(135deg, #f59e0b, #ec4899)",
+          color:"white",display:"flex",alignItems:"center",justifyContent:"center",
+          fontSize:42,fontWeight:700,
+          border:"4px solid var(--bg-soft)",
+          boxShadow:"var(--shadow-lg)",
+          marginTop:-72,
+        }}>A</div>
+
+        <div style={{display:"flex",alignItems:"flex-start",gap:20,marginTop:14}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6,flexWrap:"wrap"}}>
+              <h1 style={{margin:0,fontSize:22,fontWeight:700,letterSpacing:"-0.02em"}}>Alice Chen</h1>
+              <span className="tag indigo">Maintainer</span>
+              <span className="tag green">在线</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10,fontSize:13,color:"var(--text-muted)",flexWrap:"wrap"}}>
+              <span className="mono">@alice</span>
+              <span style={{color:"var(--text-faint)"}}>·</span>
+              <span>platform-team</span>
+              <span style={{color:"var(--text-faint)"}}>·</span>
+              <span>📍 Shanghai · UTC+8</span>
+              <span style={{color:"var(--text-faint)"}}>·</span>
+              <span>加入于 2023年3月</span>
+            </div>
+            <div style={{fontSize:13,color:"var(--text-muted)",marginTop:10,maxWidth:680,lineHeight:1.55}}>
+              Platform engineer · 专注 Go、Kubernetes 和开发者工具。喜欢把"看似无聊但每天都做"的事情自动化。
+            </div>
+          </div>
+
+          <div style={{display:"flex",gap:8,flexShrink:0}}>
+            <button className="btn"><IconChat size={14}/> 私信</button>
+            <button className="btn"><IconBell size={14}/> 关注</button>
+            <button className="btn primary" onClick={() => setEditing(true)}><IconSettings size={14}/> 编辑资料</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats strip */}
+      <div style={{display:"flex",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:"var(--radius)",overflow:"hidden",marginBottom:"var(--gap)"}}>
+        <ProfileStat label="发布的 Skills" value="12" sub="3 个 draft"/>
+        <ProfileStat label="累计周激活" value="4,208" sub="近30天" color="#10b981"/>
+        <ProfileStat label="完成审批" value="187" sub="平均 4.2 小时" color="#f59e0b"/>
+        <ProfileStat label="收到的 ⭐" value="362" sub="来自 87 位同事"/>
+        <ProfileStat label="社区影响力" value="#3" sub="platform-team 排名" color="#dc2626"/>
+        <div style={{padding:"14px 18px",flex:1,minWidth:0,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+          <div style={{fontSize:12,color:"var(--text-subtle)",marginBottom:4}}>活跃天数</div>
+          <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+            <span className="num" style={{fontSize:22,fontWeight:700,letterSpacing:"-0.02em",lineHeight:1.1}}>342</span>
+            <span style={{fontSize:11.5,color:"var(--green-text)",fontWeight:500}}>🔥 28 天连续</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{display:"flex",gap:24,borderBottom:"1px solid var(--border)",marginBottom:"var(--gap)"}}>
+        {[
+          {id:"overview",label:"概览"},
+          {id:"skills",label:"Skills",count:12},
+          {id:"activity",label:"动态"},
+          {id:"achievements",label:"成就",count:14},
+          {id:"settings",label:"设置"},
+        ].map(it => (
+          <div key={it.id}
+            onClick={() => setTab(it.id)}
+            style={{
+              padding:"10px 0",cursor:"pointer",fontSize:13.5,
+              fontWeight: tab === it.id ? 600 : 500,
+              color: tab === it.id ? "var(--text)" : "var(--text-subtle)",
+              borderBottom: tab === it.id ? "2px solid var(--primary)" : "2px solid transparent",
+              marginBottom:-1,
+              display:"flex",alignItems:"center",gap:6
+            }}>
+            {it.label}
+            {it.count !== undefined && <span className="tag outline" style={{fontSize:10.5,padding:"0 5px",height:17}}>{it.count}</span>}
+          </div>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      {tab === "overview" && (
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 320px",gap:"var(--gap)"}}>
+          <div>
+            {/* Contribution graph */}
+            <div className="card" style={{marginBottom:"var(--gap)"}}>
+              <div className="card-header">
+                <h3 className="card-title">📈 贡献热力图</h3>
+                <span className="text-subtle" style={{fontSize:12}}>包括发布、审批、评论</span>
+              </div>
+              <div className="card-body" style={{padding:20}}>
+                <ContribGraph/>
+              </div>
+            </div>
+
+            {/* Pinned skills */}
+            <div className="card" style={{marginBottom:"var(--gap)"}}>
+              <div className="card-header">
+                <h3 className="card-title">📌 置顶 Skills</h3>
+                <a style={{fontSize:12,color:"var(--primary)",cursor:"pointer"}}>编辑置顶</a>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:"var(--border)"}}>
+                {skills.slice(0,4).map(s => (
+                  <div key={s.name} style={{padding:14,background:"var(--bg-elevated)",cursor:"pointer"}}>
+                    <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:8}}>
+                      <div className={`skill-icon ${s.iconClass}`} style={{width:32,height:32,fontSize:13}}>{s.icon}</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:13.5,fontWeight:600}}>
+                          <span style={{color:"var(--text-subtle)",fontWeight:500}}>{s.ns}/</span>{s.name}
+                        </div>
+                        <div style={{fontSize:11.5,color:"var(--text-subtle)",marginTop:2,display:"flex",gap:8}}>
+                          <span className="mono">v{s.version}</span>
+                          <span>·</span>
+                          <span>{s.activations.toLocaleString()} 激活/周</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Recent activity preview */}
+            <div className="card">
+              <div className="card-header">
+                <h3 className="card-title">🕒 最近动态</h3>
+                <a style={{fontSize:12,color:"var(--primary)",cursor:"pointer"}} onClick={() => setTab("activity")}>查看全部 →</a>
+              </div>
+              <div className="card-body flush">
+                <ActivityRow icon={<IconRocket size={14}/>} color="green"
+                  title={<>发布了 <strong>platform-team/go-code-review</strong> <span className="mono">v1.2.3</span></>}
+                  time="2 天前" meta="审批人 @bob, @charlie"/>
+                <ActivityRow icon={<IconCheckCircle size={14}/>} color="blue"
+                  title={<>审批通过了 <strong>data-team/csv-import</strong> <span className="mono">v2.0.1</span></>}
+                  time="3 天前" meta="平均响应 1.2h"/>
+                <ActivityRow icon={<IconChat size={14}/>} color="amber"
+                  title={<>在 <strong>finance-team/expense-validate</strong> 留下了 4 条评论</>}
+                  time="3 天前"/>
+                <ActivityRow icon={<IconStar size={14}/>} color="orange"
+                  title={<>收到了 <strong>@frank</strong> 的 ⭐ 评价 (5星) — "拯救了我的 PR review 时间"</>}
+                  time="5 天前"/>
+              </div>
+            </div>
+          </div>
+
+          {/* Right column */}
+          <div>
+            {/* Teams */}
+            <div className="card" style={{marginBottom:"var(--gap)"}}>
+              <div className="card-header" style={{padding:"12px 16px"}}>
+                <h3 className="card-title"><IconUsers size={14}/> 所属团队</h3>
+              </div>
+              <div className="card-body flush">
+                {teams.map(t => (
+                  <div key={t.id} style={{padding:"12px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
+                    <div style={{width:32,height:32,borderRadius:6,background:"var(--primary-50)",color:"var(--primary)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:600}}>
+                      {t.id.startsWith("@") ? "👥" : t.id[0].toUpperCase()}
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:600}}>{t.id}</div>
+                      <div style={{fontSize:11.5,color:"var(--text-subtle)"}}>
+                        {t.role} · {t.members} 成员{t.skills !== null ? ` · ${t.skills} skills` : ""}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Top skills (radar-style summary) */}
+            <div className="card" style={{marginBottom:"var(--gap)"}}>
+              <div className="card-header" style={{padding:"12px 16px"}}>
+                <h3 className="card-title">🎯 技术领域</h3>
+              </div>
+              <div className="card-body" style={{padding:14}}>
+                {[
+                  {label:"Go / Backend",value:92,color:"var(--primary)"},
+                  {label:"Kubernetes / SRE",value:84,color:"#10b981"},
+                  {label:"开发者工具",value:78,color:"#f59e0b"},
+                  {label:"代码评审",value:88,color:"#dc2626"},
+                  {label:"文档写作",value:65,color:"#8b5cf6"},
+                ].map(s => (
+                  <div key={s.label} style={{marginBottom:10}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}>
+                      <span>{s.label}</span>
+                      <span className="num text-subtle">{s.value}</span>
+                    </div>
+                    <div style={{height:5,background:"var(--bg-muted)",borderRadius:3,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${s.value}%`,background:s.color,borderRadius:3,transition:"width 0.3s"}}/>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Connections */}
+            <div className="card">
+              <div className="card-header" style={{padding:"12px 16px"}}>
+                <h3 className="card-title">🔗 经常协作</h3>
+              </div>
+              <div className="card-body" style={{padding:14}}>
+                {[
+                  {name:"@bob",role:"Reviewer",bg:"bg-2",initial:"B",count:34},
+                  {name:"@charlie",role:"Maintainer",bg:"bg-3",initial:"C",count:28},
+                  {name:"@diana",role:"Contributor",bg:"bg-4",initial:"D",count:19},
+                  {name:"@frank",role:"Maintainer",bg:"bg-5",initial:"F",count:15},
+                ].map(p => (
+                  <div key={p.name} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0"}}>
+                    <div className={`avatar ${p.bg}`} style={{width:28,height:28,fontSize:11}}>{p.initial}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div className="mono" style={{fontSize:12.5,fontWeight:500}}>{p.name}</div>
+                      <div style={{fontSize:11,color:"var(--text-subtle)"}}>{p.role}</div>
+                    </div>
+                    <div className="num" style={{fontSize:11.5,color:"var(--text-faint)"}}>{p.count} 次协作</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "skills" && (
+        <div className="card">
+          <div className="card-body flush table-wrap">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Skill</th>
+                  <th>角色</th>
+                  <th style={{textAlign:"right"}}>当前版本</th>
+                  <th style={{textAlign:"right"}}>激活/周</th>
+                </tr>
+              </thead>
+              <tbody>
+                {skills.map(s => (
+                  <tr key={s.name}>
+                    <td>
+                      <div className="tbl-name">
+                        <div className={`skill-icon ${s.iconClass}`}>{s.icon}</div>
+                        <div className="skill-name-text"><span style={{color:"var(--text-subtle)",fontWeight:500}}>{s.ns}/</span>{s.name}</div>
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`tag ${s.role === "Owner" ? "indigo" : s.role === "Maintainer" ? "blue" : "outline"}`}>{s.role}</span>
+                    </td>
+                    <td style={{textAlign:"right"}}><span className="mono num">{s.version}</span></td>
+                    <td className="num" style={{textAlign:"right",fontWeight:500}}>{s.activations > 0 ? s.activations.toLocaleString() : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === "activity" && (
+        <div className="card">
+          <div className="card-body flush">
+            <ActivityRow icon={<IconRocket size={14}/>} color="green" title={<>发布了 <strong>platform-team/go-code-review</strong> <span className="mono">v1.2.3</span></>} time="2 天前" meta="审批人 @bob, @charlie"/>
+            <ActivityRow icon={<IconCheckCircle size={14}/>} color="blue" title={<>审批通过了 <strong>data-team/csv-import</strong> <span className="mono">v2.0.1</span></>} time="3 天前" meta="响应 1.2h"/>
+            <ActivityRow icon={<IconChat size={14}/>} color="amber" title={<>在 <strong>finance-team/expense-validate</strong> 留下了 4 条评论</>} time="3 天前"/>
+            <ActivityRow icon={<IconStar size={14}/>} color="orange" title={<>收到了 <strong>@frank</strong> 的 ⭐ 评价 (5星)</>} time="5 天前" meta="拯救了我的 PR review 时间"/>
+            <ActivityRow icon={<IconCode size={14}/>} color="blue" title={<>创建了新的 draft <strong>deploy-helper</strong> <span className="mono">v0.1.0</span></>} time="6 天前"/>
+            <ActivityRow icon={<IconAlertTriangle size={14}/>} color="red" title={<>将 <strong>old-deploy-flow</strong> 标记为 deprecated</>} time="1 周前" meta="迁移到 deploy-helper"/>
+            <ActivityRow icon={<IconUsers size={14}/>} color="green" title={<>加入了 <strong>@core-reviewers</strong> 团队</>} time="2 周前"/>
+            <ActivityRow icon={<IconBookmark size={14}/>} color="blue" title={<>收藏了 <strong>data-team/sql-explain</strong></>} time="3 周前"/>
+          </div>
+          <div style={{padding:"12px 16px",borderTop:"1px solid var(--border)",textAlign:"center"}}>
+            <a style={{fontSize:12.5,color:"var(--primary)",cursor:"pointer",fontWeight:500}}>加载更多 →</a>
+          </div>
+        </div>
+      )}
+
+      {tab === "achievements" && (
+        <div>
+          <div style={{fontSize:13,color:"var(--text-subtle)",marginBottom:14}}>已解锁 <strong style={{color:"var(--text)"}}>14</strong> / 26 个成就 · 完成度 54%</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))",gap:12}}>
+            <Achievement icon="🚀" name="首次发布" desc="发布了你的第一个 skill" earned/>
+            <Achievement icon="⚡" name="快速响应" desc="20 次审批响应都在 1 小时内" earned rare/>
+            <Achievement icon="🎯" name="百次激活" desc="单个 skill 周激活突破 100 次" earned/>
+            <Achievement icon="📚" name="千人之师" desc="累计周激活突破 1,000 次" earned/>
+            <Achievement icon="🔥" name="持续贡献" desc="连续 30 天有贡献活动" earned rare/>
+            <Achievement icon="🏆" name="社区之星" desc="收到 100+ 颗 ⭐" earned/>
+            <Achievement icon="🛡️" name="安全卫士" desc="发现并报告 5 个安全问题" earned/>
+            <Achievement icon="💎" name="百万激活" desc="累计激活突破 1,000,000 次"/>
+            <Achievement icon="🌟" name="全栈之王" desc="同时维护 10+ 跨团队 skills"/>
+            <Achievement icon="📜" name="文档大师" desc="撰写 50+ 篇优质文档" earned/>
+          </div>
+        </div>
+      )}
+
+      {tab === "settings" && (
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"var(--gap)"}}>
+          <div className="card">
+            <div className="card-header"><h3 className="card-title">基本信息</h3></div>
+            <div className="card-body" style={{display:"flex",flexDirection:"column",gap:14}}>
+              {[
+                {label:"显示名",value:"Alice Chen"},
+                {label:"用户名",value:"@alice"},
+                {label:"邮箱",value:"alice@example.com"},
+                {label:"主要团队",value:"platform-team"},
+                {label:"时区",value:"Asia/Shanghai (UTC+8)"},
+              ].map(f => (
+                <div key={f.label}>
+                  <div style={{fontSize:11.5,color:"var(--text-subtle)",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.04em",fontWeight:600}}>{f.label}</div>
+                  <div style={{padding:"8px 12px",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",background:"var(--bg)",fontSize:13}}>{f.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="card">
+            <div className="card-header"><h3 className="card-title">通知偏好</h3></div>
+            <div className="card-body" style={{display:"flex",flexDirection:"column",gap:0}}>
+              {[
+                {label:"审批请求",desc:"有人请求你审批时通知",on:true},
+                {label:"评论提及",desc:"有人 @ 我时通知",on:true},
+                {label:"Skill 发布成功",desc:"我的 skill 发布完成时通知",on:true},
+                {label:"依赖更新",desc:"我使用的 skill 有新版本时通知",on:false},
+                {label:"周报摘要",desc:"每周一发送活动摘要邮件",on:true},
+                {label:"社区动态",desc:"团队内新 skill 发布时通知",on:false},
+              ].map(s => (
+                <div key={s.label} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:"1px solid var(--border)"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:500}}>{s.label}</div>
+                    <div style={{fontSize:11.5,color:"var(--text-subtle)",marginTop:2}}>{s.desc}</div>
+                  </div>
+                  <div style={{
+                    width:32,height:18,borderRadius:9,
+                    background:s.on?"var(--primary)":"var(--border-strong)",
+                    position:"relative",cursor:"pointer",flexShrink:0,
+                    transition:"background 0.15s"
+                  }}>
+                    <div style={{
+                      width:14,height:14,borderRadius:"50%",background:"white",
+                      position:"absolute",top:2,left:s.on?16:2,
+                      boxShadow:"0 1px 2px rgb(0 0 0 / 0.2)",transition:"left 0.15s"
+                    }}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editing && (
+        <div onClick={() => setEditing(false)} style={{position:"fixed",inset:0,background:"rgb(15 23 42 / 0.55)",backdropFilter:"blur(4px)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div onClick={e => e.stopPropagation()} style={{background:"var(--bg-elevated)",borderRadius:"var(--radius-lg)",border:"1px solid var(--border)",boxShadow:"var(--shadow-lg)",width:"100%",maxWidth:560,maxHeight:"calc(100vh - 60px)",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+            <div style={{padding:"16px 22px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <div style={{fontSize:15,fontWeight:600}}>编辑资料</div>
+                <div style={{fontSize:12,color:"var(--text-subtle)",marginTop:2}}>保存后会立即对所有人可见</div>
+              </div>
+              <button className="btn sm ghost" onClick={() => setEditing(false)} style={{fontSize:18,padding:"2px 10px"}}>×</button>
+            </div>
+            <div style={{padding:"20px 22px",overflowY:"auto",flex:1,display:"flex",flexDirection:"column",gap:16}}>
+              <div style={{display:"flex",alignItems:"center",gap:14}}>
+                <div style={{width:56,height:56,borderRadius:"50%",background:"linear-gradient(135deg,#f59e0b,#ec4899)",color:"white",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700}}>A</div>
+                <div style={{flex:1}}>
+                  <button className="btn sm">上传新头像</button>
+                  <button className="btn sm ghost" style={{marginLeft:8,color:"var(--red-text)"}}>移除</button>
+                  <div style={{fontSize:11,color:"var(--text-subtle)",marginTop:6}}>JPG / PNG · 最大 2MB</div>
+                </div>
+              </div>
+
+              {[
+                { label: "显示名称", value: "Alice Chen" },
+                { label: "用户名", value: "@alice", mono: true, hint: "用户名不可修改" },
+                { label: "Title / 职位", value: "Senior Platform Engineer" },
+                { label: "所在地", value: "Shanghai, China" },
+              ].map(f => (
+                <div key={f.label}>
+                  <div style={{fontSize:12,fontWeight:500,color:"var(--text-muted)",marginBottom:5}}>{f.label}</div>
+                  <input className="input" defaultValue={f.value} readOnly={!!f.hint} style={{width:"100%",fontFamily: f.mono ? "'JetBrains Mono', monospace" : undefined,opacity: f.hint ? 0.6 : 1}}/>
+                  {f.hint && <div style={{fontSize:11,color:"var(--text-faint)",marginTop:4}}>{f.hint}</div>}
+                </div>
+              ))}
+
+              <div>
+                <div style={{fontSize:12,fontWeight:500,color:"var(--text-muted)",marginBottom:5}}>个人简介</div>
+                <textarea className="input" rows="3" style={{width:"100%",resize:"vertical",fontFamily:"inherit",lineHeight:1.5}} defaultValue={`Platform engineer · 专注 Go、Kubernetes 和开发者工具。喜欢把"看似无聊但每天都做"的事情自动化。`}/>
+                <div style={{fontSize:11,color:"var(--text-faint)",marginTop:4}}>支持 Markdown · 最多 280 字符</div>
+              </div>
+
+              <div>
+                <div style={{fontSize:12,fontWeight:500,color:"var(--text-muted)",marginBottom:5}}>感兴趣的领域</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {["Go","Kubernetes","Platform","DevOps","CLI 工具","数据库"].map(t => (
+                    <span key={t} className="tag indigo" style={{display:"inline-flex",alignItems:"center",gap:4}}>{t} <span style={{cursor:"pointer",opacity:0.6}}>×</span></span>
+                  ))}
+                  <button className="btn sm ghost" style={{height:24,fontSize:11}}>+ 添加</button>
+                </div>
+              </div>
+
+              <div style={{borderTop:"1px solid var(--border)",paddingTop:14}}>
+                <div style={{fontSize:12,fontWeight:600,color:"var(--text-muted)",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:10}}>外部链接</div>
+                {[{l:"GitHub",v:"github.com/alice"},{l:"个人网站",v:"alice.dev"}].map(f => (
+                  <div key={f.l} style={{marginBottom:10}}>
+                    <div style={{fontSize:12,color:"var(--text-muted)",marginBottom:4}}>{f.l}</div>
+                    <input className="input" defaultValue={f.v} style={{width:"100%",fontFamily:"'JetBrains Mono', monospace",fontSize:12.5}}/>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{borderTop:"1px solid var(--border)",paddingTop:14}}>
+                <div style={{fontSize:12,fontWeight:600,color:"var(--text-muted)",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:10}}>可见性</div>
+                {[
+                  {n:"展示在线状态",d:"其他用户可看到你正在线",on:true},
+                  {n:"公开邮箱",d:"在主页显示工作邮箱",on:false},
+                  {n:"接受私信",d:"允许其他人通过 skillHub 联系你",on:true},
+                ].map(p => (
+                  <div key={p.n} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"6px 0"}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:500}}>{p.n}</div>
+                      <div style={{fontSize:11.5,color:"var(--text-subtle)"}}>{p.d}</div>
+                    </div>
+                    <div className={`toggle ${p.on?"on":""}`}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{padding:"14px 22px",borderTop:"1px solid var(--border)",display:"flex",justifyContent:"flex-end",gap:8,background:"var(--bg-soft)"}}>
+              <button className="btn" onClick={() => setEditing(false)}>取消</button>
+              <button className="btn primary" onClick={() => setEditing(false)}>保存修改</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+window.Profile = Profile;

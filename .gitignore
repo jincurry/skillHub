@@ -1,0 +1,21 @@
+# Go
+server/skillhub.db
+server/skillhub.db-wal
+server/skillhub.db-shm
+
+# Node / Vite
+web/node_modules/
+web/dist/
+
+# Logs
+*.log
+/tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+*.swp
+*.swo
