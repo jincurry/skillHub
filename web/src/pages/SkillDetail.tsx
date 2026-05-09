@@ -16,6 +16,7 @@ export function SkillDetail() {
   const [tab, setTab] = useState<'overview' | 'versions' | 'health' | 'audit'>('overview');
   const skill = useAsync(() => api.getSkill(ns, name), [ns, name]);
   const versions = useAsync(() => api.listVersions(ns, name), [ns, name]);
+  const members = useAsync(() => api.namespaceMembers(ns), [ns]);
 
   if (skill.loading) return <div className="content-inner"><div className="card"><div className="card-body">加载中...</div></div></div>;
   if (skill.error || !skill.data) return (
@@ -149,20 +150,13 @@ skillhub run ${p.name}`}</code></pre>
             <div className="card">
               <div className="card-body" style={{ padding: '6px 24px' }}>
                 <div className="timeline">
-                  <div className="timeline-item">
-                    <div className="timeline-dot" style={{ background: 'var(--primary)' }} />
-                    <div className="timeline-content">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600 }}>
-                        <span className="mono">v{p.version}</span>
-                        <span className="tag green">Latest</span>
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 2 }}>
-                        <span className="mono">@{p.author}</span> · {new Date(p.updatedAt).toLocaleString()}
-                      </div>
-                      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>当前发布版本</div>
+                  {(versions.data ?? []).length === 0 && (
+                    <div style={{ padding: 16, color: 'var(--text-subtle)', fontSize: 13 }}>
+                      暂无版本记录
                     </div>
-                  </div>
+                  )}
                   {(versions.data ?? []).map((v) => {
+                    const isLatest = v.version === p.version;
                     const cls = v.status === 'published' ? 'green'
                       : v.status === 'review' ? 'amber'
                       : v.status === 'changes_requested' ? 'amber'
@@ -175,11 +169,12 @@ skillhub run ${p.name}`}</code></pre>
                       : v.status;
                     return (
                       <div className="timeline-item" key={v.id}>
-                        <div className="timeline-dot" />
+                        <div className="timeline-dot" style={isLatest ? { background: 'var(--primary)' } : undefined} />
                         <div className="timeline-content">
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600 }}>
                             <span className="mono">v{v.version}</span>
                             <span className={`tag ${cls}`}>{label}</span>
+                            {isLatest && <span className="tag green">Latest</span>}
                             {v.reviewId > 0 && (
                               <span
                                 className="mono"
@@ -241,13 +236,33 @@ skillhub run ${p.name}`}</code></pre>
           <div className="card">
             <div className="card-header" style={{ padding: '12px 16px' }}><h3 className="card-title">维护者</h3></div>
             <div className="card-body flush">
-              <div style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div className="avatar sm bg-1">{p.author[0]?.toUpperCase()}</div>
-                <div style={{ flex: 1, fontSize: 13 }}>
-                  <div style={{ fontWeight: 500 }} className="mono">@{p.author}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>Owner</div>
-                </div>
-              </div>
+              {(() => {
+                const list = (members.data ?? []).filter(
+                  (m) => m.role === 'owner' || m.role === 'maintainer',
+                );
+                // Always surface the author at the top, even if their ns role is lower.
+                const authorIn = list.find((m) => m.username === p.author);
+                const ordered = authorIn
+                  ? [authorIn, ...list.filter((m) => m.username !== p.author)]
+                  : [{ username: p.author, role: 'author' as const }, ...list];
+                if (members.loading) {
+                  return <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>;
+                }
+                return ordered.map((m, i) => (
+                  <div key={m.username} style={{
+                    padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10,
+                    borderTop: i === 0 ? 'none' : '1px solid var(--border)',
+                  }}>
+                    <div className={`avatar sm bg-${(i % 5) + 1}`}>{m.username[0]?.toUpperCase()}</div>
+                    <div style={{ flex: 1, fontSize: 13 }}>
+                      <div style={{ fontWeight: 500 }} className="mono">@{m.username}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', textTransform: 'capitalize' }}>
+                        {m.username === p.author ? `Author · ${m.role}` : m.role}
+                      </div>
+                    </div>
+                  </div>
+                ));
+              })()}
             </div>
           </div>
         </div>

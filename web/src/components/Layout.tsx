@@ -10,12 +10,12 @@ import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { clearAuth } from '../api/auth';
 
-type NavItem = { id: string; to: string; icon: ReactNode; label: string; kbd?: string; badge?: number };
+type NavItem = { id: string; to: string; icon: ReactNode; label: string; kbd?: string };
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'workspace', to: '/workspace', icon: <IconHome />, label: '工作台', kbd: 'G H' },
   { id: 'browse', to: '/skills', icon: <IconBox />, label: '浏览 Skills', kbd: 'G S' },
-  { id: 'reviews', to: '/reviews', icon: <IconCheck />, label: '审批中心', badge: 5, kbd: 'G R' },
+  { id: 'reviews', to: '/reviews', icon: <IconCheck />, label: '审批中心', kbd: 'G R' },
   { id: 'audit', to: '/audit', icon: <IconClipboard />, label: '审计日志' },
   { id: 'admin', to: '/admin', icon: <IconSettings />, label: '管理后台' },
   { id: 'profile', to: '/profile', icon: <IconUsers />, label: '我的主页' },
@@ -30,6 +30,8 @@ const FAVORITES = [
 function Sidebar() {
   const navigate = useNavigate();
   const { data: me } = useAsync(() => api.me());
+  const { data: pendingReviews } = useAsync(() => api.listReviews('pending'));
+  const pendingCount = pendingReviews?.length ?? 0;
   function logout() {
     clearAuth();
     window.location.assign('/login');
@@ -43,18 +45,21 @@ function Sidebar() {
 
       <div className="sidebar-section">
         <div className="sidebar-label">导航</div>
-        {NAV_ITEMS.map((item) => (
-          <NavLink
-            key={item.id}
-            to={item.to}
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            {item.icon}
-            <span className="label">{item.label}</span>
-            {item.badge ? <span className="badge">{item.badge}</span>
-              : item.kbd ? <span className="kbd">{item.kbd}</span> : null}
-          </NavLink>
-        ))}
+        {NAV_ITEMS.map((item) => {
+          const badge = item.id === 'reviews' && pendingCount > 0 ? pendingCount : null;
+          return (
+            <NavLink
+              key={item.id}
+              to={item.to}
+              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+            >
+              {item.icon}
+              <span className="label">{item.label}</span>
+              {badge !== null ? <span className="badge">{badge}</span>
+                : item.kbd ? <span className="kbd">{item.kbd}</span> : null}
+            </NavLink>
+          );
+        })}
       </div>
 
       <div className="sidebar-section">
@@ -89,17 +94,16 @@ function Sidebar() {
   );
 }
 
-const CRUMBS_MAP: Record<string, string[]> = {
-  '/workspace': ['Home', '工作台'],
-  '/skills': ['Home', 'Skills', '浏览'],
-  '/reviews': ['Home', '审批中心'],
-  '/audit': ['Home', '审计日志'],
-  '/admin': ['Home', '管理后台'],
-  '/profile': ['Home', '@alice'],
-};
-
-function buildCrumbs(pathname: string): string[] {
-  if (CRUMBS_MAP[pathname]) return CRUMBS_MAP[pathname];
+function buildCrumbs(pathname: string, username?: string): string[] {
+  const STATIC: Record<string, string[]> = {
+    '/workspace': ['Home', '工作台'],
+    '/skills': ['Home', 'Skills', '浏览'],
+    '/reviews': ['Home', '审批中心'],
+    '/audit': ['Home', '审计日志'],
+    '/admin': ['Home', '管理后台'],
+  };
+  if (STATIC[pathname]) return STATIC[pathname];
+  if (pathname === '/profile') return ['Home', `@${username ?? '...'}`];
   const parts = pathname.split('/').filter(Boolean);
   if (parts[0] === 'skills' && parts.length >= 3) {
     if (parts[3] === 'edit') return ['Home', '编辑器', `${parts[1]} / ${parts[2]}`];
@@ -111,7 +115,8 @@ function buildCrumbs(pathname: string): string[] {
 
 function Topbar() {
   const { pathname } = useLocation();
-  const crumbs = buildCrumbs(pathname);
+  const { data: me } = useAsync(() => api.me());
+  const crumbs = buildCrumbs(pathname, me?.username);
   return (
     <div className="topbar">
       <div className="breadcrumb">

@@ -16,8 +16,11 @@ const DRAFT_CHECKS_FALLBACK = [
 ];
 
 function DraftCard({ d }: { d: Skill }) {
+  const navigate = useNavigate();
   const v = useAsync<ValidationReport>(() => api.validate(d.ns, d.name), [d.ns, d.name]);
   const checks = v.data?.checks ?? DRAFT_CHECKS_FALLBACK;
+  const blocked = (v.data?.checks ?? []).some((c) => c.severity === 'err');
+  const editPath = `/skills/${d.ns}/${d.name}/edit`;
   return (
     <div className="draft-card">
       <div className="draft-card-head">
@@ -57,9 +60,20 @@ function DraftCard({ d }: { d: Skill }) {
         )}
       </div>
       <div className="draft-actions">
-        <button className="btn sm"><IconCode size={13} /> 继续编辑</button>
-        <button className="btn sm"><IconCheckCircle size={13} /> Validate</button>
-        <button className="btn sm primary"><IconRocket size={13} /> 提交审批</button>
+        <button className="btn sm" onClick={() => navigate(editPath)}>
+          <IconCode size={13} /> 继续编辑
+        </button>
+        <button className="btn sm" onClick={() => v.reload()} disabled={v.loading}>
+          <IconCheckCircle size={13} /> {v.loading ? '验证中...' : 'Validate'}
+        </button>
+        <button
+          className="btn sm primary"
+          disabled={blocked}
+          title={blocked ? '存在错误，先到编辑器修复' : undefined}
+          onClick={() => navigate(editPath)}
+        >
+          <IconRocket size={13} /> 提交审批
+        </button>
       </div>
     </div>
   );
@@ -126,14 +140,28 @@ export function Workspace() {
   const notifs = useAsync(() => api.myNotifications(), []);
   const pending = useAsync(() => api.listReviews('pending'), []);
 
-  const sparkData1 = [12, 18, 15, 22, 28, 24, 32, 38, 45, 42, 51, 49, 58, 67];
-  const sparkData2 = [80, 95, 88, 102, 110, 105, 120, 128, 135, 142, 138, 156, 168, 175];
-  const sparkData3 = [4, 5, 3, 6, 8, 7, 9, 11, 10, 13, 12, 15, 14, 17];
-  const sparkData4 = [99.2, 99.4, 99.1, 99.3, 99.5, 99.2, 99.0, 99.1, 99.4, 99.3, 99.5, 99.2, 99.1, 99.1];
-
   const draftCount = drafts.data?.length ?? 0;
   const pendingCount = pending.data?.length ?? 0;
   const greeting = me.data ? `早上好,${me.data.display.split(' ')[0]} 👋` : '早上好 👋';
+
+  // Live KPIs derived from data we already have. No fabricated numbers.
+  const myPublished = (mySkills.data ?? []).filter((s) => s.status === 'published');
+  const totalActivations = (mySkills.data ?? []).reduce((acc, s) => acc + s.activations, 0);
+  const ratedSkills = (mySkills.data ?? []).filter((s) => s.ratings > 0);
+  const avgRating = ratedSkills.length
+    ? ratedSkills.reduce((a, s) => a + s.rating, 0) / ratedSkills.length
+    : 0;
+  const overdueReviews = (pending.data ?? []).filter((r) => r.urgency === 'overdue').length;
+
+  async function markAllRead() {
+    if (!notifs.data?.some((n) => n.unread)) return;
+    try {
+      await api.markNotificationsRead({ all: true });
+      notifs.reload();
+    } catch {
+      /* ignore */
+    }
+  }
 
   return (
     <div className="content-inner">
@@ -153,24 +181,46 @@ export function Workspace() {
 
       <div className="stat-strip">
         <div className="stat">
-          <div className="stat-label">本周激活总数</div>
-          <div><span className="stat-value num">2,884</span><span className="stat-delta up"><IconArrowUp size={11} />12.4%</span></div>
-          <Sparkline data={sparkData2} color="var(--primary)" />
+          <div className="stat-label">我的激活/周</div>
+          <div>
+            <span className="stat-value num">{totalActivations.toLocaleString()}</span>
+            <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 8 }}>
+              横跨 {myPublished.length} 个 published
+            </span>
+          </div>
         </div>
         <div className="stat">
-          <div className="stat-label">活跃 Skills</div>
-          <div><span className="stat-value num">38</span><span className="stat-delta up"><IconArrowUp size={11} />3</span></div>
-          <Sparkline data={sparkData1} color="#10b981" />
+          <div className="stat-label">我的草稿</div>
+          <div>
+            <span className="stat-value num">{draftCount}</span>
+            {draftCount > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 8 }}>待提交</span>
+            )}
+          </div>
         </div>
         <div className="stat">
-          <div className="stat-label">独立用户</div>
-          <div><span className="stat-value num">142</span><span className="stat-delta up"><IconArrowUp size={11} />8.1%</span></div>
-          <Sparkline data={sparkData3} color="#f59e0b" />
+          <div className="stat-label">待我审批</div>
+          <div>
+            <span className="stat-value num" style={{ color: overdueReviews ? 'var(--red)' : undefined }}>
+              {pendingCount}
+            </span>
+            {overdueReviews > 0 && (
+              <span className="stat-delta down" style={{ marginLeft: 8 }}>
+                <IconArrowDown size={11} />{overdueReviews} 超时
+              </span>
+            )}
+          </div>
         </div>
         <div className="stat">
-          <div className="stat-label">成功率</div>
-          <div><span className="stat-value num">99.1%</span><span className="stat-delta down"><IconArrowDown size={11} />0.4pp</span></div>
-          <Sparkline data={sparkData4} color="#dc2626" />
+          <div className="stat-label">平均评分</div>
+          <div>
+            <span className="stat-value num">{avgRating > 0 ? avgRating.toFixed(1) : '—'}</span>
+            {ratedSkills.length > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 8 }}>
+                / 5 · {ratedSkills.length} 个 skill
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -272,7 +322,10 @@ export function Workspace() {
                   {notifs.data?.filter((n) => n.unread).length ?? 0} 未读
                 </span>
               </h3>
-              <a style={{ fontSize: 12, color: 'var(--text-subtle)', cursor: 'pointer' }}>全部已读</a>
+              <a
+                style={{ fontSize: 12, color: 'var(--text-subtle)', cursor: 'pointer' }}
+                onClick={markAllRead}
+              >全部已读</a>
             </div>
             <div className="card-body flush feed">
               {notifs.data?.map((n) => <NotificationItem key={n.id} n={n} />)}

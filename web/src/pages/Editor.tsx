@@ -19,18 +19,40 @@ function yamlFromSkill(s: { ns?: string; name?: string; version?: string; classi
   return `name: ${name}\nversion: "${ver}"\nnamespace: ${ns}\nclassification: ${cls}\n# Skill metadata — every field is required before submitting for review.\ndescription: |\n  ${desc.replace(/\n/g, '\n  ') || 'TODO: write a clear one-paragraph description.'}\n\nruntime:\n  image: "alpine:3.19"\n  timeout: 60s\n  memory: "512Mi"\n\ntags:\n${tags}\n\ninputs: []\n`;
 }
 
+// Compute the next semver bump from the current version. Falls back to 0.1.0.
+function bumpVersion(current?: string): string {
+  if (!current) return '0.1.0';
+  const m = current.match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return current;
+  const [, maj, min, patch] = m;
+  return `${maj}.${parseInt(min, 10) + 1}.${patch}`;
+}
+
 export function Editor() {
   const { ns = 'platform-team', name = 'go-code-review' } = useParams();
   const navigate = useNavigate();
   const [openFile, setOpenFile] = useState('skill.yaml');
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [showSubmit, setShowSubmit] = useState(false);
+  const [submitVersion, setSubmitVersion] = useState('');
+  const [submitNote, setSubmitNote] = useState('');
   const validation = useAsync<ValidationReport>(() => api.validate(ns, name), [ns, name]);
   const skill = useAsync(() => api.getSkill(ns, name), [ns, name]);
   const policy = useAsync(
     () => api.namespacePolicy(ns, (skill.data?.classification ?? 'L2') as 'L1' | 'L2' | 'L3'),
     [ns, skill.data?.classification],
   );
+
+  const currentVersion = skill.data?.version ?? '0.1.0';
+  const nextVersion = bumpVersion(currentVersion);
+
+  // Pre-fill the submit dialog when it opens.
+  useEffect(() => {
+    if (showSubmit) {
+      setSubmitVersion((v) => v || nextVersion);
+    }
+  }, [showSubmit, nextVersion]);
 
   const runValidate = async () => {
     setMsg('验证中...');
@@ -44,9 +66,17 @@ export function Editor() {
   };
 
   const submitForReview = async () => {
+    if (!submitVersion.trim()) {
+      setMsg('请填写新版本号');
+      return;
+    }
     setSubmitting(true); setMsg(null);
     try {
-      const r = await api.submitForReview(ns, name, { version: '1.3.0', note: '请审批' });
+      const r = await api.submitForReview(ns, name, {
+        version: submitVersion.trim(),
+        note: submitNote.trim() || '请审批',
+      });
+      setShowSubmit(false);
       setMsg(`已提交 审批 #${r.id}`);
       setTimeout(() => navigate(`/reviews/${r.id}`), 600);
     } catch (e) {
@@ -80,19 +110,85 @@ export function Editor() {
           <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{ns} /</span>
             {name}
-            <span className="tag indigo mono">v1.3.0</span>
+            <span className="tag indigo mono">v{currentVersion}</span>
             <span className="status-pill draft"><span className="swatch"></span>Draft</span>
           </h1>
-          <p className="page-subtitle">未保存的更改 · 上次自动保存 <span className="mono">2 分钟前</span></p>
+          <p className="page-subtitle">
+            当前版本 <span className="mono">v{currentVersion}</span>
+            {dirty && <span style={{ color: 'var(--amber-text)', marginLeft: 8 }}>· 未保存的更改</span>}
+          </p>
         </div>
         <div className="page-actions">
           <button className="btn"><IconCode size={14} /> 预览渲染</button>
           <button className="btn" onClick={runValidate}><IconCheckCircle size={14} /> Validate</button>
-          <button className="btn primary" disabled={submitting} onClick={submitForReview}>
+          <button className="btn primary" disabled={submitting} onClick={() => setShowSubmit(true)}>
             <IconRocket size={14} /> {submitting ? '提交中...' : '提交审批'}
           </button>
         </div>
       </div>
+
+      {showSubmit && (
+        <div
+          onClick={() => !submitting && setShowSubmit(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--bg)', borderRadius: 10, width: 480, maxWidth: '92vw',
+              boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)',
+            }}
+          >
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>提交审批</h3>
+              <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>
+                当前版本 <span className="mono">v{currentVersion}</span> · 默认 bump 到 <span className="mono">v{nextVersion}</span>
+              </div>
+            </div>
+            <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <label style={{ display: 'block' }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>新版本号</div>
+                <input
+                  className="input"
+                  value={submitVersion}
+                  onChange={(e) => setSubmitVersion(e.target.value)}
+                  placeholder={nextVersion}
+                  style={{ width: '100%', fontFamily: "'JetBrains Mono', monospace" }}
+                />
+              </label>
+              <label style={{ display: 'block' }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>提交说明（可选）</div>
+                <textarea
+                  className="input"
+                  rows={4}
+                  value={submitNote}
+                  onChange={(e) => setSubmitNote(e.target.value)}
+                  placeholder="本次变更的关键点,会显示给审批人..."
+                  style={{ width: '100%', resize: 'vertical' }}
+                />
+              </label>
+              {policy.data && (
+                <div style={{ fontSize: 12, color: 'var(--text-subtle)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                  策略: <span className="tag indigo">{policy.data.classification}</span>{' '}
+                  {policy.data.mode} · SLA <span className="mono">{policy.data.slaHours}h</span>
+                  {(policy.data.suggested ?? []).length > 0 && (
+                    <> · 建议审批人 {(policy.data.suggested ?? []).map((u) => `@${u}`).join(', ')}</>
+                  )}
+                </div>
+              )}
+            </div>
+            <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn" onClick={() => setShowSubmit(false)} disabled={submitting}>取消</button>
+              <button className="btn primary" disabled={submitting || !submitVersion.trim()} onClick={submitForReview}>
+                <IconRocket size={13} /> {submitting ? '提交中...' : '确认提交'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {msg && (
         <div className="card" style={{ marginBottom: 'var(--gap)', borderLeft: '3px solid var(--primary)' }}>

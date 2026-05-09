@@ -10,7 +10,13 @@ import { useAsync } from '../api/useAsync';
 import { openCreateSkill } from '../components/CreateSkillModal';
 import type { Skill } from '../api/types';
 
-const TAGS = ['data', 'sql', 'go', 'k8s', 'review', 'security', 'lint', 'frontend'];
+function copyInstallCommand(s: Skill): Promise<void> {
+  const cmd = `skillhub install ${s.ns}/${s.name}@${s.version}`;
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(cmd);
+  }
+  return Promise.resolve();
+}
 
 function FilterCheckbox({ checked, onChange, label, count }: {
   checked: boolean; onChange: (next: boolean) => void; label: ReactNode; count?: number;
@@ -31,6 +37,13 @@ function FilterCheckbox({ checked, onChange, label, count }: {
 }
 
 function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    await copyInstallCommand(s);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
   return (
     <div className="skill-card" onClick={() => onOpen(s)}>
       <div className="skill-card-head">
@@ -84,7 +97,9 @@ function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
 
       <div className="skill-card-actions" onClick={(e) => e.stopPropagation()}>
         <button className="btn sm" onClick={() => onOpen(s)}>查看详情</button>
-        <button className="btn sm primary"><IconCopy size={12} /> 复制安装命令</button>
+        <button className="btn sm primary" onClick={onCopy}>
+          <IconCopy size={12} /> {copied ? '已复制' : '复制安装命令'}
+        </button>
       </div>
     </div>
   );
@@ -96,6 +111,7 @@ export function Browse() {
   const [selectedNs, setSelectedNs] = useState<Set<string>>(new Set());
   const [selectedClass, setSelectedClass] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<Set<string>>(new Set());
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
 
   const namespaces = useAsync(() => api.namespaces(), []);
@@ -107,13 +123,14 @@ export function Browse() {
       if (selectedNs.size && !selectedNs.has(s.ns)) return false;
       if (selectedClass.size && !selectedClass.has(s.classification)) return false;
       if (selectedStatus.size && !selectedStatus.has(s.status)) return false;
+      if (selectedTags.size && !s.tags.some((t) => selectedTags.has(t))) return false;
       if (search) {
         const q = search.toLowerCase();
         if (!(s.name + s.desc + s.tags.join(',')).toLowerCase().includes(q)) return false;
       }
       return true;
     });
-  }, [skills.data, selectedNs, selectedClass, selectedStatus, search]);
+  }, [skills.data, selectedNs, selectedClass, selectedStatus, selectedTags, search]);
 
   const openSkill = (s: Skill) => navigate(`/skills/${s.ns}/${s.name}`);
   const toggle = (set: Set<string>, setter: (n: Set<string>) => void, id: string) => {
@@ -126,11 +143,19 @@ export function Browse() {
     const all = skills.data ?? [];
     const byClass: Record<string, number> = { L1: 0, L2: 0, L3: 0 };
     const byStatus: Record<string, number> = {};
+    const byTag: Record<string, number> = {};
     for (const s of all) {
       byClass[s.classification] = (byClass[s.classification] || 0) + 1;
       byStatus[s.status] = (byStatus[s.status] || 0) + 1;
+      for (const t of s.tags) {
+        byTag[t] = (byTag[t] || 0) + 1;
+      }
     }
-    return { byClass, byStatus };
+    const sortedTags = Object.entries(byTag)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([id, count]) => ({ id, count }));
+    return { byClass, byStatus, tags: sortedTags };
   }, [skills.data]);
 
   return (
@@ -171,14 +196,23 @@ export function Browse() {
 
           <div className="filter-group">
             <h4 className="filter-group-title">标签</h4>
-            {TAGS.map((t) => (
-              <FilterCheckbox key={t} checked={false} onChange={() => { }} label={`#${t}`} />
+            {counts.tags.length === 0 && (
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: '4px 0' }}>暂无</div>
+            )}
+            {counts.tags.map((t) => (
+              <FilterCheckbox
+                key={t.id}
+                checked={selectedTags.has(t.id)}
+                onChange={() => toggle(selectedTags, setSelectedTags, t.id)}
+                label={`#${t.id}`}
+                count={t.count}
+              />
             ))}
           </div>
 
           <div style={{ paddingTop: 14, borderTop: '1px solid var(--border)' }}>
             <button className="btn" style={{ width: '100%' }} onClick={() => {
-              setSelectedNs(new Set()); setSelectedClass(new Set()); setSelectedStatus(new Set()); setSearch('');
+              setSelectedNs(new Set()); setSelectedClass(new Set()); setSelectedStatus(new Set()); setSelectedTags(new Set()); setSearch('');
             }}>清空所有过滤</button>
           </div>
         </aside>
@@ -242,7 +276,15 @@ export function Browse() {
                         <td className="num" style={{ textAlign: 'right', fontWeight: 500 }}>{s.activations.toLocaleString()}</td>
                         <td style={{ textAlign: 'right' }}><span className="mono">v{s.version}</span></td>
                         <td style={{ color: 'var(--text-subtle)', fontSize: 12.5 }}>{new Date(s.updatedAt).toLocaleDateString()}</td>
-                        <td><button className="btn sm ghost" onClick={(e) => e.stopPropagation()}><IconCopy size={12} /></button></td>
+                        <td>
+                          <button
+                            className="btn sm ghost"
+                            title="复制安装命令"
+                            onClick={(e) => { e.stopPropagation(); void copyInstallCommand(s); }}
+                          >
+                            <IconCopy size={12} />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

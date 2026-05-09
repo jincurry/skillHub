@@ -3,6 +3,8 @@ import {
   IconChat, IconBell, IconSettings, IconRocket, IconCheckCircle,
   IconStar, IconCode, IconAlertTriangle, IconUsers, IconBookmark,
 } from '../components/Icons';
+import { api } from '../api/client';
+import { useAsync } from '../api/useAsync';
 
 function ProfileStat({ label, value, sub, color = 'var(--primary)' }: {
   label: string; value: string; sub?: string; color?: string;
@@ -130,20 +132,25 @@ export function Profile() {
   const [tab, setTab] = useState<'overview' | 'skills' | 'activity' | 'achievements' | 'settings'>('overview');
   const [editing, setEditing] = useState(false);
 
-  const skills = [
-    { name: 'go-code-review', ns: 'platform-team', icon: 'Go', iconClass: 'blue', role: 'Owner', activations: 1234, version: '1.2.3' },
-    { name: 'k8s-debug', ns: 'platform-team', icon: 'k8', iconClass: 'blue', role: 'Owner', activations: 612, version: '1.5.0' },
-    { name: 'deploy-helper', ns: 'platform-team', icon: '🚀', iconClass: 'violet', role: 'Owner', activations: 0, version: '0.1.0-draft' },
-    { name: 'old-deploy-flow', ns: 'platform-team', icon: 'Dp', iconClass: 'red', role: 'Owner', activations: 18, version: '0.9.4' },
-    { name: 'data-import-csv', ns: 'data-team', icon: 'csv', iconClass: 'green', role: 'Maintainer', activations: 842, version: '2.0.1' },
-    { name: 'sql-explain', ns: 'data-team', icon: 'SQ', iconClass: 'green', role: 'Reviewer', activations: 1502, version: '1.1.0' },
-  ];
+  const me = useAsync(() => api.me(), []);
+  const allSkills = useAsync(() => api.listSkills(), []);
+
+  // Skills authored by the current user, decorated with the role that the
+  // backend gives us through namespace_members. Falls back to "Author" if the
+  // membership record isn't loaded.
+  const mySkills = (allSkills.data ?? []).filter((s) => s.author === me.data?.username);
 
   const teams = [
     { id: 'platform-team', role: 'Maintainer', members: 12, skills: 12 as number | null },
     { id: 'data-team', role: 'Reviewer', members: 8, skills: 8 as number | null },
     { id: '@core-reviewers', role: 'Member', members: 24, skills: null as number | null },
   ];
+
+  const display = me.data?.display ?? '...';
+  const username = me.data?.username ?? '...';
+  const role = me.data?.role ?? '';
+  const team = me.data?.team ?? '';
+  const initial = display.trim().charAt(0).toUpperCase() || '?';
 
   return (
     <div className="content-inner">
@@ -172,26 +179,23 @@ export function Profile() {
           color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 42, fontWeight: 700,
           border: '4px solid var(--bg-soft)', boxShadow: 'var(--shadow-lg)', marginTop: -72,
-        }}>A</div>
+        }}>{initial}</div>
 
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, marginTop: 14 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
-              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Alice Chen</h1>
-              <span className="tag indigo">Maintainer</span>
+              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>{display}</h1>
+              {role && <span className="tag indigo">{role}</span>}
               <span className="tag green">在线</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-              <span className="mono">@alice</span>
-              <span style={{ color: 'var(--text-faint)' }}>·</span>
-              <span>platform-team</span>
-              <span style={{ color: 'var(--text-faint)' }}>·</span>
-              <span>📍 Shanghai · UTC+8</span>
-              <span style={{ color: 'var(--text-faint)' }}>·</span>
-              <span>加入于 2023年3月</span>
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 10, maxWidth: 680, lineHeight: 1.55 }}>
-              Platform engineer · 专注 Go、Kubernetes 和开发者工具。喜欢把"看似无聊但每天都做"的事情自动化。
+              <span className="mono">@{username}</span>
+              {team && (
+                <>
+                  <span style={{ color: 'var(--text-faint)' }}>·</span>
+                  <span>{team}</span>
+                </>
+              )}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
@@ -255,8 +259,13 @@ export function Profile() {
                 <a style={{ fontSize: 12, color: 'var(--primary)', cursor: 'pointer' }}>编辑置顶</a>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--border)' }}>
-                {skills.slice(0, 4).map((s) => (
-                  <div key={s.name} style={{ padding: 14, background: 'var(--bg-elevated)', cursor: 'pointer' }}>
+                {mySkills.length === 0 && (
+                  <div style={{ padding: 18, background: 'var(--bg-elevated)', gridColumn: '1 / -1', fontSize: 12, color: 'var(--text-subtle)' }}>
+                    暂无可置顶的 skill。
+                  </div>
+                )}
+                {mySkills.slice(0, 4).map((s) => (
+                  <div key={s.id} style={{ padding: 14, background: 'var(--bg-elevated)', cursor: 'pointer' }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                       <div className={`skill-icon ${s.iconClass}`} style={{ width: 32, height: 32, fontSize: 13 }}>{s.icon}</div>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -265,8 +274,12 @@ export function Profile() {
                         </div>
                         <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2, display: 'flex', gap: 8 }}>
                           <span className="mono">v{s.version}</span>
-                          <span>·</span>
-                          <span>{s.activations.toLocaleString()} 激活/周</span>
+                          {s.activations > 0 && (
+                            <>
+                              <span>·</span>
+                              <span>{s.activations.toLocaleString()} 激活/周</span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -361,24 +374,34 @@ export function Profile() {
       {tab === 'skills' && (
         <div className="card">
           <div className="card-body flush table-wrap">
-            <table className="tbl">
-              <thead><tr><th>Skill</th><th>角色</th><th style={{ textAlign: 'right' }}>当前版本</th><th style={{ textAlign: 'right' }}>激活/周</th></tr></thead>
-              <tbody>
-                {skills.map((s) => (
-                  <tr key={s.name}>
-                    <td>
-                      <div className="tbl-name">
-                        <div className={`skill-icon ${s.iconClass}`}>{s.icon}</div>
-                        <div className="skill-name-text"><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{s.ns}/</span>{s.name}</div>
-                      </div>
-                    </td>
-                    <td><span className={`tag ${s.role === 'Owner' ? 'indigo' : s.role === 'Maintainer' ? 'blue' : 'outline'}`}>{s.role}</span></td>
-                    <td style={{ textAlign: 'right' }}><span className="mono num">{s.version}</span></td>
-                    <td className="num" style={{ textAlign: 'right', fontWeight: 500 }}>{s.activations > 0 ? s.activations.toLocaleString() : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {allSkills.loading && (
+              <div style={{ padding: 16, fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>
+            )}
+            {!allSkills.loading && mySkills.length === 0 && (
+              <div style={{ padding: 16, fontSize: 13, color: 'var(--text-subtle)' }}>
+                你还没有作为作者发布的 skill。
+              </div>
+            )}
+            {mySkills.length > 0 && (
+              <table className="tbl">
+                <thead><tr><th>Skill</th><th>状态</th><th style={{ textAlign: 'right' }}>当前版本</th><th style={{ textAlign: 'right' }}>激活/周</th></tr></thead>
+                <tbody>
+                  {mySkills.map((s) => (
+                    <tr key={s.id}>
+                      <td>
+                        <div className="tbl-name">
+                          <div className={`skill-icon ${s.iconClass}`}>{s.icon}</div>
+                          <div className="skill-name-text"><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{s.ns}/</span>{s.name}</div>
+                        </div>
+                      </td>
+                      <td><span className={`tag ${s.status === 'published' ? 'green' : s.status === 'review' ? 'amber' : s.status === 'yanked' ? 'red' : 'outline'}`}>{s.status}</span></td>
+                      <td style={{ textAlign: 'right' }}><span className="mono num">v{s.version}</span></td>
+                      <td className="num" style={{ textAlign: 'right', fontWeight: 500 }}>{s.activations > 0 ? s.activations.toLocaleString() : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}
