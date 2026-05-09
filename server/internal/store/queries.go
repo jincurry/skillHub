@@ -103,6 +103,10 @@ func (s *Store) CreateSkill(req model.CreateSkillRequest, author string) (*model
 	}
 	_, _ = s.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
 		author, "create_draft", req.Namespace+"/"+req.Name, "v0.1.0", "127.0.0.1")
+	// Seed the bundle with skill.yaml + README.md so the editor opens to real
+	// files instead of synthesised content. Best-effort: if the seed fails, the
+	// skill row is already in place and the user can still create files later.
+	_ = s.SeedDefaultFiles(req.Namespace, req.Name, req.Description, author)
 	return s.GetSkill(req.Namespace, req.Name)
 }
 

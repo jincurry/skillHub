@@ -61,6 +61,11 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/skills/:ns/:name/yank", s.yankSkill)
 		auth.POST("/skills/:ns/:name/deprecate", s.deprecateSkill)
 
+		auth.GET("/skills/:ns/:name/files", s.listSkillFiles)
+		auth.GET("/skills/:ns/:name/files/*path", s.getSkillFile)
+		auth.PUT("/skills/:ns/:name/files/*path", s.putSkillFile)
+		auth.DELETE("/skills/:ns/:name/files/*path", s.deleteSkillFile)
+
 		auth.GET("/reviews", s.listReviews)
 		auth.GET("/reviews/stats", s.getReviewStats)
 		auth.GET("/reviews/:id", s.getReview)
@@ -548,6 +553,140 @@ func (s *Server) getReviewStats(c *gin.Context) {
 		return
 	}
 	c.JSON(200, stats)
+}
+
+// canEditSkill reports whether the user can write or delete a skill's files.
+// Author of the skill always wins; otherwise the user must be an owner or
+// maintainer of the owning namespace. This mirrors the rule applied by
+// submitForReview — if you can't submit a bundle, you shouldn't be able to
+// rewrite it either.
+func (s *Server) canEditSkill(user, ns, name string) (bool, error) {
+	k, err := s.store.GetSkill(ns, name)
+	if err != nil {
+		return false, err
+	}
+	if k == nil {
+		return false, nil
+	}
+	if k.Author == user {
+		return true, nil
+	}
+	role, err := s.store.UserRoleInNamespace(ns, user)
+	if err != nil {
+		return false, err
+	}
+	return role == "owner" || role == "maintainer", nil
+}
+
+// extractFilePath normalises gin's wildcard path (which arrives with a leading
+// slash) and runs it through the path-safety validator.
+func extractFilePath(c *gin.Context) (string, bool) {
+	raw := strings.TrimPrefix(c.Param("path"), "/")
+	cleaned, err := store.ValidateFilePath(raw)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return "", false
+	}
+	return cleaned, true
+}
+
+func (s *Server) listSkillFiles(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	if k, _ := s.store.GetSkill(ns, name); k == nil {
+		c.JSON(404, gin.H{"error": "skill not found"})
+		return
+	}
+	out, err := s.store.ListSkillFiles(ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, out)
+}
+
+func (s *Server) getSkillFile(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	p, ok := extractFilePath(c)
+	if !ok {
+		return
+	}
+	f, err := s.store.GetSkillFile(ns, name, p)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if f == nil {
+		c.JSON(404, gin.H{"error": "file not found"})
+		return
+	}
+	c.JSON(200, f)
+}
+
+func (s *Server) putSkillFile(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	p, ok := extractFilePath(c)
+	if !ok {
+		return
+	}
+	user := s.currentUser(c)
+	allowed, err := s.canEditSkill(user, ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(403, gin.H{"error": "需要 author 或 namespace 成员身份"})
+		return
+	}
+	var req model.PutFileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	f, err := s.store.PutSkillFile(ns, name, p, req.Content, user)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
+		user, "edit_file", ns+"/"+name+":"+p, "", "127.0.0.1")
+	c.JSON(200, f)
+}
+
+func (s *Server) deleteSkillFile(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	p, ok := extractFilePath(c)
+	if !ok {
+		return
+	}
+	user := s.currentUser(c)
+	allowed, err := s.canEditSkill(user, ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(403, gin.H{"error": "需要 author 或 namespace 成员身份"})
+		return
+	}
+	// skill.yaml / README.md are bundle anchors; refuse to delete them so the
+	// editor never ends up empty.
+	if p == "skill.yaml" || p == "SKILL.md" || p == "README.md" {
+		c.JSON(400, gin.H{"error": "this file is required and cannot be deleted"})
+		return
+	}
+	deleted, err := s.store.DeleteSkillFile(ns, name, p)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if !deleted {
+		c.JSON(404, gin.H{"error": "file not found"})
+		return
+	}
+	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
+		user, "delete_file", ns+"/"+name+":"+p, "", "127.0.0.1")
+	c.JSON(204, nil)
 }
 
 // createNamespace lets any authenticated user spin up a namespace they will

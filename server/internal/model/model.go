@@ -121,6 +121,22 @@ type CreateNamespaceRequest struct {
 	Owner string `json:"owner"`
 }
 
+// SkillFile is one file inside a skill bundle. Used both in the list endpoint
+// (where Content is empty to keep the payload small) and in the single-file
+// endpoint (where Content is the full body).
+type SkillFile struct {
+	Path      string    `json:"path"`
+	Content   string    `json:"content,omitempty"`
+	Size      int       `json:"size"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	UpdatedBy string    `json:"updatedBy"`
+}
+
+// PutFileRequest is the body for PUT /skills/:ns/:name/files/*path.
+type PutFileRequest struct {
+	Content string `json:"content"`
+}
+
 type DecisionRequest struct {
 	Decision string `json:"decision" binding:"required,oneof=approve reject request_changes"`
 	Note     string `json:"note"`

@@ -124,4 +124,17 @@ CREATE TABLE IF NOT EXISTS skill_versions (
   updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_skill_versions ON skill_versions(ns, name);
+
+CREATE TABLE IF NOT EXISTS skill_files (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ns          TEXT    NOT NULL,
+  skill_name  TEXT    NOT NULL,
+  path        TEXT    NOT NULL,
+  content     TEXT    NOT NULL DEFAULT '',
+  size        INTEGER NOT NULL DEFAULT 0,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by  TEXT    NOT NULL DEFAULT '',
+  UNIQUE (ns, skill_name, path)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_files_skill ON skill_files(ns, skill_name);
 `

@@ -175,3 +175,12 @@ export interface SkillVersion {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface SkillFile {
+  path: string;
+  /** Empty in list responses; populated for single-file responses. */
+  content?: string;
+  size: number;
+  updatedAt: string;
+  updatedBy: string;
+}

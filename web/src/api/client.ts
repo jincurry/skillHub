@@ -1,4 +1,4 @@
-import type { AuditFilter, AuditLog, Comment, Me, MeStats, Namespace, NamespaceMember, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewStats, Skill, SkillVersion, UpdateMeRequest, ValidationReport } from './types';
+import type { AuditFilter, AuditLog, Comment, Me, MeStats, Namespace, NamespaceMember, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewStats, Skill, SkillFile, SkillVersion, UpdateMeRequest, ValidationReport } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -81,6 +81,19 @@ export const api = {
     request<ValidationReport>(`/skills/${ns}/${name}/validate`),
   listVersions: (ns: string, name: string) =>
     request<SkillVersion[]>(`/skills/${ns}/${name}/versions`),
+
+  listFiles: (ns: string, name: string) =>
+    request<SkillFile[]>(`/skills/${ns}/${name}/files`),
+  getFile: (ns: string, name: string, path: string) =>
+    request<SkillFile>(`/skills/${ns}/${name}/files/${encodeURI(path)}`),
+  putFile: (ns: string, name: string, path: string, content: string) =>
+    request<SkillFile>(`/skills/${ns}/${name}/files/${encodeURI(path)}`, {
+      method: 'PUT', body: JSON.stringify({ content }),
+    }),
+  deleteFile: (ns: string, name: string, path: string) =>
+    request<void>(`/skills/${ns}/${name}/files/${encodeURI(path)}`, {
+      method: 'DELETE',
+    }),
   listRatings: (ns: string, name: string) =>
     request<RatingsResponse>(`/skills/${ns}/${name}/ratings`),
   rateSkill: (ns: string, name: string, stars: number, comment = '') =>
