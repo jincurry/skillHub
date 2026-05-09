@@ -9,6 +9,7 @@ import {
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { RatingsPanel } from '../components/RatingsPanel';
+import { renderMarkdown } from '../lib/markdown';
 
 export function SkillDetail() {
   const { ns = '', name = '' } = useParams();
@@ -133,12 +134,25 @@ export function SkillDetail() {
                     <h2>概述</h2>
                     <p><code>{p.name}</code> 由 <span className="mono">@{p.author}</span> 维护，属于 {p.ns} 命名空间，密级 {p.classification}。</p>
                     <p>{p.desc}</p>
-                    <h3>标签</h3>
-                    <p>{p.tags.map((t) => <code key={t} style={{ marginRight: 6 }}>#{t}</code>)}</p>
-                    <h3>使用示例</h3>
-                    <pre><code>{`# 安装并运行
+                    {p.tags.length > 0 && (
+                      <>
+                        <h3>标签</h3>
+                        <p>{p.tags.map((t) => <code key={t} style={{ marginRight: 6 }}>#{t}</code>)}</p>
+                      </>
+                    )}
+                    {p.longDesc ? (
+                      <div dangerouslySetInnerHTML={{ __html: renderMarkdown(p.longDesc) }} />
+                    ) : (
+                      <>
+                        <h3>使用示例</h3>
+                        <pre><code>{`# 安装并运行
 skillhub install ${p.ns}/${p.name}@${p.version}
 skillhub run ${p.name}`}</code></pre>
+                        <p style={{ color: 'var(--text-faint)', fontSize: 12 }}>
+                          作者还没有撰写详细 README。
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

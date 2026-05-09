@@ -27,6 +27,15 @@ func Open(path string) (*Store, error) {
 	}
 	// Backfill: add password_hash column on legacy DBs (empty hash → no login until reseeded).
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''`)
+	// Backfill: profile fields for the Me model.
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN email     TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN bio       TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN location  TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`)
+	// Backfill: long-form description for skills (markdown-ish README body).
+	_, _ = db.Exec(`ALTER TABLE skills ADD COLUMN long_desc TEXT NOT NULL DEFAULT ''`)
+	// Backfill: when a review was decided, used by the avg-decision-hours stat.
+	_, _ = db.Exec(`ALTER TABLE reviews ADD COLUMN decided_at DATETIME`)
 	s := &Store{DB: db}
 	if err := s.seedIfEmpty(); err != nil {
 		return nil, fmt.Errorf("seed: %w", err)

@@ -133,11 +133,10 @@ export function Profile() {
   const [editing, setEditing] = useState(false);
 
   const me = useAsync(() => api.me(), []);
+  const stats = useAsync(() => api.meStats(), []);
   const allSkills = useAsync(() => api.listSkills(), []);
 
-  // Skills authored by the current user, decorated with the role that the
-  // backend gives us through namespace_members. Falls back to "Author" if the
-  // membership record isn't loaded.
+  // Skills authored by the current user.
   const mySkills = (allSkills.data ?? []).filter((s) => s.author === me.data?.username);
 
   const teams = [
@@ -150,7 +149,17 @@ export function Profile() {
   const username = me.data?.username ?? '...';
   const role = me.data?.role ?? '';
   const team = me.data?.team ?? '';
+  const email = me.data?.email ?? '';
+  const bio = me.data?.bio ?? '';
+  const location = me.data?.location ?? '';
+  const joinedAt = me.data?.joinedAt ?? '';
   const initial = display.trim().charAt(0).toUpperCase() || '?';
+
+  function handleSaved(updated: import('../api/types').Me) {
+    me.reload();
+    void updated; // updated returned by api.updateMe; me.reload() refreshes the cached row
+    setEditing(false);
+  }
 
   return (
     <div className="content-inner">
@@ -196,7 +205,24 @@ export function Profile() {
                   <span>{team}</span>
                 </>
               )}
+              {location && (
+                <>
+                  <span style={{ color: 'var(--text-faint)' }}>·</span>
+                  <span>📍 {location}</span>
+                </>
+              )}
+              {joinedAt && (
+                <>
+                  <span style={{ color: 'var(--text-faint)' }}>·</span>
+                  <span>加入于 {new Date(joinedAt).toLocaleDateString()}</span>
+                </>
+              )}
             </div>
+            {bio && (
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 10, maxWidth: 680, lineHeight: 1.55 }}>
+                {bio}
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <button className="btn"><IconChat size={14} /> 私信</button>
@@ -207,18 +233,32 @@ export function Profile() {
       </div>
 
       <div style={{ display: 'flex', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden', marginBottom: 'var(--gap)' }}>
-        <ProfileStat label="发布的 Skills" value="12" sub="3 个 draft" />
-        <ProfileStat label="累计周激活" value="4,208" sub="近30天" color="#10b981" />
-        <ProfileStat label="完成审批" value="187" sub="平均 4.2 小时" color="#f59e0b" />
-        <ProfileStat label="收到的 ⭐" value="362" sub="来自 87 位同事" />
-        <ProfileStat label="社区影响力" value="#3" sub="platform-team 排名" color="#dc2626" />
-        <div style={{ padding: '14px 18px', flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginBottom: 4 }}>活跃天数</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span className="num" style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.1 }}>342</span>
-            <span style={{ fontSize: 11.5, color: 'var(--green-text)', fontWeight: 500 }}>🔥 28 天连续</span>
-          </div>
-        </div>
+        <ProfileStat
+          label="发布的 Skills"
+          value={String(stats.data?.published ?? '—')}
+          sub={stats.data?.drafts ? `${stats.data.drafts} 个 draft` : undefined}
+        />
+        <ProfileStat
+          label="累计激活"
+          value={(stats.data?.activations ?? 0).toLocaleString()}
+          color="#10b981"
+        />
+        <ProfileStat
+          label="完成审批"
+          value={String(stats.data?.reviewsCompleted ?? '—')}
+          sub={stats.data?.pendingReviews ? `${stats.data.pendingReviews} 个待我审` : undefined}
+          color="#f59e0b"
+        />
+        <ProfileStat
+          label="收到的 ⭐"
+          value={String(stats.data?.ratingsReceived ?? '—')}
+          sub={stats.data && stats.data.avgRating > 0 ? `平均 ${stats.data.avgRating.toFixed(1)}` : undefined}
+        />
+        <ProfileStat
+          label="待我审批"
+          value={String(stats.data?.pendingReviews ?? '—')}
+          color="#dc2626"
+        />
       </div>
 
       <div style={{ display: 'flex', gap: 24, borderBottom: '1px solid var(--border)', marginBottom: 'var(--gap)' }}>
@@ -448,11 +488,11 @@ export function Profile() {
             <div className="card-header"><h3 className="card-title">基本信息</h3></div>
             <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {[
-                { label: '显示名', value: 'Alice Chen' },
-                { label: '用户名', value: '@alice' },
-                { label: '邮箱', value: 'alice@example.com' },
-                { label: '主要团队', value: 'platform-team' },
-                { label: '时区', value: 'Asia/Shanghai (UTC+8)' },
+                { label: '显示名', value: display },
+                { label: '用户名', value: `@${username}` },
+                { label: '邮箱', value: email || '—' },
+                { label: '主要团队', value: team || '—' },
+                { label: '所在地', value: location || '—' },
               ].map((f) => (
                 <div key={f.label}>
                   <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>{f.label}</div>
@@ -496,50 +536,93 @@ export function Profile() {
       )}
 
       {editing && (
-        <div onClick={() => setEditing(false)} style={{ position: 'fixed', inset: 0, background: 'rgb(15 23 42 / 0.55)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg-elevated)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)', width: '100%', maxWidth: 560, maxHeight: 'calc(100vh - 60px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ padding: '16px 22px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 600 }}>编辑资料</div>
-                <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 2 }}>保存后会立即对所有人可见</div>
-              </div>
-              <button className="btn sm ghost" onClick={() => setEditing(false)} style={{ fontSize: 18, padding: '2px 10px' }}>×</button>
-            </div>
-            <div style={{ padding: '20px 22px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(135deg,#f59e0b,#ec4899)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 700 }}>A</div>
-                <div style={{ flex: 1 }}>
-                  <button className="btn sm">上传新头像</button>
-                  <button className="btn sm ghost" style={{ marginLeft: 8, color: 'var(--red-text)' }}>移除</button>
-                  <div style={{ fontSize: 11, color: 'var(--text-subtle)', marginTop: 6 }}>JPG / PNG · 最大 2MB</div>
-                </div>
-              </div>
-              {[
-                { label: '显示名称', value: 'Alice Chen' },
-                { label: '用户名', value: '@alice', mono: true, hint: '用户名不可修改' },
-                { label: 'Title / 职位', value: 'Senior Platform Engineer' },
-                { label: '所在地', value: 'Shanghai, China' },
-              ].map((f) => (
-                <div key={f.label}>
-                  <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>{f.label}</div>
-                  <input className="input" defaultValue={f.value} readOnly={!!f.hint} style={{ width: '100%', fontFamily: f.mono ? "'JetBrains Mono', monospace" : undefined, opacity: f.hint ? 0.6 : 1 }} />
-                  {f.hint && <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>{f.hint}</div>}
-                </div>
-              ))}
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>个人简介</div>
-                <textarea className="input" rows={3} style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
-                  defaultValue={`Platform engineer · 专注 Go、Kubernetes 和开发者工具。喜欢把"看似无聊但每天都做"的事情自动化。`} />
-                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>支持 Markdown · 最多 280 字符</div>
-              </div>
-            </div>
-            <div style={{ padding: '14px 22px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8, background: 'var(--bg-soft)' }}>
-              <button className="btn" onClick={() => setEditing(false)}>取消</button>
-              <button className="btn primary" onClick={() => setEditing(false)}>保存修改</button>
+        <EditProfileModal
+          initial={{ display, email, bio, location }}
+          username={username}
+          onClose={() => setEditing(false)}
+          onSaved={handleSaved}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditProfileModal({
+  initial, username, onClose, onSaved,
+}: {
+  initial: { display: string; email: string; bio: string; location: string };
+  username: string;
+  onClose: () => void;
+  onSaved: (m: import('../api/types').Me) => void;
+}) {
+  const [display, setDisplay] = useState(initial.display);
+  const [email, setEmail] = useState(initial.email);
+  const [bio, setBio] = useState(initial.bio);
+  const [location, setLocation] = useState(initial.location);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setBusy(true); setErr(null);
+    try {
+      const updated = await api.updateMe({
+        display: display.trim(),
+        email: email.trim(),
+        bio,
+        location: location.trim(),
+      });
+      onSaved(updated);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const initialChar = display.trim().charAt(0).toUpperCase() || '?';
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgb(15 23 42 / 0.55)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg-elevated)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)', width: '100%', maxWidth: 560, maxHeight: 'calc(100vh - 60px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ padding: '16px 22px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>编辑资料</div>
+            <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 2 }}>保存后会立即对所有人可见</div>
+          </div>
+          <button className="btn sm ghost" onClick={onClose} style={{ fontSize: 18, padding: '2px 10px' }}>×</button>
+        </div>
+        <div style={{ padding: '20px 22px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(135deg,#f59e0b,#ec4899)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 700 }}>{initialChar}</div>
+            <div style={{ flex: 1, fontSize: 12, color: 'var(--text-subtle)' }}>
+              用户名 <span className="mono" style={{ color: 'var(--text)' }}>@{username}</span> 不可修改。
             </div>
           </div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>显示名称</div>
+            <input className="input" value={display} onChange={(e) => setDisplay(e.target.value)} style={{ width: '100%' }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>邮箱</div>
+            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: '100%' }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>所在地</div>
+            <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Shanghai · UTC+8" style={{ width: '100%' }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>个人简介</div>
+            <textarea className="input" rows={4} value={bio} onChange={(e) => setBio(e.target.value)} style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>纯文本 · 最多 500 字符</div>
+          </div>
+          {err && <div style={{ color: 'var(--red-text)', fontSize: 12.5 }}>{err}</div>}
         </div>
-      )}
+        <div style={{ padding: '14px 22px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8, background: 'var(--bg-soft)' }}>
+          <button className="btn" onClick={onClose} disabled={busy}>取消</button>
+          <button className="btn primary" onClick={save} disabled={busy}>
+            {busy ? '保存中...' : '保存修改'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

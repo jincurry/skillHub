@@ -2,11 +2,18 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ClassificationTag } from '../components/Tags';
 import {
-  IconDownload, IconCheckCircle, IconArrowDown, IconChevronRight,
+  IconDownload, IconCheckCircle, IconChevronRight,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import type { Review } from '../api/types';
+
+function fmtHours(h: number): string {
+  if (h < 0) return '—';
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 24) return `${h.toFixed(1)}h`;
+  return `${(h / 24).toFixed(1)}d`;
+}
 
 const URGENCY_BG: Record<Review['urgency'], { bg: string; color: string }> = {
   overdue: { bg: 'var(--red-bg)', color: 'var(--red-text)' },
@@ -21,6 +28,7 @@ export function Reviews() {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
   const all = useAsync(() => api.listReviews(), []);
+  const stats = useAsync(() => api.reviewStats(), []);
 
   const counts = useMemo(() => {
     const data = all.data ?? [];
@@ -51,10 +59,36 @@ export function Reviews() {
       </div>
 
       <div className="stat-strip" style={{ marginBottom: 'var(--gap)' }}>
-        <div className="stat"><div className="stat-label">本月审批数</div><div><span className="stat-value num">{counts.all}</span></div></div>
-        <div className="stat"><div className="stat-label">平均审批耗时</div><div><span className="stat-value num">8.4h</span><span className="stat-delta up"><IconArrowDown size={11} />2.1h</span></div></div>
-        <div className="stat"><div className="stat-label">SLA 达成率</div><div><span className="stat-value num">94%</span></div></div>
-        <div className="stat"><div className="stat-label">超时件数</div><div><span className="stat-value num" style={{ color: 'var(--red)' }}>{(all.data ?? []).filter((r) => r.urgency === 'overdue').length}</span></div></div>
+        <div className="stat">
+          <div className="stat-label">总审批数</div>
+          <div><span className="stat-value num">{stats.data?.total ?? counts.all}</span></div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">平均审批耗时</div>
+          <div>
+            <span className="stat-value num">
+              {stats.data ? fmtHours(stats.data.avgDecisionHours) : '—'}
+            </span>
+          </div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">SLA 达成率</div>
+          <div>
+            <span className="stat-value num">
+              {stats.data && (stats.data.approved + stats.data.rejected) > 0
+                ? `${stats.data.slaComplianceRate.toFixed(0)}%`
+                : '—'}
+            </span>
+          </div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">超时件数</div>
+          <div>
+            <span className="stat-value num" style={{ color: (stats.data?.overdue ?? 0) > 0 ? 'var(--red)' : undefined }}>
+              {stats.data?.overdue ?? 0}
+            </span>
+          </div>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>

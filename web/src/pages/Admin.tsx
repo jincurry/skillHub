@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ClassificationTag } from '../components/Tags';
 import {
-  IconExternal, IconRocket, IconArrowUp, IconPlus, IconMore,
+  IconExternal, IconRocket, IconArrowUp, IconPlus, IconMore, IconXCircle,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
@@ -12,6 +12,7 @@ export function Admin() {
   const skills = useAsync(() => api.listSkills(), []);
   const [memberNs, setMemberNs] = useState<string>('platform-team');
   const members = useAsync(() => api.namespaceMembers(memberNs), [memberNs]);
+  const [showCreate, setShowCreate] = useState(false);
 
   const totalSkills = skills.data?.length ?? 0;
   const totalActivations = (skills.data ?? []).reduce((acc, s) => acc + s.activations, 0);
@@ -97,7 +98,9 @@ export function Admin() {
         <div className="card">
           <div className="card-header">
             <h3 className="card-title">命名空间</h3>
-            <button className="btn sm primary"><IconPlus size={12} /> 新建命名空间</button>
+            <button className="btn sm primary" onClick={() => setShowCreate(true)}>
+              <IconPlus size={12} /> 新建命名空间
+            </button>
           </div>
           <div className="card-body flush table-wrap">
             <table className="tbl">
@@ -208,6 +211,67 @@ export function Admin() {
 
       {/* keep ClassificationTag import alive in case future use */}
       <span style={{ display: 'none' }}><ClassificationTag level="L1" /></span>
+
+      {showCreate && (
+        <CreateNamespaceModal
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { setShowCreate(false); namespaces.reload(); setTab('namespaces'); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CreateNamespaceModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [id, setId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    const trimmed = id.trim();
+    if (!trimmed) { setErr('命名空间 id 必填'); return; }
+    setBusy(true); setErr(null);
+    try {
+      await api.createNamespace({ id: trimmed });
+      onCreated();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: 10, width: 420, maxWidth: '92vw', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)' }}>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>新建命名空间</h3>
+          <button className="btn sm ghost" onClick={onClose} disabled={busy}><IconXCircle size={14} /></button>
+        </div>
+        <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <label style={{ display: 'block' }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>ID</div>
+            <input
+              className="input"
+              value={id}
+              onChange={(e) => setId(e.target.value)}
+              placeholder="qa-team"
+              style={{ width: '100%', fontFamily: "'JetBrains Mono', monospace" }}
+              autoFocus
+            />
+            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
+              小写字母、数字、连字符。你将自动成为 owner。
+            </div>
+          </label>
+          {err && <div style={{ color: 'var(--red-text)', fontSize: 12.5 }}>{err}</div>}
+        </div>
+        <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn" onClick={onClose} disabled={busy}>取消</button>
+          <button className="btn primary" onClick={submit} disabled={busy || !id.trim()}>
+            <IconRocket size={13} /> {busy ? '创建中...' : '创建'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

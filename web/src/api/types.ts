@@ -6,6 +6,7 @@ export interface Skill {
   ns: string;
   name: string;
   desc: string;
+  longDesc: string;
   icon: string;
   iconClass: string;
   classification: 'L1' | 'L2' | 'L3';
@@ -73,6 +74,45 @@ export interface Me {
   display: string;
   role: string;
   team: string;
+  email: string;
+  bio: string;
+  location: string;
+  joinedAt: string;
+}
+
+export interface UpdateMeRequest {
+  display?: string;
+  email?: string;
+  bio?: string;
+  location?: string;
+}
+
+export interface MeStats {
+  published: number;
+  drafts: number;
+  activations: number;
+  ratingsReceived: number;
+  avgRating: number;
+  pendingReviews: number;
+  reviewsCompleted: number;
+}
+
+export interface ReviewStats {
+  total: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  overdue: number;
+  slaComplianceRate: number;
+  avgDecisionHours: number; // -1 when no data yet
+}
+
+export interface AuditFilter {
+  actor?: string;
+  action?: string;
+  target?: string;
+  q?: string;
+  limit?: number;
 }
 
 export type CheckSeverity = 'ok' | 'warn' | 'err';

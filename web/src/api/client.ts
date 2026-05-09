@@ -1,4 +1,4 @@
-import type { AuditLog, Comment, Me, Namespace, NamespaceMember, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, Skill, SkillVersion, ValidationReport } from './types';
+import type { AuditFilter, AuditLog, Comment, Me, MeStats, Namespace, NamespaceMember, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewStats, Skill, SkillVersion, UpdateMeRequest, ValidationReport } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -45,6 +45,9 @@ export const api = {
       method: 'POST', body: JSON.stringify({ username, password }),
     }),
   me: () => request<Me>('/me'),
+  updateMe: (body: UpdateMeRequest) =>
+    request<Me>('/me', { method: 'PATCH', body: JSON.stringify(body) }),
+  meStats: () => request<MeStats>('/me/stats'),
   myNotifications: () => request<Notification[]>('/me/notifications'),
   markNotificationsRead: (opts: { ids?: number[]; all?: boolean }) =>
     request<{ ok: true }>('/me/notifications/read', {
@@ -61,6 +64,8 @@ export const api = {
   myDrafts: () => request<Skill[]>('/me/drafts'),
 
   namespaces: () => request<Namespace[]>('/namespaces'),
+  createNamespace: (body: { id: string; owner?: string }) =>
+    request<Namespace>('/namespaces', { method: 'POST', body: JSON.stringify(body) }),
   namespaceMembers: (ns: string) => request<NamespaceMember[]>(`/namespaces/${ns}/members`),
   namespacePolicy: (ns: string, classification: 'L1' | 'L2' | 'L3') =>
     request<PolicyPreview>(`/namespaces/${ns}/policy?classification=${classification}`),
@@ -85,6 +90,7 @@ export const api = {
 
   listReviews: (status?: 'pending' | 'approved' | 'rejected') =>
     request<Review[]>('/reviews' + qs({ status })),
+  reviewStats: () => request<ReviewStats>('/reviews/stats'),
   getReview: (id: number | string) => request<Review>(`/reviews/${id}`),
   decideReview: (id: number | string, decision: 'approve' | 'reject' | 'request_changes', note?: string) =>
     request<Review>(`/reviews/${id}/decision`, {
@@ -95,5 +101,14 @@ export const api = {
   addComment: (id: number | string, body: string) =>
     request<Comment>(`/reviews/${id}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
 
-  listAuditLogs: (limit = 100) => request<AuditLog[]>('/audit-logs' + qs({ limit: String(limit) })),
+  listAuditLogs: (filter: AuditFilter = {}) => {
+    const limit = filter.limit ?? 200;
+    return request<AuditLog[]>('/audit-logs' + qs({
+      actor: filter.actor,
+      action: filter.action,
+      target: filter.target,
+      q: filter.q,
+      limit: String(limit),
+    }));
+  },
 };

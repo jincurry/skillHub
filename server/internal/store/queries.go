@@ -30,7 +30,7 @@ type SkillFilter struct {
 }
 
 func (s *Store) ListSkills(f SkillFilter) ([]model.Skill, error) {
-	q := `SELECT id,ns,name,description,icon,icon_class,classification,status,version,author,
+	q := `SELECT id,ns,name,description,long_desc,icon,icon_class,classification,status,version,author,
 	             rating,ratings_count,activations,delta_pct,hot,tags_csv,updated_at
 	      FROM skills WHERE 1=1`
 	args := []any{}
@@ -63,8 +63,8 @@ func (s *Store) ListSkills(f SkillFilter) ([]model.Skill, error) {
 		var k model.Skill
 		var tagsCSV string
 		var hot int
-		if err := rows.Scan(&k.ID, &k.Namespace, &k.Name, &k.Description, &k.Icon, &k.IconClass,
-			&k.Classification, &k.Status, &k.Version, &k.Author,
+		if err := rows.Scan(&k.ID, &k.Namespace, &k.Name, &k.Description, &k.LongDesc,
+			&k.Icon, &k.IconClass, &k.Classification, &k.Status, &k.Version, &k.Author,
 			&k.Rating, &k.Ratings, &k.Activations, &k.DeltaPct, &hot, &tagsCSV, &k.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -76,14 +76,14 @@ func (s *Store) ListSkills(f SkillFilter) ([]model.Skill, error) {
 }
 
 func (s *Store) GetSkill(ns, name string) (*model.Skill, error) {
-	row := s.DB.QueryRow(`SELECT id,ns,name,description,icon,icon_class,classification,status,version,author,
+	row := s.DB.QueryRow(`SELECT id,ns,name,description,long_desc,icon,icon_class,classification,status,version,author,
 	             rating,ratings_count,activations,delta_pct,hot,tags_csv,updated_at
 	      FROM skills WHERE ns=? AND name=?`, ns, name)
 	var k model.Skill
 	var tagsCSV string
 	var hot int
-	if err := row.Scan(&k.ID, &k.Namespace, &k.Name, &k.Description, &k.Icon, &k.IconClass,
-		&k.Classification, &k.Status, &k.Version, &k.Author,
+	if err := row.Scan(&k.ID, &k.Namespace, &k.Name, &k.Description, &k.LongDesc,
+		&k.Icon, &k.IconClass, &k.Classification, &k.Status, &k.Version, &k.Author,
 		&k.Rating, &k.Ratings, &k.Activations, &k.DeltaPct, &hot, &tagsCSV, &k.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -197,7 +197,8 @@ func (s *Store) DecideReview(id int64, decision, note, actor string) error {
 	} else {
 		skillStatus = "published"
 	}
-	if _, err := tx.Exec(`UPDATE reviews SET status=?, urgency=? WHERE id=?`, newStatus, urgency, id); err != nil {
+	if _, err := tx.Exec(`UPDATE reviews SET status=?, urgency=?, decided_at=CURRENT_TIMESTAMP WHERE id=?`,
+		newStatus, urgency, id); err != nil {
 		return err
 	}
 	var ns, name, version, author string
@@ -320,11 +321,42 @@ func (s *Store) AddComment(reviewID int64, author, body string) (*model.Comment,
 	return &c, nil
 }
 
-func (s *Store) ListAuditLogs(limit int) ([]model.AuditLog, error) {
-	if limit <= 0 || limit > 500 {
-		limit = 100
+// AuditFilter narrows down ListAuditLogs. All fields are optional.
+type AuditFilter struct {
+	Actor  string // exact match on actor username
+	Action string // exact match on action
+	Target string // substring match on target (e.g. "platform-team/" or "ns/name")
+	Q      string // free-text substring across actor / action / target / version
+	Limit  int
+}
+
+func (s *Store) ListAuditLogs(f AuditFilter) ([]model.AuditLog, error) {
+	if f.Limit <= 0 || f.Limit > 500 {
+		f.Limit = 100
 	}
-	rows, err := s.DB.Query(`SELECT id,actor,action,target,version,ip,created_at FROM audit_logs ORDER BY created_at DESC LIMIT ?`, limit)
+	q := `SELECT id,actor,action,target,version,ip,created_at FROM audit_logs WHERE 1=1`
+	args := []any{}
+	if f.Actor != "" {
+		q += ` AND actor = ?`
+		args = append(args, f.Actor)
+	}
+	if f.Action != "" {
+		q += ` AND action = ?`
+		args = append(args, f.Action)
+	}
+	if f.Target != "" {
+		q += ` AND target LIKE ?`
+		args = append(args, "%"+f.Target+"%")
+	}
+	if f.Q != "" {
+		q += ` AND (actor LIKE ? OR action LIKE ? OR target LIKE ? OR version LIKE ?)`
+		like := "%" + f.Q + "%"
+		args = append(args, like, like, like, like)
+	}
+	q += ` ORDER BY created_at DESC LIMIT ?`
+	args = append(args, f.Limit)
+
+	rows, err := s.DB.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +416,7 @@ func (s *Store) MarkNotificationsRead(user string, ids []int64, all bool) error 
 }
 
 func (s *Store) ListMyDrafts(user string) ([]model.Skill, error) {
-	rows, err := s.DB.Query(`SELECT id,ns,name,description,icon,icon_class,classification,status,version,author,
+	rows, err := s.DB.Query(`SELECT id,ns,name,description,long_desc,icon,icon_class,classification,status,version,author,
 		rating,ratings_count,activations,delta_pct,hot,tags_csv,updated_at
 		FROM skills WHERE author=? AND status='draft' ORDER BY updated_at DESC`, user)
 	if err != nil {
@@ -396,8 +428,8 @@ func (s *Store) ListMyDrafts(user string) ([]model.Skill, error) {
 		var k model.Skill
 		var tagsCSV string
 		var hot int
-		if err := rows.Scan(&k.ID, &k.Namespace, &k.Name, &k.Description, &k.Icon, &k.IconClass,
-			&k.Classification, &k.Status, &k.Version, &k.Author,
+		if err := rows.Scan(&k.ID, &k.Namespace, &k.Name, &k.Description, &k.LongDesc,
+			&k.Icon, &k.IconClass, &k.Classification, &k.Status, &k.Version, &k.Author,
 			&k.Rating, &k.Ratings, &k.Activations, &k.DeltaPct, &hot, &tagsCSV, &k.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -462,9 +494,16 @@ func (s *Store) SubmitDraftForReview(ns, name, version, note, author string, rev
 }
 
 func (s *Store) GetUser(username string) (*model.Me, error) {
-	row := s.DB.QueryRow(`SELECT username,display,role,team FROM users WHERE username=?`, username)
+	// joined_at is left raw (no COALESCE) so the SQLite driver can decode it
+	// directly into time.Time — wrapping it in COALESCE collapses the column
+	// type to TEXT and breaks the scan.
+	row := s.DB.QueryRow(`SELECT username,display,role,team,
+		COALESCE(email,''),COALESCE(bio,''),COALESCE(location,''),
+		joined_at
+		FROM users WHERE username=?`, username)
 	var u model.Me
-	if err := row.Scan(&u.Username, &u.Display, &u.Role, &u.Team); err != nil {
+	if err := row.Scan(&u.Username, &u.Display, &u.Role, &u.Team,
+		&u.Email, &u.Bio, &u.Location, &u.JoinedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}

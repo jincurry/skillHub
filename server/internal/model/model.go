@@ -7,6 +7,7 @@ type Skill struct {
 	Namespace      string    `json:"ns"`
 	Name           string    `json:"name"`
 	Description    string    `json:"desc"`
+	LongDesc       string    `json:"longDesc"`
 	Icon           string    `json:"icon"`
 	IconClass      string    `json:"iconClass"`
 	Classification string    `json:"classification"` // L1|L2|L3
@@ -70,10 +71,54 @@ type Notification struct {
 }
 
 type Me struct {
-	Username string `json:"username"`
-	Display  string `json:"display"`
-	Role     string `json:"role"`
-	Team     string `json:"team"`
+	Username string    `json:"username"`
+	Display  string    `json:"display"`
+	Role     string    `json:"role"`
+	Team     string    `json:"team"`
+	Email    string    `json:"email"`
+	Bio      string    `json:"bio"`
+	Location string    `json:"location"`
+	JoinedAt time.Time `json:"joinedAt"`
+}
+
+// UpdateMeRequest carries the editable subset of the user profile. All fields
+// are pointers so that an omitted field means "leave unchanged" while an empty
+// string means "clear it out".
+type UpdateMeRequest struct {
+	Display  *string `json:"display" binding:"omitempty,max=80"`
+	Email    *string `json:"email" binding:"omitempty,max=200"`
+	Bio      *string `json:"bio" binding:"omitempty,max=500"`
+	Location *string `json:"location" binding:"omitempty,max=120"`
+}
+
+// MeStats aggregates "what does this user own / care about" counts for the
+// Profile and Workspace dashboards.
+type MeStats struct {
+	Published        int     `json:"published"`
+	Drafts           int     `json:"drafts"`
+	Activations      int     `json:"activations"`
+	RatingsReceived  int     `json:"ratingsReceived"`
+	AvgRating        float64 `json:"avgRating"`
+	PendingReviews   int     `json:"pendingReviews"`   // assigned to me, status=pending
+	ReviewsCompleted int     `json:"reviewsCompleted"` // approved/rejected/changes_requested by me
+}
+
+// ReviewStats summarises the org-wide approval queue for the Reviews KPI strip.
+type ReviewStats struct {
+	Total             int     `json:"total"`
+	Pending           int     `json:"pending"`
+	Approved          int     `json:"approved"`
+	Rejected          int     `json:"rejected"`           // includes changes_requested
+	Overdue           int     `json:"overdue"`            // pending + urgency=overdue
+	SLAComplianceRate float64 `json:"slaComplianceRate"`  // % of decided reviews not overdue
+	AvgDecisionHours  float64 `json:"avgDecisionHours"`   // -1 when no data yet
+}
+
+// CreateNamespaceRequest is the body for POST /namespaces. Owner defaults to
+// the caller when empty.
+type CreateNamespaceRequest struct {
+	ID    string `json:"id" binding:"required,min=2,max=64"`
+	Owner string `json:"owner"`
 }
 
 type DecisionRequest struct {

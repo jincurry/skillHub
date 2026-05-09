@@ -6,7 +6,11 @@ CREATE TABLE IF NOT EXISTS users (
   display       TEXT NOT NULL,
   role          TEXT NOT NULL DEFAULT 'Member',
   team          TEXT NOT NULL DEFAULT '',
-  password_hash TEXT NOT NULL DEFAULT ''
+  password_hash TEXT NOT NULL DEFAULT '',
+  email         TEXT NOT NULL DEFAULT '',
+  bio           TEXT NOT NULL DEFAULT '',
+  location      TEXT NOT NULL DEFAULT '',
+  joined_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS namespaces (
@@ -19,6 +23,7 @@ CREATE TABLE IF NOT EXISTS skills (
   ns              TEXT    NOT NULL,
   name            TEXT    NOT NULL,
   description     TEXT    NOT NULL DEFAULT '',
+  long_desc       TEXT    NOT NULL DEFAULT '',
   icon            TEXT    NOT NULL DEFAULT '?',
   icon_class      TEXT    NOT NULL DEFAULT 'blue',
   classification  TEXT    NOT NULL DEFAULT 'L2',
@@ -50,7 +55,8 @@ CREATE TABLE IF NOT EXISTS reviews (
   urgency         TEXT    NOT NULL DEFAULT 'ok',
   sla             TEXT    NOT NULL DEFAULT '72h',
   note            TEXT    NOT NULL DEFAULT '',
-  submitted_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  submitted_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  decided_at      DATETIME
 );
 CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status);
 

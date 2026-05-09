@@ -39,11 +39,14 @@ func (s *Server) Routes() *gin.Engine {
 	auth.Use(s.authMiddleware())
 	{
 		auth.GET("/me", s.getMe)
+		auth.PATCH("/me", s.patchMe)
+		auth.GET("/me/stats", s.getMeStats)
 		auth.GET("/me/notifications", s.listNotifications)
 		auth.POST("/me/notifications/read", s.markNotificationsRead)
 		auth.GET("/me/drafts", s.listMyDrafts)
 
 		auth.GET("/namespaces", s.listNamespaces)
+		auth.POST("/namespaces", s.createNamespace)
 		auth.GET("/namespaces/:ns/members", s.listNamespaceMembers)
 		auth.GET("/namespaces/:ns/policy", s.getNamespacePolicy)
 
@@ -59,6 +62,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/skills/:ns/:name/deprecate", s.deprecateSkill)
 
 		auth.GET("/reviews", s.listReviews)
+		auth.GET("/reviews/stats", s.getReviewStats)
 		auth.GET("/reviews/:id", s.getReview)
 		auth.POST("/reviews/:id/decision", s.decideReview)
 		auth.GET("/reviews/:id/comments", s.listComments)
@@ -497,12 +501,82 @@ func (s *Server) addComment(c *gin.Context) {
 
 func (s *Server) listAuditLogs(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
-	out, err := s.store.ListAuditLogs(limit)
+	out, err := s.store.ListAuditLogs(store.AuditFilter{
+		Actor:  c.Query("actor"),
+		Action: c.Query("action"),
+		Target: c.Query("target"),
+		Q:      c.Query("q"),
+		Limit:  limit,
+	})
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(200, out)
+}
+
+// patchMe updates the current user's profile fields.
+func (s *Server) patchMe(c *gin.Context) {
+	var req model.UpdateMeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	user, err := s.store.UpdateMe(s.currentUser(c), req)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, user)
+}
+
+// getMeStats returns aggregate counts for the current user's dashboard.
+func (s *Server) getMeStats(c *gin.Context) {
+	stats, err := s.store.MeStats(s.currentUser(c))
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, stats)
+}
+
+// getReviewStats returns the org-wide review queue summary.
+func (s *Server) getReviewStats(c *gin.Context) {
+	stats, err := s.store.ReviewStats()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, stats)
+}
+
+// createNamespace lets any authenticated user spin up a namespace they will
+// own. Owner falls back to the calling user when omitted.
+func (s *Server) createNamespace(c *gin.Context) {
+	var req model.CreateNamespaceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	owner := strings.TrimSpace(req.Owner)
+	if owner == "" {
+		owner = s.currentUser(c)
+	}
+	ns, err := s.store.CreateNamespace(req.ID, owner)
+	if err != nil {
+		// Surface the most useful errors to the client.
+		msg := err.Error()
+		switch {
+		case strings.Contains(msg, "UNIQUE"):
+			c.JSON(409, gin.H{"error": "namespace already exists"})
+		case strings.Contains(msg, "owner user does not exist"):
+			c.JSON(400, gin.H{"error": msg})
+		default:
+			c.JSON(500, gin.H{"error": msg})
+		}
+		return
+	}
+	c.JSON(201, ns)
 }
 
 func (s *Server) listNotifications(c *gin.Context) {
