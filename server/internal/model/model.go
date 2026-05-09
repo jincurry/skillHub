@@ -137,6 +137,36 @@ type PutFileRequest struct {
 	Content string `json:"content"`
 }
 
+// Achievement is one badge surfaced on the Profile page. Server-computed from
+// existing data (stats, audit log, ownership) so we don't need a dedicated
+// achievements table for the MVP.
+type Achievement struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	Desc     string  `json:"desc"`
+	Icon     string  `json:"icon"`
+	Earned   bool    `json:"earned"`
+	Rare     bool    `json:"rare"`
+	Progress float64 `json:"progress"` // 0..1
+	Hint     string  `json:"hint,omitempty"`
+}
+
+// SearchResult is the bag returned by the global ⌘K search endpoint.
+type SearchResult struct {
+	Skills     []Skill          `json:"skills"`
+	Namespaces []Namespace      `json:"namespaces"`
+	Users      []SearchUserHit  `json:"users"`
+}
+
+// SearchUserHit is the user shape exposed by /search. We deliberately do not
+// expose email / bio here — the search box doesn't need them.
+type SearchUserHit struct {
+	Username string `json:"username"`
+	Display  string `json:"display"`
+	Role     string `json:"role"`
+	Team     string `json:"team"`
+}
+
 type DecisionRequest struct {
 	Decision string `json:"decision" binding:"required,oneof=approve reject request_changes"`
 	Note     string `json:"note"`

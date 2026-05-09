@@ -41,9 +41,12 @@ func (s *Server) Routes() *gin.Engine {
 		auth.GET("/me", s.getMe)
 		auth.PATCH("/me", s.patchMe)
 		auth.GET("/me/stats", s.getMeStats)
+		auth.GET("/me/achievements", s.getMeAchievements)
 		auth.GET("/me/notifications", s.listNotifications)
 		auth.POST("/me/notifications/read", s.markNotificationsRead)
 		auth.GET("/me/drafts", s.listMyDrafts)
+
+		auth.GET("/search", s.search)
 
 		auth.GET("/namespaces", s.listNamespaces)
 		auth.POST("/namespaces", s.createNamespace)
@@ -543,6 +546,27 @@ func (s *Server) getMeStats(c *gin.Context) {
 		return
 	}
 	c.JSON(200, stats)
+}
+
+// getMeAchievements returns the badge list for the current user.
+func (s *Server) getMeAchievements(c *gin.Context) {
+	out, err := s.store.Achievements(s.currentUser(c))
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, out)
+}
+
+// search powers the global ⌘K command palette. Returns 3 buckets in one round
+// trip; empty q returns empty buckets.
+func (s *Server) search(c *gin.Context) {
+	out, err := s.store.Search(c.Query("q"))
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, out)
 }
 
 // getReviewStats returns the org-wide review queue summary.

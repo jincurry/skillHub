@@ -184,3 +184,28 @@ export interface SkillFile {
   updatedAt: string;
   updatedBy: string;
 }
+
+export interface Achievement {
+  id: string;
+  name: string;
+  desc: string;
+  icon: string;
+  earned: boolean;
+  rare: boolean;
+  /** 0..1 */
+  progress: number;
+  hint?: string;
+}
+
+export interface SearchUserHit {
+  username: string;
+  display: string;
+  role: string;
+  team: string;
+}
+
+export interface SearchResult {
+  skills: Skill[];
+  namespaces: Namespace[];
+  users: SearchUserHit[];
+}

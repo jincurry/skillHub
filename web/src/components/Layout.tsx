@@ -6,6 +6,7 @@ import {
 } from './Icons';
 import { CreateSkillModal } from './CreateSkillModal';
 import { NotificationBell } from './NotificationBell';
+import { CommandPalette, openCommandPalette } from './CommandPalette';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { clearAuth } from '../api/auth';
@@ -128,11 +129,19 @@ function Topbar() {
         ))}
       </div>
       <div style={{ flex: 1 }} />
-      <div className="search-box">
+      <button
+        className="search-box"
+        onClick={openCommandPalette}
+        title="搜索 (Ctrl/Cmd+K)"
+        style={{
+          border: 'none', background: 'inherit', cursor: 'pointer', font: 'inherit',
+          color: 'inherit', textAlign: 'left',
+        }}
+      >
         <IconSearch size={15} />
         <span>搜索 skill、命名空间、用户...</span>
         <span className="kbd">Ctrl K</span>
-      </div>
+      </button>
       <NotificationBell />
       <button className="icon-btn" title="帮助">
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>?</span>
@@ -152,6 +161,7 @@ export function Layout() {
         </div>
       </div>
       <CreateSkillModal />
+      <CommandPalette />
     </div>
   );
 }

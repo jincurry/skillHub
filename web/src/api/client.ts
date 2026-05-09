@@ -1,4 +1,4 @@
-import type { AuditFilter, AuditLog, Comment, Me, MeStats, Namespace, NamespaceMember, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewStats, Skill, SkillFile, SkillVersion, UpdateMeRequest, ValidationReport } from './types';
+import type { Achievement, AuditFilter, AuditLog, Comment, Me, MeStats, Namespace, NamespaceMember, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, UpdateMeRequest, ValidationReport } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -48,6 +48,8 @@ export const api = {
   updateMe: (body: UpdateMeRequest) =>
     request<Me>('/me', { method: 'PATCH', body: JSON.stringify(body) }),
   meStats: () => request<MeStats>('/me/stats'),
+  meAchievements: () => request<Achievement[]>('/me/achievements'),
+  search: (q: string) => request<SearchResult>('/search' + qs({ q })),
   myNotifications: () => request<Notification[]>('/me/notifications'),
   markNotificationsRead: (opts: { ids?: number[]; all?: boolean }) =>
     request<{ ok: true }>('/me/notifications/read', {

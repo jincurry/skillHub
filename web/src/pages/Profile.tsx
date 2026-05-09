@@ -98,16 +98,21 @@ function ActivityRow({ icon, color, title, time, meta }: {
   );
 }
 
-function Achievement({ icon, name, desc, earned, rare }: {
+function Achievement({ icon, name, desc, earned, rare, progress, hint }: {
   icon: string; name: string; desc: string; earned?: boolean; rare?: boolean;
+  progress?: number; hint?: string;
 }) {
+  const pct = Math.max(0, Math.min(1, progress ?? (earned ? 1 : 0)));
   return (
-    <div style={{
-      display: 'flex', gap: 12, padding: 14,
-      border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-      background: earned ? 'var(--bg-elevated)' : 'var(--bg-muted)',
-      opacity: earned ? 1 : 0.55,
-    }}>
+    <div
+      title={hint && !earned ? hint : undefined}
+      style={{
+        display: 'flex', gap: 12, padding: 14,
+        border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+        background: earned ? 'var(--bg-elevated)' : 'var(--bg-muted)',
+        opacity: earned ? 1 : 0.7,
+      }}
+    >
       <div style={{
         width: 44, height: 44, borderRadius: 10, flexShrink: 0,
         background: earned
@@ -121,8 +126,22 @@ function Achievement({ icon, name, desc, earned, rare }: {
         <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
           {name}
           {rare && earned && <span className="tag amber" style={{ fontSize: 10 }}>稀有</span>}
+          {!earned && pct > 0 && (
+            <span className="num" style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 500, marginLeft: 'auto' }}>
+              {Math.round(pct * 100)}%
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', lineHeight: 1.4, marginTop: 2 }}>{desc}</div>
+        {!earned && (
+          <div style={{ marginTop: 6, height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', width: `${pct * 100}%`,
+              background: rare ? 'linear-gradient(90deg,#f59e0b,#dc2626)' : 'var(--primary)',
+              transition: 'width 0.3s',
+            }} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -135,6 +154,7 @@ export function Profile() {
   const me = useAsync(() => api.me(), []);
   const stats = useAsync(() => api.meStats(), []);
   const allSkills = useAsync(() => api.listSkills(), []);
+  const achievements = useAsync(() => api.meAchievements(), []);
 
   // Skills authored by the current user.
   const mySkills = (allSkills.data ?? []).filter((s) => s.author === me.data?.username);
@@ -466,19 +486,36 @@ export function Profile() {
 
       {tab === 'achievements' && (
         <div>
-          <div style={{ fontSize: 13, color: 'var(--text-subtle)', marginBottom: 14 }}>已解锁 <strong style={{ color: 'var(--text)' }}>14</strong> / 26 个成就 · 完成度 54%</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-            <Achievement icon="🚀" name="首次发布" desc="发布了你的第一个 skill" earned />
-            <Achievement icon="⚡" name="快速响应" desc="20 次审批响应都在 1 小时内" earned rare />
-            <Achievement icon="🎯" name="百次激活" desc="单个 skill 周激活突破 100 次" earned />
-            <Achievement icon="📚" name="千人之师" desc="累计周激活突破 1,000 次" earned />
-            <Achievement icon="🔥" name="持续贡献" desc="连续 30 天有贡献活动" earned rare />
-            <Achievement icon="🏆" name="社区之星" desc="收到 100+ 颗 ⭐" earned />
-            <Achievement icon="🛡️" name="安全卫士" desc="发现并报告 5 个安全问题" earned />
-            <Achievement icon="💎" name="百万激活" desc="累计激活突破 1,000,000 次" />
-            <Achievement icon="🌟" name="全栈之王" desc="同时维护 10+ 跨团队 skills" />
-            <Achievement icon="📜" name="文档大师" desc="撰写 50+ 篇优质文档" earned />
-          </div>
+          {achievements.loading && <div style={{ color: 'var(--text-subtle)' }}>加载中...</div>}
+          {achievements.error && <div style={{ color: 'var(--red-text)' }}>{achievements.error.message}</div>}
+          {achievements.data && (
+            <>
+              {(() => {
+                const earned = achievements.data.filter((a) => a.earned).length;
+                const total = achievements.data.length;
+                const pct = total > 0 ? Math.round((earned / total) * 100) : 0;
+                return (
+                  <div style={{ fontSize: 13, color: 'var(--text-subtle)', marginBottom: 14 }}>
+                    已解锁 <strong style={{ color: 'var(--text)' }}>{earned}</strong> / {total} 个成就 · 完成度 {pct}%
+                  </div>
+                );
+              })()}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+                {achievements.data.map((a) => (
+                  <Achievement
+                    key={a.id}
+                    icon={a.icon}
+                    name={a.name}
+                    desc={a.desc}
+                    earned={a.earned}
+                    rare={a.rare}
+                    progress={a.progress}
+                    hint={a.hint}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 
