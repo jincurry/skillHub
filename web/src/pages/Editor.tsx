@@ -308,6 +308,11 @@ export function Editor() {
   const [draftingNote, setDraftingNote] = useState(false);
   const [draftErr, setDraftErr] = useState<string | null>(null);
   const draftHandleRef = useRef<AssistHandle | null>(null);
+  // Buffer for streamed deltas; we flush to React state on rAF so a fast
+  // token stream doesn't block the main thread (otherwise the stop / submit
+  // buttons feel frozen because click events can't get scheduled).
+  const draftBufRef = useRef('');
+  const draftRafRef = useRef<number | null>(null);
 
   // Pick a sensible default file once the listing comes back. SKILL.md is the
   // primary authoring surface so it wins over skill.yaml / README.md.
@@ -382,11 +387,25 @@ export function Editor() {
   // Stream a commit-summary directly into the submitNote textarea, bypassing
   // the AI drawer entirely. The drawer's z-index sits below the modal, and
   // its output goes into its own buffer — neither is useful here.
+  function stopDraft() {
+    draftHandleRef.current?.abort();
+    draftHandleRef.current = null;
+    if (draftRafRef.current != null) {
+      cancelAnimationFrame(draftRafRef.current);
+      draftRafRef.current = null;
+    }
+    // Flush any buffered tail so the user keeps what was already streamed.
+    if (draftBufRef.current) {
+      const tail = draftBufRef.current;
+      draftBufRef.current = '';
+      setSubmitNote((prev) => prev + tail);
+    }
+    setDraftingNote(false);
+  }
+
   async function draftSubmitNote() {
     if (draftingNote) {
-      draftHandleRef.current?.abort();
-      draftHandleRef.current = null;
-      setDraftingNote(false);
+      stopDraft();
       return;
     }
     setDraftErr(null);
@@ -408,19 +427,34 @@ export function Editor() {
     const content = skillMd ?? (activePath ? buffers[activePath]?.content ?? '' : '');
     const filePath = skillMd ? 'SKILL.md' : (activePath ?? 'SKILL.md');
     setSubmitNote('');
+    draftBufRef.current = '';
     setDraftingNote(true);
+    const flush = () => {
+      draftRafRef.current = null;
+      if (!draftBufRef.current) return;
+      const chunk = draftBufRef.current;
+      draftBufRef.current = '';
+      setSubmitNote((prev) => prev + chunk);
+    };
     draftHandleRef.current = runAssist(ns, name, {
       providerId,
       action: 'commit-summary',
       currentContent: content,
       filePath,
     }, {
-      onDelta: (chunk) => setSubmitNote((prev) => prev + chunk),
+      onDelta: (chunk) => {
+        draftBufRef.current += chunk;
+        if (draftRafRef.current == null) {
+          draftRafRef.current = requestAnimationFrame(flush);
+        }
+      },
       onDone: () => {
+        flush();
         setDraftingNote(false);
         draftHandleRef.current = null;
       },
       onError: (m) => {
+        flush();
         setDraftErr(m);
         setDraftingNote(false);
         draftHandleRef.current = null;
@@ -431,10 +465,9 @@ export function Editor() {
   // Cancel any in-flight draft when the modal closes.
   useEffect(() => {
     if (!showSubmit && draftHandleRef.current) {
-      draftHandleRef.current.abort();
-      draftHandleRef.current = null;
-      setDraftingNote(false);
+      stopDraft();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSubmit]);
 
   // Collect validation error strings for the AI fix-validation action.
@@ -607,6 +640,8 @@ export function Editor() {
 
   async function submitForReview() {
     if (!submitVersion.trim()) { setMsg('请填写新版本号'); return; }
+    // If a draft is still streaming, stop it first so we submit what we have.
+    if (draftingNote) stopDraft();
     if (anyDirty) {
       if (!window.confirm('还有未保存的修改,要先保存全部再提交吗?')) return;
       await saveAll();
