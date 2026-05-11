@@ -4,7 +4,7 @@ import { ClassificationTag, StatusPill } from '../components/Tags';
 import {
   IconStar, IconFire, IconCode,
   IconArrowUp, IconArrowDown, IconAlertTriangle,
-  IconFile, IconChevronRight,
+  IconFile, IconChevronRight, IconDownload, IconPlus,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
@@ -16,6 +16,14 @@ import {
   AUDIT_ACTION_COLOR, AUDIT_ACTION_LABEL, auditCategory, shortTarget,
   type AuditCategory,
 } from '../lib/audit';
+
+// Pre-fills the "new draft version" prompt with a sensible default. The server
+// re-runs the same logic so the prompt is just UX — the user can override.
+function bumpedPatch(v: string): string {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v.trim());
+  if (!m) return v;
+  return `${m[1]}.${m[2]}.${parseInt(m[3], 10) + 1}`;
+}
 
 export function SkillDetail() {
   const { ns = '', name = '' } = useParams();
@@ -115,6 +123,34 @@ export function SkillDetail() {
     }
   }
 
+  // Bump a published / yanked / deprecated skill into a fresh draft so the
+  // author can iterate. We let the user override the auto-bumped version
+  // because patch-bumps don't always match intent (a major refactor wants
+  // a minor or major bump).
+  async function doCreateDraft() {
+    const suggested = bumpedPatch(p.version);
+    const v = window.prompt(
+      `为 ${p.ns}/${p.name} 新建草稿版本。\n当前 v${p.version} → 新版本号（留空使用建议 v${suggested}）：`,
+      suggested,
+    );
+    if (v === null) return; // user cancelled
+    try {
+      await api.createSkillDraft(p.ns, p.name, v.trim());
+      await skill.reload();
+      navigate(`/skills/${p.ns}/${p.name}/edit`);
+    } catch (e) {
+      alert('操作失败：' + (e as Error).message);
+    }
+  }
+
+  async function doDownloadBundle() {
+    try {
+      await api.downloadBundle(p.ns, p.name);
+    } catch (e) {
+      alert('下载失败：' + (e as Error).message);
+    }
+  }
+
   return (
     <div className="content-inner">
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-subtle)', marginBottom: 14 }}>
@@ -146,12 +182,29 @@ export function SkillDetail() {
           </div>
         </div>
         <div className="detail-hero-actions">
+          {/* Download bundle — available to everyone who can see the skill. */}
+          <button
+            className="btn"
+            onClick={doDownloadBundle}
+            title={`下载 ${p.ns}/${p.name} v${p.version} 的文件 bundle (.tar.gz)`}
+          ><IconDownload size={14} /> 下载</button>
+
           {canEdit ? (
-            <button
-              className="btn primary"
-              onClick={() => navigate(`/skills/${p.ns}/${p.name}/edit`)}
-              title={isAuthor ? '编辑你的 skill' : `以 ${myRole} 身份编辑此 skill`}
-            ><IconCode size={14} /> 编辑</button>
+            // The primary CTA depends on status: draft/review → continue
+            // editing; published/yanked/deprecated → spawn a new draft.
+            p.status === 'draft' || p.status === 'review' ? (
+              <button
+                className="btn primary"
+                onClick={() => navigate(`/skills/${p.ns}/${p.name}/edit`)}
+                title={isAuthor ? '编辑你的 skill' : `以 ${myRole} 身份编辑此 skill`}
+              ><IconCode size={14} /> 编辑</button>
+            ) : (
+              <button
+                className="btn primary"
+                onClick={doCreateDraft}
+                title="以新版本号创建一个可编辑的草稿"
+              ><IconPlus size={14} /> 新建草稿版本</button>
+            )
           ) : (
             <span
               className="tag"

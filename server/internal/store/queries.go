@@ -551,34 +551,42 @@ func (s *Store) ListMyDrafts(user string) ([]model.Skill, error) {
 // SubmitDraftForReview transitions a draft skill to "review" status and creates a Review row.
 // Returns ErrNoRows-equivalent if the skill is missing or not a draft.
 func (s *Store) SubmitDraftForReview(ns, name, version, note, author string, reviewers []string) (*model.Review, error) {
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	var classification, status string
-	if err := tx.QueryRow(`SELECT classification, status FROM skills WHERE ns=? AND name=?`, ns, name).Scan(&classification, &status); err != nil {
+	// Look up classification *before* starting the write tx. ResolvePolicy
+	// (and the classification probe below) issue independent queries on
+	// s.DB, and with SetMaxOpenConns(1) any nested DB call after tx.Begin()
+	// blocks forever waiting for the connection the tx is holding.
+	var classification, status, currentVersion string
+	if err := s.DB.QueryRow(`SELECT classification, status, version FROM skills WHERE ns=? AND name=?`, ns, name).
+		Scan(&classification, &status, &currentVersion); err != nil {
 		return nil, err
 	}
 	if status != "draft" {
 		return nil, sql.ErrNoRows
 	}
 	if version == "" {
-		version = "0.1.0"
+		// Fall back to whatever's on the skill row — usually set by the
+		// CreateDraftVersion bump that preceded this submit. The old default
+		// of "0.1.0" silently rewrote published versions back to 0.1.0.
+		version = currentVersion
+		if version == "" {
+			version = "0.1.0"
+		}
 	}
-	if _, err := tx.Exec(`UPDATE skills SET status='review', version=?, updated_at=CURRENT_TIMESTAMP WHERE ns=? AND name=?`, version, ns, name); err != nil {
-		return nil, err
-	}
-	// Resolve the SLA window from the active policy (per-namespace override
-	// if any, otherwise the global default for this classification). The
-	// previous hard-coded "72h" survived from before namespace_policies
-	// existed.
 	pol, _, err := s.ResolvePolicy(ns, classification)
 	if err != nil {
 		return nil, err
 	}
 	sla := fmt.Sprintf("%dh", pol.SLAHours)
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`UPDATE skills SET status='review', version=?, updated_at=CURRENT_TIMESTAMP WHERE ns=? AND name=?`, version, ns, name); err != nil {
+		return nil, err
+	}
 	revCSV := strings.Join(reviewers, ",")
 	res, err := tx.Exec(`INSERT INTO reviews(ns,skill_name,version,classification,author,reviewers_csv,status,urgency,sla,note)
 		VALUES(?,?,?,?,?,?,?,?,?,?)`,

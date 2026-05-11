@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { AIProviderModal } from '../components/AIProviderModal';
 import { NamespacePoliciesPanel } from '../components/NamespacePoliciesPanel';
+import { MembersPanel } from '../components/MembersPanel';
 import { AdminOverview } from '../components/AdminOverview';
 import { CleanNamespaceModal } from '../components/CleanNamespaceModal';
 import type { AIProvider } from '../api/types';
@@ -110,44 +111,12 @@ export function Admin() {
       )}
 
       {tab === 'members' && (
-        <div className="card">
-          <div className="card-header" style={{ alignItems: 'center', gap: 10 }}>
-            <h3 className="card-title">命名空间成员 &amp; 角色</h3>
-            <select
-              value={effectiveNs}
-              onChange={(e) => setMemberNs(e.target.value)}
-              style={{ marginLeft: 'auto', padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6 }}
-            >
-              {(namespaces.data ?? []).map((n) => (
-                <option key={n.id} value={n.id}>{n.id}</option>
-              ))}
-            </select>
-          </div>
-          <div className="card-body flush table-wrap">
-            {members.loading && <div style={{ padding: 16, fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
-            {members.error && <div style={{ padding: 16, fontSize: 12, color: 'var(--red-text)' }}>{members.error.message}</div>}
-            {members.data && (
-              <table className="tbl">
-                <thead><tr><th>用户</th><th>角色</th></tr></thead>
-                <tbody>
-                  {members.data.map((m) => {
-                    const cls = m.role === 'owner' ? 'red' : m.role === 'maintainer' ? 'amber'
-                      : m.role === 'reviewer' ? 'indigo' : 'green';
-                    return (
-                      <tr key={m.username}>
-                        <td><span className="mono">@{m.username}</span></td>
-                        <td><span className={`tag ${cls}`}>{m.role}</span></td>
-                      </tr>
-                    );
-                  })}
-                  {members.data.length === 0 && (
-                    <tr><td colSpan={2} style={{ color: 'var(--text-faint)', fontSize: 12, padding: 12 }}>无成员</td></tr>
-                  )}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
+        <MembersPanel
+          ns={effectiveNs}
+          namespaces={namespaces.data ?? []}
+          onChangeNs={setMemberNs}
+          members={members}
+        />
       )}
 
       {tab === 'policies' && (

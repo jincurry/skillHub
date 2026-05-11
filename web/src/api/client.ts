@@ -88,12 +88,58 @@ export const api = {
     request<{ ok: true; status: string }>(`/skills/${ns}/${name}/deprecate`, {
       method: 'POST', body: JSON.stringify({ reason: reason ?? '' }),
     }),
+  // createSkillDraft transitions a published/yanked/deprecated skill into a
+  // fresh editable draft. Empty body = auto-bump patch.
+  createSkillDraft: (ns: string, name: string, version?: string) =>
+    request<Skill>(`/skills/${ns}/${name}/draft`, {
+      method: 'POST', body: JSON.stringify({ version: version ?? '' }),
+    }),
+  // downloadBundle fetches a tar.gz and triggers a browser download. Returns
+  // the suggested filename so the caller can surface a "downloaded X" toast.
+  downloadBundle: async (ns: string, name: string): Promise<string> => {
+    const tok = getToken();
+    const res = await fetch(`${BASE}/skills/${ns}/${name}/bundle`, {
+      headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const j = (await res.json()) as { error?: string };
+        if (j?.error) detail = j.error;
+      } catch { /* ignore */ }
+      throw new Error(`${res.status} ${detail}`);
+    }
+    // Parse filename from Content-Disposition; fall back to `${ns}-${name}.tar.gz`.
+    const cd = res.headers.get('Content-Disposition') ?? '';
+    const m = /filename="([^"]+)"/.exec(cd);
+    const filename = m?.[1] ?? `${ns}-${name}.tar.gz`;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    return filename;
+  },
   myDrafts: () => request<Skill[]>('/me/drafts'),
 
   namespaces: () => request<Namespace[]>('/namespaces'),
   createNamespace: (body: { id: string; owner?: string }) =>
     request<Namespace>('/namespaces', { method: 'POST', body: JSON.stringify(body) }),
   namespaceMembers: (ns: string) => request<NamespaceMember[]>(`/namespaces/${ns}/members`),
+  addNamespaceMember: (ns: string, body: { username: string; role: string }) =>
+    request<NamespaceMember[]>(`/namespaces/${ns}/members`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  updateNamespaceMemberRole: (ns: string, username: string, role: string) =>
+    request<NamespaceMember[]>(`/namespaces/${ns}/members/${encodeURIComponent(username)}`, {
+      method: 'PATCH', body: JSON.stringify({ role }),
+    }),
+  removeNamespaceMember: (ns: string, username: string) =>
+    request<NamespaceMember[]>(`/namespaces/${ns}/members/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
+    }),
   namespacePolicy: (ns: string, classification: 'L1' | 'L2' | 'L3') =>
     request<PolicyPreview>(`/namespaces/${ns}/policy?classification=${classification}`),
 

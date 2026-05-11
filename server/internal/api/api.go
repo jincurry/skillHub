@@ -1,6 +1,8 @@
 package api
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"database/sql"
 	"net/http"
 	"os"
@@ -59,6 +61,9 @@ func (s *Server) Routes() *gin.Engine {
 		auth.GET("/namespaces", s.listNamespaces)
 		auth.POST("/namespaces", s.createNamespace)
 		auth.GET("/namespaces/:ns/members", s.listNamespaceMembers)
+		auth.POST("/namespaces/:ns/members", s.addNamespaceMember)
+		auth.PATCH("/namespaces/:ns/members/:username", s.updateNamespaceMemberRole)
+		auth.DELETE("/namespaces/:ns/members/:username", s.removeNamespaceMember)
 		auth.GET("/namespaces/:ns/policy", s.getNamespacePolicy)
 
 		auth.GET("/skills", s.listSkills)
@@ -77,6 +82,8 @@ func (s *Server) Routes() *gin.Engine {
 		auth.GET("/skills/:ns/:name/files/*path", s.getSkillFile)
 		auth.PUT("/skills/:ns/:name/files/*path", s.putSkillFile)
 		auth.DELETE("/skills/:ns/:name/files/*path", s.deleteSkillFile)
+		auth.POST("/skills/:ns/:name/draft", s.createSkillDraft)
+		auth.GET("/skills/:ns/:name/bundle", s.downloadSkillBundle)
 		// Rename lives on a sibling route because the `files/*path` catch-all
 		// above would otherwise swallow a "/files/rename" segment as the
 		// wildcard value.
@@ -443,6 +450,93 @@ func (s *Server) listNamespaceMembers(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	c.JSON(200, out)
+}
+
+// canManageNamespace gates writes to namespace_members. We accept the namespace's
+// own owner (so teams can self-administer) and any platform admin.
+func (s *Server) canManageNamespace(user, ns string) (bool, error) {
+	if u, err := s.store.GetUser(user); err == nil && u != nil && u.IsAdmin {
+		return true, nil
+	}
+	role, err := s.store.UserRoleInNamespace(ns, user)
+	if err != nil {
+		return false, err
+	}
+	return role == "owner", nil
+}
+
+func (s *Server) addNamespaceMember(c *gin.Context) {
+	ns := c.Param("ns")
+	allowed, err := s.canManageNamespace(s.currentUser(c), ns)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(403, gin.H{"error": "需要 namespace owner 或 admin 身份"})
+		return
+	}
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Role     string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if err := s.store.AddNamespaceMember(ns, req.Username, req.Role, s.currentUser(c)); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	out, _ := s.store.ListNamespaceMembers(ns)
+	c.JSON(200, out)
+}
+
+func (s *Server) updateNamespaceMemberRole(c *gin.Context) {
+	ns := c.Param("ns")
+	username := c.Param("username")
+	allowed, err := s.canManageNamespace(s.currentUser(c), ns)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(403, gin.H{"error": "需要 namespace owner 或 admin 身份"})
+		return
+	}
+	var req struct {
+		Role string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if err := s.store.UpdateNamespaceMemberRole(ns, username, req.Role, s.currentUser(c)); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	out, _ := s.store.ListNamespaceMembers(ns)
+	c.JSON(200, out)
+}
+
+func (s *Server) removeNamespaceMember(c *gin.Context) {
+	ns := c.Param("ns")
+	username := c.Param("username")
+	allowed, err := s.canManageNamespace(s.currentUser(c), ns)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(403, gin.H{"error": "需要 namespace owner 或 admin 身份"})
+		return
+	}
+	if err := s.store.RemoveNamespaceMember(ns, username, s.currentUser(c)); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	out, _ := s.store.ListNamespaceMembers(ns)
 	c.JSON(200, out)
 }
 
@@ -1143,4 +1237,84 @@ func (s *Server) listMyDrafts(c *gin.Context) {
 		return
 	}
 	c.JSON(200, out)
+}
+
+// createSkillDraft transitions a published/yanked/deprecated skill into an
+// editable draft on a fresh version. Body: { "version"?: "1.3.0" }; if empty
+// the server bumps the patch component.
+func (s *Server) createSkillDraft(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	user := s.currentUser(c)
+	allowed, err := s.canEditSkill(user, ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(403, gin.H{"error": "需要作者或 namespace owner/maintainer 身份"})
+		return
+	}
+	var req struct {
+		Version string `json:"version"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	k, err := s.store.CreateDraftVersion(ns, name, req.Version, user)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, k)
+}
+
+// downloadSkillBundle streams the current skill's file bundle as a .tar.gz
+// archive named "<ns>-<name>-v<version>.tar.gz". Files are written under a
+// top-level directory so unpacking is tidy.
+func (s *Server) downloadSkillBundle(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	k, err := s.store.GetSkill(ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if k == nil {
+		c.JSON(404, gin.H{"error": "skill not found"})
+		return
+	}
+	files, err := s.store.ListSkillFilesWithContent(ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	root := ns + "-" + name + "-v" + k.Version
+	filename := root + ".tar.gz"
+	c.Header("Content-Type", "application/gzip")
+	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+
+	gz := gzip.NewWriter(c.Writer)
+	defer gz.Close()
+	tw := tar.NewWriter(gz)
+	defer tw.Close()
+
+	now := time.Now()
+	for _, f := range files {
+		hdr := &tar.Header{
+			Name:    root + "/" + f.Path,
+			Mode:    0o644,
+			Size:    int64(len(f.Content)),
+			ModTime: now,
+		}
+		if !f.UpdatedAt.IsZero() {
+			hdr.ModTime = f.UpdatedAt
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return
+		}
+		if _, err := tw.Write([]byte(f.Content)); err != nil {
+			return
+		}
+	}
+	// Best-effort audit; failure here doesn't affect the streamed bytes.
+	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
+		s.currentUser(c), "download_bundle", ns+"/"+name, "v"+k.Version, "127.0.0.1")
 }
