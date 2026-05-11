@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IconBell } from './Icons';
-import { api } from '../api/client';
 import { fmtRelative, notifTargetUrl } from '../lib/notify';
+import {
+  markAllReadOptimistic, markOneReadOptimistic, reloadNotifications, useNotifStore,
+} from '../lib/notifStore';
 import type { Notification } from '../api/types';
 
 const KIND_COLOR: Record<string, string> = {
@@ -15,29 +17,13 @@ const KIND_COLOR: Record<string, string> = {
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  const unreadCount = items.filter((n) => n.unread).length;
-
-  async function load() {
-    setLoading(true);
-    try {
-      setItems((await api.myNotifications()) ?? []);
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-    const t = window.setInterval(() => void load(), 30000);
-    return () => window.clearInterval(t);
-  }, []);
+  // Shared notification state — the bell, the sidebar badge and the
+  // Workspace feed all read from this single source.
+  const { items, loading } = useNotifStore();
+  const unreadCount = items.reduce((n, x) => n + (x.unread ? 1 : 0), 0);
 
   useEffect(() => {
     if (!open) return;
@@ -50,21 +36,17 @@ export function NotificationBell() {
 
   async function toggle() {
     setOpen((v) => !v);
-    if (!open) await load();
+    // Opening the popover refreshes immediately so the user doesn't see
+    // stale data between polls.
+    if (!open) await reloadNotifications();
   }
 
   async function markAllRead() {
-    if (unreadCount === 0) return;
-    await api.markNotificationsRead({ all: true });
-    setItems((arr) => arr.map((n) => ({ ...n, unread: false })));
+    await markAllReadOptimistic();
   }
 
   async function clickItem(n: Notification) {
-    if (n.unread) {
-      // Optimistic update first so the bell badge updates instantly.
-      setItems((arr) => arr.map((x) => (x.id === n.id ? { ...x, unread: false } : x)));
-      void api.markNotificationsRead({ ids: [n.id] }).catch(() => void load());
-    }
+    if (n.unread) void markOneReadOptimistic(n.id);
     setOpen(false);
     const url = notifTargetUrl(n);
     if (url) navigate(url);

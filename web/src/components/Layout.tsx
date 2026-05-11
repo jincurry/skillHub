@@ -10,6 +10,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { CommandPalette, openCommandPalette } from './CommandPalette';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
+import { useUnreadCount } from '../lib/notifStore';
 import { clearAuth } from '../api/auth';
 
 type NavItem = { id: string; to: string; icon: ReactNode; label: string };
@@ -27,6 +28,10 @@ function Sidebar() {
   const { data: me } = useAsync(() => api.me());
   const { data: pendingReviews } = useAsync(() => api.listReviews('pending'));
   const pendingCount = pendingReviews?.length ?? 0;
+  // Unread notifications drive the workspace nav badge. Same shared store
+  // backs the topbar bell and the Workspace feed, so all three update in
+  // lockstep when the user clicks "mark read" anywhere.
+  const unreadNotifs = useUnreadCount();
   function logout() {
     clearAuth();
     window.location.assign('/login');
@@ -44,7 +49,16 @@ function Sidebar() {
           // Hide /admin from non-admin users — backend rejects them anyway,
           // but keeping the link visible would be a footgun.
           if (item.id === 'admin' && me && !me.isAdmin) return null;
-          const badge = item.id === 'reviews' && pendingCount > 0 ? pendingCount : null;
+          // Per-item badge resolution. Two surfaces have counters:
+          //   workspace → unread notifications
+          //   reviews   → pending reviews assigned to me
+          // We cap at 99+ so the pill doesn't blow out the layout.
+          let badge: number | string | null = null;
+          if (item.id === 'workspace' && unreadNotifs > 0) {
+            badge = unreadNotifs > 99 ? '99+' : unreadNotifs;
+          } else if (item.id === 'reviews' && pendingCount > 0) {
+            badge = pendingCount > 99 ? '99+' : pendingCount;
+          }
           return (
             <NavLink
               key={item.id}

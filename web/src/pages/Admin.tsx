@@ -7,6 +7,7 @@ import { useAsync } from '../api/useAsync';
 import { AIProviderModal } from '../components/AIProviderModal';
 import { NamespacePoliciesPanel } from '../components/NamespacePoliciesPanel';
 import { AdminOverview } from '../components/AdminOverview';
+import { CleanNamespaceModal } from '../components/CleanNamespaceModal';
 import type { AIProvider } from '../api/types';
 
 export function Admin() {
@@ -27,6 +28,9 @@ export function Admin() {
     [effectiveNs],
   );
   const [showCreate, setShowCreate] = useState(false);
+  // Holds the ns id currently being cleaned up (via CleanNamespaceModal).
+  // null means the modal is closed.
+  const [cleanupNs, setCleanupNs] = useState<string | null>(null);
 
   return (
     <div className="content-inner">
@@ -65,10 +69,10 @@ export function Admin() {
               <thead><tr><th>命名空间</th><th>Owner</th><th style={{ textAlign: 'right' }}>Skills</th><th style={{ textAlign: 'right', width: 120 }}>操作</th></tr></thead>
               <tbody>
                 {namespaces.data?.map((ns) => {
-                  // Non-empty namespaces cannot be deleted because cascading
-                  // skills / reviews / audit logs would be catastrophic;
-                  // the button is disabled with a tooltip explaining why.
-                  const canDelete = ns.count === 0;
+                  // Empty namespaces delete with a plain confirm; non-empty
+                  // ones go through CleanNamespaceModal which does the
+                  // cascading skill cleanup + typed confirmation.
+                  const isEmpty = ns.count === 0;
                   return (
                     <tr key={ns.id}>
                       <td><span className="mono" style={{ fontWeight: 600 }}>{ns.id}</span></td>
@@ -77,19 +81,24 @@ export function Admin() {
                       <td style={{ textAlign: 'right' }}>
                         <button
                           className="btn sm"
-                          disabled={!canDelete}
-                          title={canDelete ? '删除该命名空间（不可撤销）' : `仍有 ${ns.count} 个 Skill，先删除或迁移后再操作`}
-                          style={canDelete ? { color: 'var(--red-text)' } : undefined}
+                          title={isEmpty
+                            ? '删除该命名空间（不可撤销）'
+                            : `清空 ${ns.count} 个 Skill 并删除该命名空间`}
+                          style={{ color: 'var(--red-text)' }}
                           onClick={async () => {
-                            if (!confirm(`确定删除命名空间 "${ns.id}"？此操作不可撤销（将同时清理成员和审批策略）。`)) return;
-                            try {
-                              await api.adminDeleteNamespace(ns.id);
-                              namespaces.reload();
-                            } catch (e) {
-                              alert('删除失败：' + (e as Error).message);
+                            if (isEmpty) {
+                              if (!confirm(`确定删除命名空间 "${ns.id}"？此操作不可撤销（将同时清理成员和审批策略）。`)) return;
+                              try {
+                                await api.adminDeleteNamespace(ns.id);
+                                namespaces.reload();
+                              } catch (e) {
+                                alert('删除失败：' + (e as Error).message);
+                              }
+                            } else {
+                              setCleanupNs(ns.id);
                             }
                           }}
-                        >删除</button>
+                        >{isEmpty ? '删除' : '清空并删除'}</button>
                       </td>
                     </tr>
                   );
@@ -292,6 +301,17 @@ export function Admin() {
         onClose={() => setAIModalOpen(false)}
         onSaved={() => aiProviders.reload()}
       />
+
+      {cleanupNs && (
+        <CleanNamespaceModal
+          ns={cleanupNs}
+          onClose={() => setCleanupNs(null)}
+          onDeleted={() => {
+            setCleanupNs(null);
+            namespaces.reload();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -185,6 +185,10 @@ export const api = {
   // Hard delete. Fails with HTTP 409 if the namespace still owns any skills.
   adminDeleteNamespace: (ns: string) =>
     request<{ ok: true }>(`/admin/namespaces/${ns}`, { method: 'DELETE' }),
+  // Hard delete a skill and all its descendants (versions / files / ratings
+  // / reviews / comments / snapshots / metrics / notifications). Admin-only.
+  adminDeleteSkill: (ns: string, name: string) =>
+    request<{ ok: true }>(`/admin/skills/${ns}/${name}`, { method: 'DELETE' }),
 
   // ---- Platform metrics (admin overview) --------------------------------
   adminMetrics: () => request<PlatformMetrics>('/admin/metrics'),

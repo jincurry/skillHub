@@ -112,6 +112,60 @@ func (s *Store) CreateSkill(req model.CreateSkillRequest, author string) (*model
 	return s.GetSkill(req.Namespace, req.Name)
 }
 
+// HardDeleteSkill erases a skill and every child row that references it.
+// This is a destructive operation reserved for admin cleanup (e.g. in
+// preparation to delete the owning namespace). Callers that want a safer
+// lifecycle transition should use yankSkill / deprecateSkill instead.
+//
+// The transaction deletes:
+//
+//   - reviews for the skill  → cascades comments + review_files (FK)
+//   - skill_versions         (manual, no FK)
+//   - skill_files            (manual, no FK)
+//   - skill_daily_metrics    (manual, no FK)
+//   - notifications targeting the skill (manual; target_kind='skill')
+//   - skills row             → cascades skill_ratings (FK)
+//
+// audit_logs are intentionally left in place so the deletion itself remains
+// visible in the admin overview feed.
+func (s *Store) HardDeleteSkill(ns, name string) error {
+	// Existence check keeps the error message clean when the user pastes
+	// the wrong slug.
+	var id int64
+	if err := s.DB.QueryRow(`SELECT id FROM skills WHERE ns=? AND name=?`, ns, name).Scan(&id); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("skill 不存在: %s/%s", ns, name)
+		}
+		return err
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Reviews first so the FK-cascaded comments / review_files go too.
+	if _, err := tx.Exec(`DELETE FROM reviews WHERE ns=? AND skill_name=?`, ns, name); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM skill_versions WHERE ns=? AND name=?`, ns, name); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM skill_files WHERE ns=? AND skill_name=?`, ns, name); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM skill_daily_metrics WHERE ns=? AND name=?`, ns, name); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM notifications WHERE target_kind='skill' AND target_ref=?`, ns+"/"+name); err != nil {
+		return err
+	}
+	// Finally the skill itself — skill_ratings cascade on FK.
+	if _, err := tx.Exec(`DELETE FROM skills WHERE id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // DeleteNamespace removes a namespace only if it has zero skills. We refuse
 // to cascade because skills drag along reviews, comments, ratings, audit
 // logs and file snapshots — deleting all of that by accident would be

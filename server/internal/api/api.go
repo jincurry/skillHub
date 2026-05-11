@@ -114,6 +114,11 @@ func (s *Server) Routes() *gin.Engine {
 		// plus dependent namespace_members / namespace_policies.
 		adminAI.DELETE("/namespaces/:ns", s.deleteNamespace)
 
+		// Hard delete a skill + all dependent rows (versions / files /
+		// ratings / reviews / comments / snapshots / metrics / notifs).
+		// Used by the admin cleanup flow before deleting a namespace.
+		adminAI.DELETE("/skills/:ns/:name", s.adminDeleteSkill)
+
 		// Platform-wide metrics for the Admin overview dashboard.
 		adminAI.GET("/metrics", s.adminMetrics)
 	}
@@ -904,6 +909,27 @@ func (s *Server) adminMetrics(c *gin.Context) {
 		return
 	}
 	c.JSON(200, out)
+}
+
+// adminDeleteSkill is the admin escape hatch for wiping a skill entirely,
+// including its history. Regular users should be using yank/deprecate
+// instead — this is only meant to support the "empty a namespace before
+// deleting it" admin flow.
+func (s *Server) adminDeleteSkill(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	if err := s.store.HardDeleteSkill(ns, name); err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "不存在") {
+			c.JSON(404, gin.H{"error": msg})
+			return
+		}
+		c.JSON(500, gin.H{"error": msg})
+		return
+	}
+	_, _ = s.store.DB.Exec(
+		`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
+		s.currentUser(c), "delete_skill", ns+"/"+name, "", c.ClientIP())
+	c.JSON(200, gin.H{"ok": true})
 }
 
 // deleteNamespace is admin-only and will refuse when the namespace still has
