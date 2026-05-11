@@ -1,4 +1,4 @@
-import type { Achievement, AIProvider, AIProviderRef, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpsertPolicyRequest, ValidationReport } from './types';
+import type { Achievement, AIProvider, AIProviderRef, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpsertPolicyRequest, ValidationReport } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -180,6 +180,14 @@ export const api = {
       `/admin/namespaces/${ns}/policies/${classification}`,
       { method: 'DELETE' },
     ),
+
+  // ---- Namespace lifecycle (admin) --------------------------------------
+  // Hard delete. Fails with HTTP 409 if the namespace still owns any skills.
+  adminDeleteNamespace: (ns: string) =>
+    request<{ ok: true }>(`/admin/namespaces/${ns}`, { method: 'DELETE' }),
+
+  // ---- Platform metrics (admin overview) --------------------------------
+  adminMetrics: () => request<PlatformMetrics>('/admin/metrics'),
 
   // ---- AI providers (any logged-in user) --------------------------------
   listAIProviderRefs: () => request<AIProviderRef[]>('/ai/providers'),

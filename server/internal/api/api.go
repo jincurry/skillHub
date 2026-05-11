@@ -109,6 +109,13 @@ func (s *Server) Routes() *gin.Engine {
 		adminAI.GET("/namespaces/:ns/policies", s.listNamespacePolicies)
 		adminAI.PUT("/namespaces/:ns/policies/:classification", s.upsertNamespacePolicy)
 		adminAI.DELETE("/namespaces/:ns/policies/:classification", s.deleteNamespacePolicy)
+
+		// Namespace hard delete (only when empty). Cleans up the row itself
+		// plus dependent namespace_members / namespace_policies.
+		adminAI.DELETE("/namespaces/:ns", s.deleteNamespace)
+
+		// Platform-wide metrics for the Admin overview dashboard.
+		adminAI.GET("/metrics", s.adminMetrics)
 	}
 	return r
 }
@@ -886,6 +893,43 @@ func (s *Server) createNamespace(c *gin.Context) {
 		return
 	}
 	c.JSON(201, ns)
+}
+
+// adminMetrics drives the platform overview dashboard. Admin-only; the
+// store layer does all the heavy lifting so this is just a pass-through.
+func (s *Server) adminMetrics(c *gin.Context) {
+	out, err := s.store.GetPlatformMetrics()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, out)
+}
+
+// deleteNamespace is admin-only and will refuse when the namespace still has
+// skills attached. The store layer enforces the same invariant — this
+// handler just maps store errors onto sensible HTTP codes so the UI can
+// display the message directly.
+func (s *Server) deleteNamespace(c *gin.Context) {
+	ns := c.Param("ns")
+	if err := s.store.DeleteNamespace(ns); err != nil {
+		msg := err.Error()
+		switch {
+		case strings.Contains(msg, "不存在"):
+			c.JSON(404, gin.H{"error": msg})
+		case strings.Contains(msg, "仍有"):
+			// Namespace not empty — use 409 Conflict so the client can
+			// distinguish this from a server-side failure.
+			c.JSON(409, gin.H{"error": msg})
+		default:
+			c.JSON(500, gin.H{"error": msg})
+		}
+		return
+	}
+	_, _ = s.store.DB.Exec(
+		`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
+		s.currentUser(c), "delete_namespace", ns, "", c.ClientIP())
+	c.JSON(200, gin.H{"ok": true})
 }
 
 func (s *Server) listNotifications(c *gin.Context) {

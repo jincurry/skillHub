@@ -1,26 +1,13 @@
 import { useState } from 'react';
 import {
-  IconPlus, IconMore, IconXCircle, IconRocket,
+  IconPlus, IconXCircle, IconRocket,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { AIProviderModal } from '../components/AIProviderModal';
 import { NamespacePoliciesPanel } from '../components/NamespacePoliciesPanel';
+import { AdminOverview } from '../components/AdminOverview';
 import type { AIProvider } from '../api/types';
-
-function Placeholder({ title, hint }: { title: string; hint: string }) {
-  return (
-    <div className="card">
-      <div className="card-body" style={{ padding: '40px 28px', textAlign: 'center' }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 10px', borderRadius: 999, background: 'var(--amber-bg)', color: 'var(--amber-text)', fontSize: 11.5, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-          P1 · 待实现
-        </div>
-        <div style={{ fontSize: 15, fontWeight: 600, marginTop: 12 }}>{title}</div>
-        <div style={{ fontSize: 13, color: 'var(--text-subtle)', marginTop: 6, maxWidth: 480, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.55 }}>{hint}</div>
-      </div>
-    </div>
-  );
-}
 
 export function Admin() {
   const [tab, setTab] = useState<'namespaces' | 'members' | 'overview' | 'policies' | 'ai'>('namespaces');
@@ -46,7 +33,7 @@ export function Admin() {
       <div className="page-header">
         <div>
           <h1 className="page-title">管理后台</h1>
-          <p className="page-subtitle">仅限平台管理员可见。命名空间 / 成员 / 审批策略 / AI 模型已上线，平台健康度概览仍在规划。</p>
+          <p className="page-subtitle">仅限平台管理员可见。命名空间 / 成员 / 审批策略 / AI 模型 / 平台概览均已上线。</p>
         </div>
       </div>
 
@@ -63,12 +50,7 @@ export function Admin() {
         </div>
       </div>
 
-      {tab === 'overview' && (
-        <Placeholder
-          title="平台健康度与配额监控"
-          hint="将展示真实的系统组件状态、调用量、存储/流量配额、SLA 容量等指标。当前后端尚未提供对应的 metrics 接口。"
-        />
-      )}
+      {tab === 'overview' && <AdminOverview />}
 
       {tab === 'namespaces' && (
         <div className="card">
@@ -80,16 +62,38 @@ export function Admin() {
           </div>
           <div className="card-body flush table-wrap">
             <table className="tbl">
-              <thead><tr><th>命名空间</th><th>Owner</th><th style={{ textAlign: 'right' }}>Skills</th><th></th></tr></thead>
+              <thead><tr><th>命名空间</th><th>Owner</th><th style={{ textAlign: 'right' }}>Skills</th><th style={{ textAlign: 'right', width: 120 }}>操作</th></tr></thead>
               <tbody>
-                {namespaces.data?.map((ns) => (
-                  <tr key={ns.id}>
-                    <td><span className="mono" style={{ fontWeight: 600 }}>{ns.id}</span></td>
-                    <td><span className="mono">@{ns.owner}</span></td>
-                    <td className="num" style={{ textAlign: 'right', fontWeight: 500 }}>{ns.count}</td>
-                    <td><button className="btn sm ghost"><IconMore size={14} /></button></td>
-                  </tr>
-                ))}
+                {namespaces.data?.map((ns) => {
+                  // Non-empty namespaces cannot be deleted because cascading
+                  // skills / reviews / audit logs would be catastrophic;
+                  // the button is disabled with a tooltip explaining why.
+                  const canDelete = ns.count === 0;
+                  return (
+                    <tr key={ns.id}>
+                      <td><span className="mono" style={{ fontWeight: 600 }}>{ns.id}</span></td>
+                      <td><span className="mono">@{ns.owner}</span></td>
+                      <td className="num" style={{ textAlign: 'right', fontWeight: 500 }}>{ns.count}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          className="btn sm"
+                          disabled={!canDelete}
+                          title={canDelete ? '删除该命名空间（不可撤销）' : `仍有 ${ns.count} 个 Skill，先删除或迁移后再操作`}
+                          style={canDelete ? { color: 'var(--red-text)' } : undefined}
+                          onClick={async () => {
+                            if (!confirm(`确定删除命名空间 "${ns.id}"？此操作不可撤销（将同时清理成员和审批策略）。`)) return;
+                            try {
+                              await api.adminDeleteNamespace(ns.id);
+                              namespaces.reload();
+                            } catch (e) {
+                              alert('删除失败：' + (e as Error).message);
+                            }
+                          }}
+                        >删除</button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

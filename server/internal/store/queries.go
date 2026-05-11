@@ -112,6 +112,52 @@ func (s *Store) CreateSkill(req model.CreateSkillRequest, author string) (*model
 	return s.GetSkill(req.Namespace, req.Name)
 }
 
+// DeleteNamespace removes a namespace only if it has zero skills. We refuse
+// to cascade because skills drag along reviews, comments, ratings, audit
+// logs and file snapshots — deleting all of that by accident would be
+// catastrophic. The caller (admin API) is expected to surface the error
+// message back to the user so they understand why the delete was blocked.
+//
+// What gets cleaned up on a successful call:
+//   - namespaces row
+//   - namespace_members rows for this ns
+//   - namespace_policies rows for this ns
+//
+// sql.ErrNoRows is translated into a friendlier "not found" error.
+func (s *Store) DeleteNamespace(ns string) error {
+	// Verify the namespace exists up-front so we return a clean error
+	// instead of silently succeeding on a typo.
+	var owner string
+	if err := s.DB.QueryRow(`SELECT owner FROM namespaces WHERE id=?`, ns).Scan(&owner); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("命名空间不存在: %s", ns)
+		}
+		return err
+	}
+	var skillCount int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM skills WHERE ns=?`, ns).Scan(&skillCount); err != nil {
+		return err
+	}
+	if skillCount > 0 {
+		return fmt.Errorf("命名空间下仍有 %d 个 Skill，不能删除。请先删除或迁移其中的 Skill。", skillCount)
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM namespace_policies WHERE ns=?`, ns); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM namespace_members WHERE ns=?`, ns); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM namespaces WHERE id=?`, ns); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) ListNamespaces() ([]model.Namespace, error) {
 	rows, err := s.DB.Query(`
 		SELECT n.id, n.owner, COALESCE(c.cnt,0)
@@ -700,6 +746,117 @@ func (s *Store) ListReviewFiles(reviewID int64) ([]model.ReviewFile, error) {
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+// GetPlatformMetrics aggregates the numbers the admin dashboard needs. All
+// queries are independent so a bad column name in one doesn't blow up the
+// whole response — we just surface partial data. Every aggregate is a
+// single COUNT/SUM so the total query cost is trivial; this can be called
+// synchronously on page load.
+func (s *Store) GetPlatformMetrics() (*model.PlatformMetrics, error) {
+	m := &model.PlatformMetrics{
+		SkillsByStatus:    map[string]int{},
+		ReviewsByStatus:   map[string]int{},
+		ActivationsTrend:  []model.TrendPoint{},
+		RecentAudit:       []model.AuditLog{},
+		AvgDecisionHours:  -1,
+	}
+
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&m.Users)
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM namespaces`).Scan(&m.Namespaces)
+
+	// Skills grouped by status. Also bumps TotalSkills alongside so the
+	// client doesn't have to sum the map.
+	if rows, err := s.DB.Query(`SELECT status, COUNT(*) FROM skills GROUP BY status`); err == nil {
+		for rows.Next() {
+			var st string
+			var c int
+			if err := rows.Scan(&st, &c); err == nil {
+				m.SkillsByStatus[st] = c
+				m.TotalSkills += c
+			}
+		}
+		rows.Close()
+	}
+
+	// Reviews grouped by status. changes_requested rolls up into rejected
+	// to match the /reviews page UX.
+	if rows, err := s.DB.Query(`SELECT status, COUNT(*) FROM reviews GROUP BY status`); err == nil {
+		for rows.Next() {
+			var st string
+			var c int
+			if err := rows.Scan(&st, &c); err == nil {
+				key := st
+				if st == "changes_requested" {
+					key = "rejected"
+				}
+				m.ReviewsByStatus[key] += c
+				m.TotalReviews += c
+			}
+		}
+		rows.Close()
+	}
+
+	// SLA numbers mirror ReviewStats (same query shapes, different consumer).
+	_ = s.DB.QueryRow(`
+		SELECT COUNT(*) FROM reviews
+		WHERE status='pending' AND urgency='overdue'`).Scan(&m.Overdue)
+	decided := m.ReviewsByStatus["approved"] + m.ReviewsByStatus["rejected"]
+	if decided > 0 {
+		var lateDecided int
+		_ = s.DB.QueryRow(`
+			SELECT COUNT(*) FROM reviews
+			WHERE status IN ('approved','rejected','changes_requested')
+			  AND urgency='overdue'`).Scan(&lateDecided)
+		m.SlaComplianceRate = float64(decided-lateDecided) / float64(decided) * 100.0
+	}
+	var avg sql.NullFloat64
+	if err := s.DB.QueryRow(`
+		SELECT AVG((julianday(decided_at) - julianday(submitted_at)) * 24.0)
+		FROM reviews WHERE decided_at IS NOT NULL`).Scan(&avg); err == nil && avg.Valid {
+		m.AvgDecisionHours = avg.Float64
+	}
+
+	// AI provider counters. has_key = 1 when the encrypted column is
+	// non-empty; see store/ai.go for how that's stored.
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM ai_providers`).Scan(&m.AIProviders.Total)
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM ai_providers WHERE enabled = 1`).Scan(&m.AIProviders.Enabled)
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM ai_providers WHERE api_key_enc IS NOT NULL AND api_key_enc != ''`).Scan(&m.AIProviders.WithKey)
+
+	// Platform-wide 30-day activation trend: sum per day across every skill.
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	trendBy := make(map[string]int, 30)
+	if rows, err := s.DB.Query(`
+		SELECT day, SUM(activations)
+		FROM skill_daily_metrics
+		WHERE day >= ?
+		GROUP BY day`,
+		today.AddDate(0, 0, -29).Format("2006-01-02"),
+	); err == nil {
+		for rows.Next() {
+			var d string
+			var v int
+			if err := rows.Scan(&d, &v); err == nil {
+				trendBy[d] = v
+			}
+		}
+		rows.Close()
+	}
+	m.ActivationsTrend = make([]model.TrendPoint, 30)
+	for i := 0; i < 30; i++ {
+		day := today.AddDate(0, 0, -(29 - i))
+		key := day.Format("2006-01-02")
+		v := trendBy[key]
+		m.ActivationsTrend[i] = model.TrendPoint{Day: key, Activations: v}
+		m.Activations30d += v
+	}
+
+	// Last 10 audit log entries so the dashboard has an at-a-glance feed.
+	logs, err := s.ListAuditLogs(AuditFilter{Limit: 10})
+	if err == nil {
+		m.RecentAudit = logs
+	}
+	return m, nil
 }
 
 // GetSkillTrend returns one TrendPoint per day for the last `days` days, in

@@ -151,6 +151,37 @@ type TrendPoint struct {
 	Activations int    `json:"activations"`
 }
 
+// AIProviderSummary groups AI-config counters shown in the admin overview.
+// Total is the raw row count; Enabled only counts providers with enabled=1;
+// WithKey counts providers that actually have an API key on file. We expose
+// the three separately so the UI can flag "configured but no key" as a
+// warning.
+type AIProviderSummary struct {
+	Total   int `json:"total"`
+	Enabled int `json:"enabled"`
+	WithKey int `json:"withKey"`
+}
+
+// PlatformMetrics is the aggregated snapshot that drives the admin overview
+// dashboard. All counts are live — no materialised view — because the data
+// set is tiny. SkillsByStatus and ReviewsByStatus map the enum values back
+// to counts so the client can render a stacked bar without a second call.
+type PlatformMetrics struct {
+	Users              int                `json:"users"`
+	Namespaces         int                `json:"namespaces"`
+	TotalSkills        int                `json:"totalSkills"`
+	SkillsByStatus     map[string]int     `json:"skillsByStatus"`
+	TotalReviews       int                `json:"totalReviews"`
+	ReviewsByStatus    map[string]int     `json:"reviewsByStatus"`
+	AvgDecisionHours   float64            `json:"avgDecisionHours"`
+	SlaComplianceRate  float64            `json:"slaComplianceRate"`
+	Overdue            int                `json:"overdue"`
+	AIProviders        AIProviderSummary  `json:"aiProviders"`
+	Activations30d     int                `json:"activations30d"`
+	ActivationsTrend   []TrendPoint       `json:"activationsTrend"`
+	RecentAudit        []AuditLog         `json:"recentAudit"`
+}
+
 // ReviewFile is one file's snapshot inside a review request. BaseContent is
 // the same path's body in the previous approved review (empty if this is a
 // brand-new file or the skill has no prior approval). NewContent is what the

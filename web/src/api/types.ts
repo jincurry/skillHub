@@ -60,6 +60,33 @@ export interface TrendPoint {
   activations: number;
 }
 
+// AIProviderSummary is the AI-counter trio inside PlatformMetrics; kept as a
+// separate type so the overview card can prop-drill just the summary.
+export interface AIProviderSummary {
+  total: number;
+  enabled: number;
+  withKey: number;
+}
+
+// PlatformMetrics matches server/internal/model/model.go:PlatformMetrics and
+// powers the Admin overview dashboard. All numbers are live snapshots; the
+// trend array always has exactly 30 entries (days) in chronological order.
+export interface PlatformMetrics {
+  users: number;
+  namespaces: number;
+  totalSkills: number;
+  skillsByStatus: Record<string, number>;
+  totalReviews: number;
+  reviewsByStatus: Record<string, number>;
+  avgDecisionHours: number;
+  slaComplianceRate: number;
+  overdue: number;
+  aiProviders: AIProviderSummary;
+  activations30d: number;
+  activationsTrend: TrendPoint[];
+  recentAudit: AuditLog[];
+}
+
 export interface Comment {
   id: number;
   reviewId: number;
