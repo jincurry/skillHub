@@ -64,6 +64,9 @@ func Open(path string) (*Store, error) {
 	if err := s.backfillNamespaceMembers(); err != nil {
 		return nil, fmt.Errorf("backfill members: %w", err)
 	}
+	if err := s.backfillDailyMetrics(); err != nil {
+		return nil, fmt.Errorf("backfill metrics: %w", err)
+	}
 	return s, nil
 }
 
@@ -95,6 +98,45 @@ func (s *Store) backfillPasswords() error {
 	}
 	for _, u := range users {
 		if _, err := s.DB.Exec(`UPDATE users SET password_hash=? WHERE username=?`, hash, u); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// backfillDailyMetrics seeds the synthetic 30-day series for every skill
+// that already exists but has no rows in skill_daily_metrics yet. This runs
+// once on upgraded DBs (where seedIfEmpty saw existing rows and skipped
+// entirely). The seed function is deterministic so reruns are no-ops as
+// long as the data is already there.
+func (s *Store) backfillDailyMetrics() error {
+	var present int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM skill_daily_metrics LIMIT 1`).Scan(&present); err != nil {
+		return err
+	}
+	if present > 0 {
+		return nil
+	}
+	rows, err := s.DB.Query(`SELECT ns, name, activations, delta_pct FROM skills WHERE activations > 0`)
+	if err != nil {
+		return err
+	}
+	type skillRow struct {
+		ns, name           string
+		weekly, deltaPct   int
+	}
+	var skills []skillRow
+	for rows.Next() {
+		var r skillRow
+		if err := rows.Scan(&r.ns, &r.name, &r.weekly, &r.deltaPct); err != nil {
+			rows.Close()
+			return err
+		}
+		skills = append(skills, r)
+	}
+	rows.Close()
+	for _, r := range skills {
+		if err := seedDailyMetrics(s.DB, r.ns, r.name, r.weekly, r.deltaPct); err != nil {
 			return err
 		}
 	}

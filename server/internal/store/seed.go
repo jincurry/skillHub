@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"strconv"
 	"strings"
 	"time"
@@ -143,6 +144,14 @@ func (s *Store) seedIfEmpty() error {
 		); err != nil {
 			return err
 		}
+		// Synthetic 30-day daily metrics so the trend chart isn't empty on
+		// fresh databases. Deterministic per (ns,name) — uses a tiny FNV
+		// hash as the random seed so each demo run produces the same curve.
+		if k.activations > 0 {
+			if err := seedDailyMetrics(tx, k.ns, k.name, k.activations, k.delta); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Seed bundle files for every skill so the editor opens to real content
@@ -248,4 +257,67 @@ func itoa(i int) string {
 		i /= 10
 	}
 	return out
+}
+
+// seedDailyMetrics writes a synthetic 30-day activation series for one
+// skill. The series is deterministic — same (ns,name,weekly,delta) always
+// produces the same shape — so demos and screenshots are reproducible.
+//
+// Shape: weekly counter is interpreted as last-7-days total; the per-day
+// average is weekly/7. The first 23 days sit at base*(1-delta/100), the
+// last 7 days at base, with ±15% noise driven by a tiny FNV hash and
+// weekends discounted to 70%. Counts are clamped to >= 0.
+func seedDailyMetrics(tx interface {
+	Exec(string, ...any) (sql.Result, error)
+}, ns, name string, weekly, deltaPct int) error {
+	if weekly <= 0 {
+		return nil
+	}
+	const days = 30
+	const recent = 7
+
+	avgRecent := float64(weekly) / float64(recent)
+	avgBase := avgRecent
+	if deltaPct != 0 {
+		// avgBase * (1 + delta/100) ≈ avgRecent  ⇒  avgBase = avgRecent / (1 + delta/100)
+		avgBase = avgRecent / (1.0 + float64(deltaPct)/100.0)
+		if avgBase < 0.1 {
+			avgBase = 0.1
+		}
+	}
+
+	// FNV-1a 32-bit on ns+"/"+name → seed.
+	seed := uint32(2166136261)
+	for _, b := range []byte(ns + "/" + name) {
+		seed ^= uint32(b)
+		seed *= 16777619
+	}
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	for i := 0; i < days; i++ {
+		day := today.AddDate(0, 0, -(days - 1 - i)) // oldest first
+		dayStr := day.Format("2006-01-02")
+		isRecent := i >= days-recent
+		avg := avgBase
+		if isRecent {
+			avg = avgRecent
+		}
+		// Pseudo-random noise in [-0.15, +0.15] using the seed + day index.
+		seed = seed*1103515245 + 12345
+		noise := (float64(seed%1000)/1000.0)*0.30 - 0.15
+		// Weekend discount (Sat=6, Sun=0) for a slightly realistic shape.
+		weekend := 1.0
+		if w := day.Weekday(); w == time.Saturday || w == time.Sunday {
+			weekend = 0.70
+		}
+		count := int(avg * (1.0 + noise) * weekend)
+		if count < 0 {
+			count = 0
+		}
+		if _, err := tx.Exec(`INSERT INTO skill_daily_metrics(ns,name,day,activations) VALUES(?,?,?,?)`,
+			ns, name, dayStr, count); err != nil {
+			return err
+		}
+	}
+	return nil
 }

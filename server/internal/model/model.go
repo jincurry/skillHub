@@ -144,6 +144,13 @@ type SkillFile struct {
 	UpdatedBy string    `json:"updatedBy"`
 }
 
+// TrendPoint is one row in the SkillDetail activation sparkline. The Day
+// is "YYYY-MM-DD" so the client can plot it without TZ acrobatics.
+type TrendPoint struct {
+	Day         string `json:"day"`
+	Activations int    `json:"activations"`
+}
+
 // ReviewFile is one file's snapshot inside a review request. BaseContent is
 // the same path's body in the previous approved review (empty if this is a
 // brand-new file or the skill has no prior approval). NewContent is what the

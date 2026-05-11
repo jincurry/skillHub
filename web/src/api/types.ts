@@ -53,6 +53,13 @@ export interface ReviewFile {
   changeKind: 'added' | 'modified' | 'deleted' | 'unchanged';
 }
 
+// TrendPoint is one row in the SkillDetail activation sparkline returned by
+// GET /skills/:ns/:name/trend?days=N. Day is "YYYY-MM-DD" UTC.
+export interface TrendPoint {
+  day: string;
+  activations: number;
+}
+
 export interface Comment {
   id: number;
   reviewId: number;

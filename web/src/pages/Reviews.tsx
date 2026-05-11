@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ClassificationTag } from '../components/Tags';
 import {
   IconDownload, IconChevronRight,
@@ -54,26 +54,56 @@ const URGENCY_BG: Record<Review['urgency'], { bg: string; color: string }> = {
   changes: { bg: 'var(--amber-bg)', color: 'var(--amber-text)' },
 };
 
+// Reviews supports two URL params so other pages can deep-link in:
+//   ?status=pending|approved|rejected|all   (default pending)
+//   ?mine=1                                  (only reviews where I'm author or reviewer)
+// The page mirrors any UI changes back to the URL so refresh / back keep state.
 export function Reviews() {
   const navigate = useNavigate();
-  const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const initialStatus = (() => {
+    const s = searchParams.get('status');
+    return s === 'approved' || s === 'rejected' || s === 'all' ? s : 'pending';
+  })() as 'pending' | 'approved' | 'rejected' | 'all';
+  const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>(initialStatus);
+  const [mineOnly, setMineOnly] = useState<boolean>(searchParams.get('mine') === '1');
+
   const all = useAsync(() => api.listReviews(), []);
   const stats = useAsync(() => api.reviewStats(), []);
+  const me = useAsync(() => api.me(), []);
+
+  // Keep the URL in sync with the local state. Drop the params back to
+  // defaults so /reviews stays clean when nothing is filtered.
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (filter !== 'pending') next.set('status', filter);
+    if (mineOnly) next.set('mine', '1');
+    setSearchParams(next, { replace: true });
+  }, [filter, mineOnly, setSearchParams]);
+
+  // "Mine" = I authored the request OR I'm in the reviewer slot. The Reviews
+  // payload already carries reviewers as a list of usernames, so this is a
+  // cheap client-side filter; no extra API.
+  const myUsername = me.data?.username ?? '';
+  const visibleAll = useMemo(() => {
+    const data = all.data ?? [];
+    if (!mineOnly || !myUsername) return data;
+    return data.filter((r) => r.author === myUsername || r.reviewers.includes(myUsername));
+  }, [all.data, mineOnly, myUsername]);
 
   const counts = useMemo(() => {
-    const data = all.data ?? [];
     return {
-      pending: data.filter((r) => r.status === 'pending').length,
-      approved: data.filter((r) => r.status === 'approved').length,
-      rejected: data.filter((r) => r.status === 'rejected').length,
-      all: data.length,
+      pending: visibleAll.filter((r) => r.status === 'pending').length,
+      approved: visibleAll.filter((r) => r.status === 'approved').length,
+      rejected: visibleAll.filter((r) => r.status === 'rejected').length,
+      all: visibleAll.length,
     };
-  }, [all.data]);
+  }, [visibleAll]);
 
   const filtered = useMemo(() => {
-    const data = all.data ?? [];
-    return filter === 'all' ? data : data.filter((r) => r.status === filter);
-  }, [all.data, filter]);
+    return filter === 'all' ? visibleAll : visibleAll.filter((r) => r.status === filter);
+  }, [visibleAll, filter]);
 
   return (
     <div className="content-inner">
@@ -83,6 +113,13 @@ export function Reviews() {
           <p className="page-subtitle">作为 maintainer，你需要审核即将发布的 Skill 版本。SLA 按密级区分：L1 24h / L2 48h / L3 72h。</p>
         </div>
         <div className="page-actions">
+          <button
+            className={`btn${mineOnly ? ' primary' : ''}`}
+            onClick={() => setMineOnly((v) => !v)}
+            title={mineOnly ? '当前只显示与我相关的审批' : '只看作为作者或审批人的记录'}
+          >
+            {mineOnly ? '✓ 我的视角' : '我的视角'}
+          </button>
           <button
             className="btn"
             onClick={() => exportReviewsCSV(filtered)}

@@ -16,15 +16,57 @@ import { coverBackground, avatarFallbackGradient } from '../lib/profile';
 // helpers
 // ---------------------------------------------------------------------------
 
-function ProfileStat({ label, value, sub, color = 'var(--primary)' }: {
-  label: string; value: string; sub?: string; color?: string;
+// ProfileStat is one cell in the header strip. `onClick` makes the whole
+// cell behave as a button; `onSubClick` lets the small "X 个 draft" / "X 个
+// 待我审" suffix navigate to a separate (usually more specific) target. We
+// stop propagation on the sub click so the cell's primary navigation
+// doesn't fire as well.
+function ProfileStat({ label, value, sub, color = 'var(--primary)', onClick, onSubClick }: {
+  label: string;
+  value: string;
+  sub?: string;
+  color?: string;
+  onClick?: () => void;
+  onSubClick?: () => void;
 }) {
+  const clickable = !!onClick;
   return (
-    <div style={{ padding: '14px 18px', borderRight: '1px solid var(--border)', flex: 1, minWidth: 0 }}>
+    <div
+      onClick={onClick}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={(e) => {
+        if (!clickable) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); }
+      }}
+      style={{
+        padding: '14px 18px', borderRight: '1px solid var(--border)',
+        flex: 1, minWidth: 0,
+        cursor: clickable ? 'pointer' : 'default',
+        transition: 'background 120ms',
+      }}
+      onMouseEnter={(e) => { if (clickable) (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-soft)'; }}
+      onMouseLeave={(e) => { if (clickable) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+    >
       <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginBottom: 4 }}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
         <span className="num" style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.1, color }}>{value}</span>
-        {sub && <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{sub}</span>}
+        {sub && (
+          onSubClick ? (
+            <span
+              onClick={(e) => { e.stopPropagation(); onSubClick(); }}
+              style={{
+                fontSize: 11.5, color: 'var(--primary)', cursor: 'pointer',
+                textDecoration: 'underline', textUnderlineOffset: 2,
+                textDecorationColor: 'transparent', transition: 'text-decoration-color 120ms',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLSpanElement).style.textDecorationColor = 'var(--primary)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLSpanElement).style.textDecorationColor = 'transparent'; }}
+            >{sub}</span>
+          ) : (
+            <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{sub}</span>
+          )
+        )}
       </div>
     </div>
   );
@@ -303,6 +345,8 @@ export function Profile() {
           label="发布的 Skills"
           value={String(stats.data?.published ?? '—')}
           sub={stats.data?.drafts ? `${stats.data.drafts} 个 draft` : undefined}
+          onClick={() => setTab('skills')}
+          onSubClick={stats.data?.drafts ? () => navigate('/workspace') : undefined}
         />
         <ProfileStat
           label="累计激活"
@@ -314,6 +358,8 @@ export function Profile() {
           value={String(stats.data?.reviewsCompleted ?? '—')}
           sub={stats.data?.pendingReviews ? `${stats.data.pendingReviews} 个待我审` : undefined}
           color="#f59e0b"
+          onClick={() => navigate('/reviews?status=approved&mine=1')}
+          onSubClick={stats.data?.pendingReviews ? () => navigate('/reviews?status=pending&mine=1') : undefined}
         />
         <ProfileStat
           label="收到的 ⭐"
@@ -324,6 +370,7 @@ export function Profile() {
           label="待我审批"
           value={String(stats.data?.pendingReviews ?? '—')}
           color="#dc2626"
+          onClick={() => navigate('/reviews?status=pending&mine=1')}
         />
       </div>
 
@@ -447,7 +494,7 @@ export function Profile() {
                           <div className="skill-name-text"><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{s.ns}/</span>{s.name}</div>
                         </div>
                       </td>
-                      <td><span className={`tag ${s.status === 'published' ? 'green' : s.status === 'review' ? 'amber' : s.status === 'yanked' ? 'red' : 'outline'}`}>{s.status}</span></td>
+                      <td><span className={`tag ${s.status === 'published' ? 'green' : s.status === 'review' ? 'amber' : s.status === 'yanked' ? 'red' : 'slate'}`}>{s.status}</span></td>
                       <td style={{ textAlign: 'right' }}><span className="mono num">v{s.version}</span></td>
                       <td className="num" style={{ textAlign: 'right', fontWeight: 500 }}>{s.activations > 0 ? s.activations.toLocaleString() : '—'}</td>
                     </tr>

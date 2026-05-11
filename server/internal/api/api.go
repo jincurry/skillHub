@@ -66,6 +66,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.GET("/skills/:ns/:name/validate", s.validateSkill)
 		auth.POST("/skills/:ns/:name/submit", s.submitForReview)
 		auth.GET("/skills/:ns/:name/versions", s.listVersions)
+		auth.GET("/skills/:ns/:name/trend", s.getSkillTrend)
 		auth.GET("/skills/:ns/:name/ratings", s.listRatings)
 		auth.POST("/skills/:ns/:name/ratings", s.rateSkill)
 		auth.POST("/skills/:ns/:name/yank", s.yankSkill)
@@ -327,6 +328,25 @@ func (s *Server) validateSkill(c *gin.Context) {
 
 func (s *Server) listVersions(c *gin.Context) {
 	out, err := s.store.ListSkillVersions(c.Param("ns"), c.Param("name"))
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, out)
+}
+
+// getSkillTrend serves the per-day activation series the SkillDetail
+// sparkline plots. Defaults to 30 days; clamps to [1, 365] inside the
+// store layer. Missing days come back as zero so the client can plot a
+// continuous line.
+func (s *Server) getSkillTrend(c *gin.Context) {
+	days := 30
+	if q := c.Query("days"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 {
+			days = n
+		}
+	}
+	out, err := s.store.GetSkillTrend(c.Param("ns"), c.Param("name"), days)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return

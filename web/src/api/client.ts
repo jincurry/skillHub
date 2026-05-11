@@ -1,4 +1,4 @@
-import type { Achievement, AIProvider, AIProviderRef, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, UpdateAIProviderRequest, UpdateMeRequest, UpsertPolicyRequest, ValidationReport } from './types';
+import type { Achievement, AIProvider, AIProviderRef, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpsertPolicyRequest, ValidationReport } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -108,6 +108,8 @@ export const api = {
     request<ValidationReport>(`/skills/${ns}/${name}/validate`),
   listVersions: (ns: string, name: string) =>
     request<SkillVersion[]>(`/skills/${ns}/${name}/versions`),
+  getSkillTrend: (ns: string, name: string, days = 30) =>
+    request<TrendPoint[]>(`/skills/${ns}/${name}/trend?days=${days}`),
 
   listFiles: (ns: string, name: string) =>
     request<SkillFile[]>(`/skills/${ns}/${name}/files`),

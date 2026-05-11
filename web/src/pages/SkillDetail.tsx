@@ -8,6 +8,7 @@ import {
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { RatingsPanel } from '../components/RatingsPanel';
+import { TrendChart } from '../components/TrendChart';
 import { renderMarkdown } from '../lib/markdown';
 import { fmtRelative } from '../lib/notify';
 import {
@@ -26,6 +27,12 @@ export function SkillDetail() {
   const auditLogs = useAsync(
     () => api.listAuditLogs({ target: `${ns}/${name}`, limit: 100 }),
     [ns, name],
+  );
+  // Only fetch trend when the health tab is active so we save a roundtrip
+  // for users who never open it.
+  const trend = useAsync(
+    () => tab === 'health' ? api.getSkillTrend(ns, name, 30) : Promise.resolve([]),
+    [tab, ns, name],
   );
 
   if (skill.loading) return <div className="content-inner"><div className="card"><div className="card-body">加载中...</div></div></div>;
@@ -218,8 +225,15 @@ export function SkillDetail() {
                 <div className="stat"><div className="stat-label">状态</div><div style={{ marginTop: 6 }}><StatusPill status={p.status} /></div></div>
               </div>
               <div className="card" style={{ marginTop: 'var(--gap)' }}>
-                <div className="card-body" style={{ fontSize: 12.5, color: 'var(--text-subtle)', lineHeight: 1.55 }}>
-                  趋势图表依赖后端时间序列接口，未实现。现仅呈现当前统计快照。
+                <div className="card-header">
+                  <h3 className="card-title">激活趋势 <span style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 400, marginLeft: 6 }}>近 30 天 · UTC</span></h3>
+                </div>
+                <div className="card-body">
+                  {trend.loading && <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
+                  {trend.error && <div style={{ fontSize: 12, color: 'var(--red-text)' }}>加载失败: {trend.error.message}</div>}
+                  {!trend.loading && !trend.error && (
+                    <TrendChart data={trend.data ?? []} height={220} />
+                  )}
                 </div>
               </div>
             </div>

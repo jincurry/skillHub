@@ -189,4 +189,18 @@ CREATE TABLE IF NOT EXISTS namespace_policies (
   updated_by     TEXT    NOT NULL DEFAULT '',
   PRIMARY KEY (ns, classification)
 );
+
+-- skill_daily_metrics: per-skill, per-day usage counters. The trend chart
+-- on SkillDetail reads this. Seeded with deterministic synthetic series
+-- derived from skills.activations + delta_pct so charts have meaningful
+-- shape until a real invocation pipeline writes here.
+CREATE TABLE IF NOT EXISTS skill_daily_metrics (
+  ns          TEXT    NOT NULL,
+  name        TEXT    NOT NULL,
+  day         TEXT    NOT NULL,        -- 'YYYY-MM-DD' (UTC)
+  activations INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (ns, name, day),
+  FOREIGN KEY (ns, name) REFERENCES skills(ns, name) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_metrics_day ON skill_daily_metrics(ns, name, day);
 `

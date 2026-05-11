@@ -322,13 +322,10 @@ a { color: inherit; text-decoration: none; }
 .tag.indigo { background: var(--primary-50); color: var(--primary-700); }
 .tag.orange { background: var(--orange-bg); color: var(--orange-text); }
 .tag .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.tag.outline {
-  background: transparent;
-  border: none;
-  color: var(--text-faint);
-  font-weight: 600;
-  padding: 0 2px;
-}
+/* `.tag.slate` is the explicit form of the default pill colour. Kept as a
+ * separate selector so call sites can ternary `green / amber / red / slate`
+ * symmetrically instead of having to omit the modifier for the slate case. */
+.tag.slate { background: var(--slate-bg); color: var(--slate-text); }
 
 /* Status pill */
 .status-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; color: var(--text-muted); }

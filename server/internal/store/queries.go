@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jincurry/skillhub/server/internal/model"
 )
@@ -699,4 +700,51 @@ func (s *Store) ListReviewFiles(reviewID int64) ([]model.ReviewFile, error) {
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+// GetSkillTrend returns one TrendPoint per day for the last `days` days, in
+// chronological order. Days that have no row in skill_daily_metrics are
+// filled in with 0 activations so the client can plot a continuous line
+// without gap-handling.
+func (s *Store) GetSkillTrend(ns, name string, days int) ([]model.TrendPoint, error) {
+	if days <= 0 {
+		days = 30
+	}
+	if days > 365 {
+		days = 365
+	}
+
+	// Pull whatever rows exist into a map keyed by day string. Done first so
+	// the loop below can do O(1) lookups while it walks the desired range.
+	rows, err := s.DB.Query(`
+		SELECT day, activations
+		FROM skill_daily_metrics
+		WHERE ns = ? AND name = ?
+		ORDER BY day DESC
+		LIMIT ?`, ns, name, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	by := make(map[string]int, days)
+	for rows.Next() {
+		var d string
+		var v int
+		if err := rows.Scan(&d, &v); err != nil {
+			return nil, err
+		}
+		by[d] = v
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	out := make([]model.TrendPoint, days)
+	for i := 0; i < days; i++ {
+		day := today.AddDate(0, 0, -(days - 1 - i))
+		key := day.Format("2006-01-02")
+		out[i] = model.TrendPoint{Day: key, Activations: by[key]}
+	}
+	return out, nil
 }
