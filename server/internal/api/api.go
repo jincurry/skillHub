@@ -101,6 +101,13 @@ func (s *Server) Routes() *gin.Engine {
 		adminAI.PATCH("/ai-providers/:id", s.updateAIProvider)
 		adminAI.DELETE("/ai-providers/:id", s.deleteAIProvider)
 		adminAI.POST("/ai-providers/:id/test", s.testAIProvider)
+
+		// Per-namespace approval policies. The hard-coded defaults still
+		// apply when no override row exists; PUT writes one, DELETE removes
+		// it ("reset to default").
+		adminAI.GET("/namespaces/:ns/policies", s.listNamespacePolicies)
+		adminAI.PUT("/namespaces/:ns/policies/:classification", s.upsertNamespacePolicy)
+		adminAI.DELETE("/namespaces/:ns/policies/:classification", s.deleteNamespacePolicy)
 	}
 	return r
 }

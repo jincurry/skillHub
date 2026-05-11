@@ -51,7 +51,10 @@ func (s *Store) UserRoleInNamespace(ns, user string) (string, error) {
 //     across all namespaces matching the same role priority (cross-team reviewers)
 //   - never include `author`
 func (s *Store) PickReviewersByPolicy(ns, author, classification string) ([]string, policy.Policy, error) {
-	pol := policy.ForClassification(classification)
+	pol, _, err := s.ResolvePolicy(ns, classification)
+	if err != nil {
+		return nil, pol, err
+	}
 
 	localMembers, err := s.ListNamespaceMembers(ns)
 	if err != nil {

@@ -469,10 +469,19 @@ func (s *Store) SubmitDraftForReview(ns, name, version, note, author string, rev
 	if _, err := tx.Exec(`UPDATE skills SET status='review', version=?, updated_at=CURRENT_TIMESTAMP WHERE ns=? AND name=?`, version, ns, name); err != nil {
 		return nil, err
 	}
+	// Resolve the SLA window from the active policy (per-namespace override
+	// if any, otherwise the global default for this classification). The
+	// previous hard-coded "72h" survived from before namespace_policies
+	// existed.
+	pol, _, err := s.ResolvePolicy(ns, classification)
+	if err != nil {
+		return nil, err
+	}
+	sla := fmt.Sprintf("%dh", pol.SLAHours)
 	revCSV := strings.Join(reviewers, ",")
 	res, err := tx.Exec(`INSERT INTO reviews(ns,skill_name,version,classification,author,reviewers_csv,status,urgency,sla,note)
 		VALUES(?,?,?,?,?,?,?,?,?,?)`,
-		ns, name, version, classification, author, revCSV, "pending", "ok", "72h", note)
+		ns, name, version, classification, author, revCSV, "pending", "ok", sla, note)
 	if err != nil {
 		return nil, err
 	}

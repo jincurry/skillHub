@@ -173,4 +173,20 @@ CREATE TABLE IF NOT EXISTS review_files (
   FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_review_files_review ON review_files(review_id);
+
+-- namespace_policies: per-namespace overrides for the approval policy that
+-- governs reviews of one classification (L1 / L2 / L3). When a row is absent
+-- the global default from policy.ForClassification applies. Slots is stored
+-- as a JSON array of {roles: [...], count: int}; we keep it text rather than
+-- normalising to a child table because it's tiny and we want atomic upserts.
+CREATE TABLE IF NOT EXISTS namespace_policies (
+  ns             TEXT    NOT NULL,
+  classification TEXT    NOT NULL,        -- 'L1' | 'L2' | 'L3'
+  mode           TEXT    NOT NULL,        -- 'parallel' | 'serial'
+  sla_hours      INTEGER NOT NULL,
+  slots_json     TEXT    NOT NULL,
+  updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by     TEXT    NOT NULL DEFAULT '',
+  PRIMARY KEY (ns, classification)
+);
 `

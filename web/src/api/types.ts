@@ -189,6 +189,29 @@ export interface PolicyPreview {
   suggested: string[];
 }
 
+// NamespacePolicy is one row in the admin policy editor: the effective
+// policy (resolved from the override row, or the global default) plus a
+// flag identifying which it is.
+export interface NamespacePolicy {
+  classification: 'L1' | 'L2' | 'L3';
+  mode: 'parallel' | 'serial';
+  slaHours: number;
+  slots: PolicySlot[];
+  isOverride: boolean;
+}
+
+export interface NamespacePoliciesResponse {
+  ns: string;
+  policies: NamespacePolicy[];
+}
+
+// UpsertPolicyRequest is the body for PUT /admin/namespaces/:ns/policies/:cls.
+export interface UpsertPolicyRequest {
+  mode: 'parallel' | 'serial';
+  slaHours: number;
+  slots: PolicySlot[];
+}
+
 export interface SkillVersion {
   id: number;
   ns: string;

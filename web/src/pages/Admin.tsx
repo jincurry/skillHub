@@ -5,6 +5,7 @@ import {
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { AIProviderModal } from '../components/AIProviderModal';
+import { NamespacePoliciesPanel } from '../components/NamespacePoliciesPanel';
 import type { AIProvider } from '../api/types';
 
 function Placeholder({ title, hint }: { title: string; hint: string }) {
@@ -45,7 +46,7 @@ export function Admin() {
       <div className="page-header">
         <div>
           <h1 className="page-title">管理后台</h1>
-          <p className="page-subtitle">仅限平台管理员可见。当前已实现命名空间与成员管理；其余模块标注为 P1 待实现。</p>
+          <p className="page-subtitle">仅限平台管理员可见。命名空间 / 成员 / 审批策略 / AI 模型已上线，平台健康度概览仍在规划。</p>
         </div>
       </div>
 
@@ -137,9 +138,10 @@ export function Admin() {
       )}
 
       {tab === 'policies' && (
-        <Placeholder
-          title="发布策略与合规规则"
-          hint="将提供 L3 密级双人审批、失败率自动撤回、Secret 扫描、包大小限制等可配置策略。当前仅支持后端代码内置的固定规则。"
+        <NamespacePoliciesPanel
+          ns={effectiveNs}
+          namespaces={namespaces.data ?? []}
+          onChangeNs={setMemberNs}
         />
       )}
 

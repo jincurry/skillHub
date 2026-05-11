@@ -1,4 +1,4 @@
-import type { Achievement, AIProvider, AIProviderRef, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, Me, MeStats, Namespace, NamespaceMember, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, UpdateAIProviderRequest, UpdateMeRequest, ValidationReport } from './types';
+import type { Achievement, AIProvider, AIProviderRef, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, UpdateAIProviderRequest, UpdateMeRequest, UpsertPolicyRequest, ValidationReport } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -164,6 +164,20 @@ export const api = {
   /** One-token ping against the upstream. Returns `{ok:true}` on success or throws. */
   testAIProvider: (id: number) =>
     request<{ ok: true; status: number }>(`/admin/ai-providers/${id}/test`, { method: 'POST' }),
+
+  // ---- Namespace approval policies (admin) ------------------------------
+  listNamespacePolicies: (ns: string) =>
+    request<NamespacePoliciesResponse>(`/admin/namespaces/${ns}/policies`),
+  upsertNamespacePolicy: (ns: string, classification: 'L1' | 'L2' | 'L3', body: UpsertPolicyRequest) =>
+    request<NamespacePoliciesResponse>(
+      `/admin/namespaces/${ns}/policies/${classification}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  deleteNamespacePolicy: (ns: string, classification: 'L1' | 'L2' | 'L3') =>
+    request<NamespacePoliciesResponse>(
+      `/admin/namespaces/${ns}/policies/${classification}`,
+      { method: 'DELETE' },
+    ),
 
   // ---- AI providers (any logged-in user) --------------------------------
   listAIProviderRefs: () => request<AIProviderRef[]>('/ai/providers'),
