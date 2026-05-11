@@ -88,6 +88,8 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/reviews/:id/decision", s.decideReview)
 		auth.GET("/reviews/:id/comments", s.listComments)
 		auth.POST("/reviews/:id/comments", s.addComment)
+		auth.POST("/reviews/:id/reviewers", s.addReviewer)
+		auth.DELETE("/reviews/:id/reviewers/:username", s.removeReviewer)
 		auth.GET("/reviews/:id/files", s.listReviewFiles)
 
 		auth.GET("/audit-logs", s.listAuditLogs)
@@ -589,6 +591,106 @@ func (s *Server) addComment(c *gin.Context) {
 		return
 	}
 	c.JSON(201, cm)
+}
+
+// canManageReviewers gates POST/DELETE on /reviews/:id/reviewers. We accept:
+//   - the review author (they invited the original set; adding more is fine)
+//   - an already-assigned reviewer (delegation: pull in a peer when stuck)
+//   - an owner or maintainer of the skill's namespace
+//   - a platform admin
+//
+// The check is intentionally loose for adds/removes — it's an org-internal
+// product and the audit log captures who did what.
+func (s *Server) canManageReviewers(user string, r *model.Review) (bool, error) {
+	if r == nil {
+		return false, nil
+	}
+	if r.Author == user {
+		return true, nil
+	}
+	for _, rv := range r.Reviewers {
+		if rv == user {
+			return true, nil
+		}
+	}
+	if u, err := s.store.GetUser(user); err == nil && u != nil && u.IsAdmin {
+		return true, nil
+	}
+	role, err := s.store.UserRoleInNamespace(r.Namespace, user)
+	if err != nil {
+		return false, err
+	}
+	return role == "owner" || role == "maintainer", nil
+}
+
+func (s *Server) addReviewer(c *gin.Context) {
+	id, ok := s.parseID(c)
+	if !ok {
+		return
+	}
+	r, err := s.store.GetReview(id)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if r == nil {
+		c.JSON(404, gin.H{"error": "review not found"})
+		return
+	}
+	allowed, err := s.canManageReviewers(s.currentUser(c), r)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(403, gin.H{"error": "需要作者、reviewer 或 namespace 维护者身份"})
+		return
+	}
+	var req struct {
+		Username string `json:"username" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	out, err := s.store.AddReviewer(id, req.Username, s.currentUser(c))
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, out)
+}
+
+func (s *Server) removeReviewer(c *gin.Context) {
+	id, ok := s.parseID(c)
+	if !ok {
+		return
+	}
+	username := c.Param("username")
+	r, err := s.store.GetReview(id)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if r == nil {
+		c.JSON(404, gin.H{"error": "review not found"})
+		return
+	}
+	allowed, err := s.canManageReviewers(s.currentUser(c), r)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(403, gin.H{"error": "需要作者、reviewer 或 namespace 维护者身份"})
+		return
+	}
+	out, err := s.store.RemoveReviewer(id, username, s.currentUser(c))
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, out)
 }
 
 func (s *Server) listAuditLogs(c *gin.Context) {

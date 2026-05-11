@@ -151,6 +151,14 @@ export const api = {
   listComments: (id: number | string) => request<Comment[]>(`/reviews/${id}/comments`),
   addComment: (id: number | string, body: string) =>
     request<Comment>(`/reviews/${id}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
+  addReviewer: (id: number | string, username: string) =>
+    request<Review>(`/reviews/${id}/reviewers`, {
+      method: 'POST', body: JSON.stringify({ username }),
+    }),
+  removeReviewer: (id: number | string, username: string) =>
+    request<Review>(`/reviews/${id}/reviewers/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
+    }),
   listReviewFiles: (id: number | string) => request<ReviewFile[]>(`/reviews/${id}/files`),
 
   listAuditLogs: (filter: AuditFilter = {}) => {

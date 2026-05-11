@@ -27,9 +27,52 @@ export function ReviewDetail() {
   const comments = useAsync(() => api.listComments(id), [id]);
   const files = useAsync(() => api.listReviewFiles(id), [id]);
   const me = useAsync(() => api.me(), []);
+  // Member list of the skill's namespace — used to populate the
+  // 添加审批人 dropdown. Fetched lazily because most viewers won't open
+  // the picker. We pass the ns explicitly once review.data loads so the
+  // first call doesn't fire with `undefined`.
+  const reviewNs = review.data?.ns;
+  const nsMembers = useAsync(
+    () => (reviewNs ? api.namespaceMembers(reviewNs) : Promise.resolve([])),
+    [reviewNs],
+  );
   const [newComment, setNewComment] = useState('');
   const [posting, setPosting] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [reviewerPick, setReviewerPick] = useState('');
+  const [reviewerFreeForm, setReviewerFreeForm] = useState('');
+  const [reviewerBusy, setReviewerBusy] = useState(false);
+
+  const addReviewer = async (username: string) => {
+    const u = username.trim();
+    if (!u) return;
+    setReviewerBusy(true);
+    try {
+      await api.addReviewer(id, u);
+      setReviewerPick('');
+      setReviewerFreeForm('');
+      review.reload();
+      window.dispatchEvent(new CustomEvent('reviews:changed'));
+    } catch (e) {
+      setActionMsg(`添加失败: ${(e as Error).message}`);
+    } finally {
+      setReviewerBusy(false);
+    }
+  };
+
+  const removeReviewer = async (username: string) => {
+    if (!window.confirm(`将 @${username} 从此审批移除?`)) return;
+    setReviewerBusy(true);
+    try {
+      await api.removeReviewer(id, username);
+      review.reload();
+      window.dispatchEvent(new CustomEvent('reviews:changed'));
+    } catch (e) {
+      setActionMsg(`移除失败: ${(e as Error).message}`);
+    } finally {
+      setReviewerBusy(false);
+    }
+  };
 
   const submit = async () => {
     if (!newComment.trim()) return;
@@ -93,8 +136,15 @@ export function ReviewDetail() {
   const myName = me.data?.username ?? '';
   const isAuthor = myName !== '' && r.author === myName;
   const isReviewer = myName !== '' && r.reviewers.includes(myName);
+  const isAdmin = me.data?.isAdmin === true;
   const isClosed = r.status !== 'pending';
   const canDecide = !isClosed && !isAuthor && isReviewer;
+  // Mirrors server canManageReviewers: author, an existing reviewer, or an
+  // admin may add/remove reviewers. (Backend additionally allows ns
+  // owner/maintainer — we can't tell that without an extra fetch, so we let
+  // the server enforce the rest and just hide the UI for users we know are
+  // disqualified.)
+  const canManageReviewers = !isClosed && (isAuthor || isReviewer || isAdmin);
   const disabledReason = isClosed ? '该审批已结束'
     : isAuthor ? '不能审批自己提交的请求'
     : !isReviewer ? '你不是这条审批的指派 reviewer'
@@ -243,15 +293,108 @@ export function ReviewDetail() {
             <div className="card">
               <div className="card-header"><h3 className="card-title">参与者</h3></div>
               <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {[{ u: r.author, role: '作者' }, ...r.reviewers.map((u) => ({ u, role: 'Reviewer' }))].map((p, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div className={`avatar sm bg-${(i % 5) + 1}`} style={{ width: 28, height: 28, fontSize: 12 }}>{p.u[0]?.toUpperCase()}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 500 }} className="mono">@{p.u}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{p.role}</div>
+                {/* Author row first — never removable. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div className="avatar sm bg-1" style={{ width: 28, height: 28, fontSize: 12 }}>
+                    {r.author[0]?.toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }} className="mono">@{r.author}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>作者</div>
+                  </div>
+                </div>
+
+                {r.reviewers.map((u, i) => (
+                  <div key={u} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div className={`avatar sm bg-${((i + 1) % 5) + 1}`} style={{ width: 28, height: 28, fontSize: 12 }}>
+                      {u[0]?.toUpperCase()}
                     </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500 }} className="mono">@{u}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>Reviewer</div>
+                    </div>
+                    {canManageReviewers && (
+                      <button
+                        onClick={() => removeReviewer(u)}
+                        disabled={reviewerBusy}
+                        title={`移除 @${u}`}
+                        style={{
+                          border: 'none', background: 'transparent', cursor: 'pointer',
+                          color: 'var(--text-faint)', padding: '2px 6px', borderRadius: 4,
+                          fontSize: 14, lineHeight: 1,
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--red-text)'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-faint)'; }}
+                      >×</button>
+                    )}
                   </div>
                 ))}
+
+                {canManageReviewers && (() => {
+                  // Candidates = ns members minus author, current reviewers, and
+                  // the system bot. We don't filter by ns_role on purpose —
+                  // sometimes the right reviewer is a 'member' or 'reviewer'
+                  // tier user, not a maintainer.
+                  const taken = new Set<string>([r.author, ...r.reviewers, 'system']);
+                  const candidates = (nsMembers.data ?? [])
+                    .filter((m) => !taken.has(m.username))
+                    .map((m) => m.username);
+                  return (
+                    <div style={{
+                      marginTop: 6, paddingTop: 10, borderTop: '1px solid var(--border)',
+                      display: 'flex', flexDirection: 'column', gap: 6,
+                    }}>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>添加审批人</div>
+                      {candidates.length > 0 && (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <select
+                            className="input"
+                            value={reviewerPick}
+                            onChange={(e) => setReviewerPick(e.target.value)}
+                            disabled={reviewerBusy}
+                            style={{ flex: 1, fontSize: 12.5 }}
+                          >
+                            <option value="">— 选择 {r.ns} 成员 —</option>
+                            {candidates.map((u) => (
+                              <option key={u} value={u}>@{u}</option>
+                            ))}
+                          </select>
+                          <button
+                            className="btn sm primary"
+                            onClick={() => addReviewer(reviewerPick)}
+                            disabled={reviewerBusy || !reviewerPick}
+                          >添加</button>
+                        </div>
+                      )}
+                      {candidates.length === 0 && !nsMembers.loading && (
+                        <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
+                          {r.ns} 内已无可邀请成员
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input
+                          className="input"
+                          placeholder="或输入跨团队用户名..."
+                          value={reviewerFreeForm}
+                          onChange={(e) => setReviewerFreeForm(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && reviewerFreeForm.trim()) {
+                              e.preventDefault();
+                              void addReviewer(reviewerFreeForm);
+                            }
+                          }}
+                          disabled={reviewerBusy}
+                          style={{ flex: 1, fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace" }}
+                        />
+                        <button
+                          className="btn sm"
+                          onClick={() => addReviewer(reviewerFreeForm)}
+                          disabled={reviewerBusy || !reviewerFreeForm.trim()}
+                        >添加</button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
