@@ -27,7 +27,12 @@ const NAV_ITEMS: NavItem[] = [
 function Sidebar() {
   const { data: me } = useAsync(() => api.me());
   const { data: pendingReviews } = useAsync(() => api.listReviews('pending'));
-  const pendingCount = pendingReviews?.length ?? 0;
+  // The "审批中心" badge should reflect things I can actually act on, not
+  // the platform-wide queue. We count reviews where I'm an assigned
+  // reviewer; author-only rows are excluded because I can't self-approve.
+  const myName = me?.username ?? '';
+  const pendingCount = myName === '' ? 0
+    : (pendingReviews ?? []).filter((r) => r.reviewers.includes(myName)).length;
   // Unread notifications drive the workspace nav badge. Same shared store
   // backs the topbar bell and the Workspace feed, so all three update in
   // lockstep when the user clicks "mark read" anywhere.

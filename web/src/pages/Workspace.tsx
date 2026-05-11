@@ -185,8 +185,16 @@ export function Workspace() {
   const notifStore = useNotifStore();
   const pending = useAsync(() => api.listReviews('pending'), []);
 
+  // Filter the platform-wide pending queue down to "things I can act on".
+  // Authoring my own request shouldn't count as 待我审批 — I can't approve
+  // my own work. The greeting / stat / feed all key off this filtered list.
+  const myName = me.data?.username ?? '';
+  const myPendingReviews = (pending.data ?? []).filter(
+    (r) => myName !== '' && r.reviewers.includes(myName),
+  );
+
   const draftCount = drafts.data?.length ?? 0;
-  const pendingCount = pending.data?.length ?? 0;
+  const pendingCount = myPendingReviews.length;
   const hour = new Date().getHours();
   const greetWord = hour < 5 ? '夜深了' : hour < 12 ? '早上好' : hour < 14 ? '中午好' : hour < 18 ? '下午好' : '晚上好';
   const greeting = me.data ? `${greetWord},${me.data.display.split(' ')[0]} 👋` : `${greetWord} 👋`;
@@ -198,7 +206,7 @@ export function Workspace() {
   const avgRating = ratedSkills.length
     ? ratedSkills.reduce((a, s) => a + s.rating, 0) / ratedSkills.length
     : 0;
-  const overdueReviews = (pending.data ?? []).filter((r) => r.urgency === 'overdue').length;
+  const overdueReviews = myPendingReviews.filter((r) => r.urgency === 'overdue').length;
 
   const [notifFilter, setNotifFilter] = useState<NotifFilter>('all');
   const filteredNotifs = filterAndSort(notifStore.items, notifFilter);
@@ -350,7 +358,12 @@ export function Workspace() {
               <a style={{ fontSize: 12, color: 'var(--primary)', cursor: 'pointer' }} onClick={() => navigate('/reviews')}>全部 →</a>
             </div>
             <div className="card-body flush">
-              {pending.data?.map((r) => <PendingReviewItem key={r.id} r={r} />)}
+              {myPendingReviews.length === 0 && (
+                <div style={{ padding: 18, fontSize: 13, color: 'var(--text-subtle)', textAlign: 'center' }}>
+                  暂无待你处理的审批 🎉
+                </div>
+              )}
+              {myPendingReviews.map((r) => <PendingReviewItem key={r.id} r={r} />)}
             </div>
           </div>
 

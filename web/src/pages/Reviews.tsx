@@ -67,7 +67,11 @@ export function Reviews() {
     return s === 'approved' || s === 'rejected' || s === 'all' ? s : 'pending';
   })() as 'pending' | 'approved' | 'rejected' | 'all';
   const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>(initialStatus);
-  const [mineOnly, setMineOnly] = useState<boolean>(searchParams.get('mine') === '1');
+  // mineOnly defaults to true so the entry-from-sidebar experience shows
+  // actionable items (where I'm author or assigned reviewer), not the
+  // platform-wide queue. Pass ?mine=0 to opt into the full list view —
+  // this is useful for admins/maintainers auditing other namespaces.
+  const [mineOnly, setMineOnly] = useState<boolean>(searchParams.get('mine') !== '0');
 
   const all = useAsync(() => api.listReviews(), []);
   const stats = useAsync(() => api.reviewStats(), []);
@@ -78,7 +82,9 @@ export function Reviews() {
   useEffect(() => {
     const next = new URLSearchParams();
     if (filter !== 'pending') next.set('status', filter);
-    if (mineOnly) next.set('mine', '1');
+    // mineOnly is the default; only persist the opt-out so /reviews stays
+    // clean for the common case.
+    if (!mineOnly) next.set('mine', '0');
     setSearchParams(next, { replace: true });
   }, [filter, mineOnly, setSearchParams]);
 
