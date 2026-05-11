@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ClassificationTag, StatusPill } from '../components/Tags';
 import {
   IconPlus, IconSearch, IconChevronDown, IconGrid, IconList,
@@ -96,11 +96,43 @@ function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
 
 export function Browse() {
   const navigate = useNavigate();
+  // URL is the source of truth for namespace filter so the global search /
+  // sidebar quick-jump (/skills?ns=foo) lands on a pre-filtered view.
+  // Multiple `ns` params are supported, e.g. /skills?ns=foo&ns=bar.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const nsFromUrl = useMemo(
+    () => new Set(searchParams.getAll('ns')),
+    [searchParams],
+  );
   const [view, setView] = useState<'grid' | 'list'>('grid');
-  const [selectedNs, setSelectedNs] = useState<Set<string>>(new Set());
+  const [selectedNs, setSelectedNs] = useState<Set<string>>(nsFromUrl);
   const [selectedClass, setSelectedClass] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<Set<string>>(new Set());
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+
+  // External URL → state: when the user clicks a namespace in the command
+  // palette while already on /skills, react-router updates the query but not
+  // the component state. We diff against the current selection to avoid
+  // touching state when the two are already in sync.
+  useEffect(() => {
+    const current = Array.from(selectedNs).sort().join(',');
+    const incoming = Array.from(nsFromUrl).sort().join(',');
+    if (current !== incoming) setSelectedNs(nsFromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nsFromUrl]);
+
+  // State → URL: keep the address bar reflecting the active namespace filter
+  // so the URL is shareable / bookmarkable. We use replace to avoid filling
+  // history with every toggle.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('ns');
+    Array.from(selectedNs).sort().forEach((n) => next.append('ns', n));
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNs]);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('updated');
   const [sortOpen, setSortOpen] = useState(false);
