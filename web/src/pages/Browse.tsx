@@ -2,21 +2,20 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ClassificationTag, StatusPill } from '../components/Tags';
 import {
-  IconBookmark, IconPlus, IconSearch, IconChevronDown, IconGrid, IconList,
-  IconClock, IconStar, IconFire, IconCopy,
+  IconPlus, IconSearch, IconChevronDown, IconGrid, IconList,
+  IconStar, IconFire,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { openCreateSkill } from '../components/CreateSkillModal';
 import type { Skill } from '../api/types';
 
-function copyInstallCommand(s: Skill): Promise<void> {
-  const cmd = `skillhub install ${s.ns}/${s.name}@${s.version}`;
-  if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(cmd);
-  }
-  return Promise.resolve();
-}
+type SortKey = 'updated' | 'activations' | 'rating';
+const SORT_LABELS: Record<SortKey, string> = {
+  updated: '最近更新',
+  activations: '激活量',
+  rating: '评分',
+};
 
 function FilterCheckbox({ checked, onChange, label, count }: {
   checked: boolean; onChange: (next: boolean) => void; label: ReactNode; count?: number;
@@ -37,13 +36,6 @@ function FilterCheckbox({ checked, onChange, label, count }: {
 }
 
 function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
-  const [copied, setCopied] = useState(false);
-  const onCopy = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    await copyInstallCommand(s);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  };
   return (
     <div className="skill-card" onClick={() => onOpen(s)}>
       <div className="skill-card-head">
@@ -96,10 +88,7 @@ function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
       </div>
 
       <div className="skill-card-actions" onClick={(e) => e.stopPropagation()}>
-        <button className="btn sm" onClick={() => onOpen(s)}>查看详情</button>
-        <button className="btn sm primary" onClick={onCopy}>
-          <IconCopy size={12} /> {copied ? '已复制' : '复制安装命令'}
-        </button>
+        <button className="btn sm primary" onClick={() => onOpen(s)}>查看详情</button>
       </div>
     </div>
   );
@@ -113,13 +102,15 @@ export function Browse() {
   const [selectedStatus, setSelectedStatus] = useState<Set<string>>(new Set());
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortKey>('updated');
+  const [sortOpen, setSortOpen] = useState(false);
 
   const namespaces = useAsync(() => api.namespaces(), []);
   const skills = useAsync(() => api.listSkills(), []);
 
   const filtered = useMemo(() => {
     const all = skills.data ?? [];
-    return all.filter((s) => {
+    const out = all.filter((s) => {
       if (selectedNs.size && !selectedNs.has(s.ns)) return false;
       if (selectedClass.size && !selectedClass.has(s.classification)) return false;
       if (selectedStatus.size && !selectedStatus.has(s.status)) return false;
@@ -130,7 +121,16 @@ export function Browse() {
       }
       return true;
     });
-  }, [skills.data, selectedNs, selectedClass, selectedStatus, selectedTags, search]);
+    out.sort((a, b) => {
+      switch (sort) {
+        case 'activations': return b.activations - a.activations;
+        case 'rating':      return b.rating - a.rating;
+        case 'updated':
+        default:            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      }
+    });
+    return out;
+  }, [skills.data, selectedNs, selectedClass, selectedStatus, selectedTags, search, sort]);
 
   const openSkill = (s: Skill) => navigate(`/skills/${s.ns}/${s.name}`);
   const toggle = (set: Set<string>, setter: (n: Set<string>) => void, id: string) => {
@@ -166,7 +166,6 @@ export function Browse() {
           <p className="page-subtitle">在公司内部 {skills.data?.length ?? '...'} 个 skill 中找到你需要的能力 — 按命名空间、密级、标签筛选。</p>
         </div>
         <div className="page-actions">
-          <button className="btn"><IconBookmark size={14} /> 我的收藏</button>
           <button className="btn primary" onClick={openCreateSkill}><IconPlus size={14} /> 创建 Skill</button>
         </div>
       </div>
@@ -223,9 +222,25 @@ export function Browse() {
               <span className="icon-left"><IconSearch size={15} /></span>
               <input className="input with-icon" placeholder="搜索 skill 名称、描述、标签..." value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            <button className="dropdown" style={{ height: 36 }}>
-              排序: <strong style={{ color: 'var(--text)' }}>相关度</strong> <IconChevronDown size={12} />
-            </button>
+            <div style={{ position: 'relative' }}>
+              <button className="dropdown" style={{ height: 36 }} onClick={() => setSortOpen((v) => !v)}>
+                排序: <strong style={{ color: 'var(--text)' }}>{SORT_LABELS[sort]}</strong> <IconChevronDown size={12} />
+              </button>
+              {sortOpen && (
+                <>
+                  <div onClick={() => setSortOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 49 }} />
+                  <div style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 50, minWidth: 160, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 8px 20px rgba(15,23,42,0.12)', overflow: 'hidden' }}>
+                    {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+                      <div key={k} onClick={() => { setSort(k); setSortOpen(false); }} style={{
+                        padding: '8px 12px', fontSize: 13, cursor: 'pointer',
+                        background: sort === k ? 'var(--primary-50, rgba(79,70,229,0.08))' : 'transparent',
+                        color: sort === k ? 'var(--primary-700, var(--primary))' : 'var(--text)',
+                      }}>{SORT_LABELS[k]}</div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
             <div className="seg">
               <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')}><IconGrid size={13} /> 网格</button>
               <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><IconList size={13} /> 列表</button>
@@ -234,7 +249,6 @@ export function Browse() {
 
           <div className="browse-meta">
             <span>共 <strong style={{ color: 'var(--text)' }} className="num">{filtered.length}</strong> 个 skill</span>
-            <span><IconClock size={12} stroke={2} /> 实时数据</span>
           </div>
 
           {skills.loading && <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>加载中...</div></div>}
@@ -255,7 +269,7 @@ export function Browse() {
                       <th style={{ textAlign: 'right' }}>评分</th>
                       <th style={{ textAlign: 'right' }}>激活/周</th>
                       <th style={{ textAlign: 'right' }}>版本</th>
-                      <th>更新</th><th></th>
+                      <th>更新</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -276,15 +290,6 @@ export function Browse() {
                         <td className="num" style={{ textAlign: 'right', fontWeight: 500 }}>{s.activations.toLocaleString()}</td>
                         <td style={{ textAlign: 'right' }}><span className="mono">v{s.version}</span></td>
                         <td style={{ color: 'var(--text-subtle)', fontSize: 12.5 }}>{new Date(s.updatedAt).toLocaleDateString()}</td>
-                        <td>
-                          <button
-                            className="btn sm ghost"
-                            title="复制安装命令"
-                            onClick={(e) => { e.stopPropagation(); void copyInstallCommand(s); }}
-                          >
-                            <IconCopy size={12} />
-                          </button>
-                        </td>
                       </tr>
                     ))}
                   </tbody>

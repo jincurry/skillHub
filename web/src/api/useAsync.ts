@@ -5,6 +5,8 @@ export interface AsyncState<T> {
   loading: boolean;
   error: Error | null;
   reload: () => void;
+  /** Locally mutate the cached value (e.g. for optimistic updates). */
+  set: (next: T | null | ((prev: T | null) => T | null)) => void;
 }
 
 export function useAsync<T>(fn: () => Promise<T>, deps: ReadonlyArray<unknown> = []): AsyncState<T> {
@@ -28,5 +30,11 @@ export function useAsync<T>(fn: () => Promise<T>, deps: ReadonlyArray<unknown> =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
 
-  return { data, loading, error, reload: () => setTick((t) => t + 1) };
+  return {
+    data,
+    loading,
+    error,
+    reload: () => setTick((t) => t + 1),
+    set: (next) => setData((prev) => (typeof next === 'function' ? (next as (p: T | null) => T | null)(prev) : next)),
+  };
 }

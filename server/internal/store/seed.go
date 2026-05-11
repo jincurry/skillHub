@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,9 +38,13 @@ func (s *Store) seedIfEmpty() error {
 		return err
 	}
 	for _, u := range users {
-		if _, err := tx.Exec(`INSERT INTO users(username,display,role,team,password_hash,email,bio,location)
-			VALUES(?,?,?,?,?,?,?,?)`,
-			u.username, u.display, u.role, "platform-team", defaultHash, u.email, u.bio, u.location); err != nil {
+		isAdmin := 0
+		if u.username == "alice" {
+			isAdmin = 1 // bootstrap admin so AI provider config is reachable
+		}
+		if _, err := tx.Exec(`INSERT INTO users(username,display,role,team,password_hash,email,bio,location,is_admin)
+			VALUES(?,?,?,?,?,?,?,?,?)`,
+			u.username, u.display, u.role, "platform-team", defaultHash, u.email, u.bio, u.location, isAdmin); err != nil {
 			return err
 		}
 	}
@@ -171,33 +176,46 @@ func (s *Store) seedIfEmpty() error {
 		{"finance-team", "expense-validate", "0.5.0", "L3", "diana", "soon", "2h", "L3 密级首次发布", []string{"alice", "charlie", "frank"}},
 		{"security-team", "auth-audit", "1.7.3", "L3", "charlie", "ok", "48h", "修复 误报", []string{"alice", "bob"}},
 	}
+	// Track inserted review ids by "ns/name" so we can wire notifications below
+	// to actual reviews instead of hard-coding ids.
+	reviewIDs := map[string]int64{}
 	for _, r := range reviews {
-		if _, err := tx.Exec(`
+		res, err := tx.Exec(`
 			INSERT INTO reviews(ns,skill_name,version,classification,author,reviewers_csv,status,urgency,sla,note,submitted_at)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 			r.ns, r.name, r.version, r.class, r.author, strings.Join(r.reviewers, ","),
 			"pending", r.urgency, r.sla, r.note, time.Now().Add(-12*time.Hour),
-		); err != nil {
+		)
+		if err != nil {
 			return err
+		}
+		if id, err := res.LastInsertId(); err == nil {
+			reviewIDs[r.ns+"/"+r.name] = id
 		}
 	}
 
+	reviewRef := func(key string) string {
+		if id, ok := reviewIDs[key]; ok {
+			return strconv.FormatInt(id, 10)
+		}
+		return ""
+	}
 	notifs := []struct {
-		kind, body string
-		unread     bool
+		kind, body, targetKind, targetRef string
+		unread                            bool
 	}{
-		{"review", "你的 platform-team/go-code-review v1.3.0 已请求 @bob @charlie 审批", true},
-		{"comment", "@charlie 在 sre-team/incident-postmortem 留下了 2 条评论", true},
-		{"publish", "data-team/csv-import v2.0.1 已成功发布", false},
-		{"warn", "security-team/auth-audit 24h 成功率下降到 92%", true},
+		{"review", "你的 platform-team/go-code-review v1.3.0 已请求 @bob @charlie 审批", "review", reviewRef("platform-team/go-code-review"), true},
+		{"comment", "@charlie 在 sre-team/incident-postmortem 留下了 2 条评论", "review", reviewRef("sre-team/incident-postmortem"), true},
+		{"publish", "data-team/csv-import v2.0.1 已成功发布", "skill", "data-team/csv-import", false},
+		{"warn", "security-team/auth-audit 24h 成功率下降到 92%", "skill", "security-team/auth-audit", true},
 	}
 	for _, n := range notifs {
 		u := 0
 		if n.unread {
 			u = 1
 		}
-		if _, err := tx.Exec(`INSERT INTO notifications(user,kind,body,unread,created_at) VALUES(?,?,?,?,?)`,
-			"alice", n.kind, n.body, u, time.Now().Add(-time.Hour)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO notifications(user,kind,target_kind,target_ref,body,unread,created_at) VALUES(?,?,?,?,?,?,?)`,
+			"alice", n.kind, n.targetKind, n.targetRef, n.body, u, time.Now().Add(-time.Hour)); err != nil {
 			return err
 		}
 	}

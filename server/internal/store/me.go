@@ -30,12 +30,40 @@ func (s *Store) UpdateMe(username string, req model.UpdateMeRequest) (*model.Me,
 		sets = append(sets, "location = ?")
 		args = append(args, strings.TrimSpace(*req.Location))
 	}
+	if req.CoverPreset != nil {
+		sets = append(sets, "cover_preset = ?")
+		args = append(args, strings.TrimSpace(*req.CoverPreset))
+	}
+	if req.CoverFrom != nil {
+		sets = append(sets, "cover_from = ?")
+		args = append(args, strings.TrimSpace(*req.CoverFrom))
+	}
+	if req.CoverTo != nil {
+		sets = append(sets, "cover_to = ?")
+		args = append(args, strings.TrimSpace(*req.CoverTo))
+	}
 	if len(sets) == 0 {
 		return s.GetUser(username)
 	}
 	args = append(args, username)
 	q := "UPDATE users SET " + strings.Join(sets, ", ") + " WHERE username = ?"
 	res, err := s.DB.Exec(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, errors.New("user not found")
+	}
+	_, _ = s.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
+		username, "update_profile", "@"+username, "127.0.0.1")
+	return s.GetUser(username)
+}
+
+// SetAvatarURL updates only the avatar_url column on a user, used by the
+// avatar upload handler. An empty string clears the column (back to gradient
+// fallback). Writes an audit log entry so changes are visible in the trail.
+func (s *Store) SetAvatarURL(username, url string) (*model.Me, error) {
+	res, err := s.DB.Exec(`UPDATE users SET avatar_url = ? WHERE username = ?`, url, username)
 	if err != nil {
 		return nil, err
 	}

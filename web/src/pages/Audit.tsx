@@ -1,18 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
-  IconDownload, IconExternal, IconSearch, IconClock,
+  IconDownload, IconSearch, IconClock,
 } from '../components/Icons';
 import { api } from '../api/client';
+import { AUDIT_ACTION_COLOR } from '../lib/audit';
 import type { AuditLog } from '../api/types';
-
-const ACTION_COLOR: Record<string, string> = {
-  publish: 'green', yank: 'red', deprecated: 'amber',
-  approve_review: 'green', reject_review: 'red', request_changes: 'amber',
-  submit_review: 'blue', create_draft: 'blue', create_namespace: 'indigo',
-  add_maintainer: 'indigo', remove_maintainer: 'amber',
-  activate: '', update_settings: 'amber', rotate_key: 'amber',
-  update_profile: 'blue',
-};
 
 function csvEscape(s: string): string {
   if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
@@ -43,8 +36,10 @@ function exportCSV(rows: AuditLog[]) {
 }
 
 export function Audit() {
-  const [q, setQ] = useState('');
-  const [debounced, setDebounced] = useState('');
+  const [params] = useSearchParams();
+  const initialTarget = params.get('target') ?? '';
+  const [q, setQ] = useState(initialTarget);
+  const [debounced, setDebounced] = useState(initialTarget);
   const [actor, setActor] = useState('');
   const [action, setAction] = useState('');
   const [data, setData] = useState<AuditLog[]>([]);
@@ -83,13 +78,12 @@ export function Audit() {
       <div className="page-header">
         <div>
           <h1 className="page-title">审计日志</h1>
-          <p className="page-subtitle">所有 skill 操作的不可变记录,默认保留 90 天,合规事件保留 7 年。</p>
+          <p className="page-subtitle">记录所有 skill 生命周期与审批动作，可按用户 / 动作 / 关键字检索。仅读，不可修改。</p>
         </div>
         <div className="page-actions">
           <button className="btn" onClick={() => exportCSV(data)} disabled={data.length === 0}>
             <IconDownload size={14} /> 导出 CSV
           </button>
-          <button className="btn primary"><IconExternal size={14} /> SIEM 接入</button>
         </div>
       </div>
 
@@ -150,7 +144,7 @@ export function Audit() {
             <div key={e.id} className="log-row">
               <span className="ts">{new Date(e.createdAt).toLocaleString()}</span>
               <span><span className="mono" style={{ fontSize: 11.5, color: e.actor === 'system' ? 'var(--text-faint)' : 'var(--primary)' }}>@{e.actor}</span></span>
-              <span><span className={`tag ${ACTION_COLOR[e.action] || ''}`}>{e.action}</span></span>
+              <span><span className={`tag ${AUDIT_ACTION_COLOR[e.action] || ''}`}>{e.action}</span></span>
               <span><span className="target">{e.target}</span> <span className="mono" style={{ color: 'var(--text-faint)', fontSize: 11 }}>{e.version}</span></span>
               <span className="ip">{e.ip}</span>
             </div>

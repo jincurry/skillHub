@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jincurry/skillhub/server/internal/model"
@@ -259,8 +260,8 @@ func (s *Store) DecideReview(id int64, decision, note, actor string) error {
 				body += "：" + note
 			}
 		}
-		if _, err := tx.Exec(`INSERT INTO notifications(user,kind,body) VALUES(?,?,?)`,
-			author, notifKind, body); err != nil {
+		if _, err := tx.Exec(`INSERT INTO notifications(user,kind,target_kind,target_ref,body) VALUES(?,?,?,?,?)`,
+			author, notifKind, "review", strconv.FormatInt(id, 10), body); err != nil {
 			return err
 		}
 	}
@@ -308,7 +309,8 @@ func (s *Store) AddComment(reviewID int64, author, body string) (*model.Comment,
 				continue
 			}
 			seen[p] = true
-			if _, err := tx.Exec(`INSERT INTO notifications(user,kind,body) VALUES(?,?,?)`, p, "comment", notifBody); err != nil {
+			if _, err := tx.Exec(`INSERT INTO notifications(user,kind,target_kind,target_ref,body) VALUES(?,?,?,?,?)`,
+				p, "comment", "review", strconv.FormatInt(reviewID, 10), notifBody); err != nil {
 				return nil, err
 			}
 		}
@@ -377,7 +379,8 @@ func (s *Store) ListAuditLogs(f AuditFilter) ([]model.AuditLog, error) {
 }
 
 func (s *Store) ListNotifications(user string) ([]model.Notification, error) {
-	rows, err := s.DB.Query(`SELECT id,kind,body,unread,created_at FROM notifications WHERE user=? ORDER BY created_at DESC LIMIT 50`, user)
+	rows, err := s.DB.Query(`SELECT id,kind,body,COALESCE(target_kind,''),COALESCE(target_ref,''),unread,created_at
+		FROM notifications WHERE user=? ORDER BY created_at DESC LIMIT 50`, user)
 	if err != nil {
 		return nil, err
 	}
@@ -386,7 +389,7 @@ func (s *Store) ListNotifications(user string) ([]model.Notification, error) {
 	for rows.Next() {
 		var n model.Notification
 		var unread int
-		if err := rows.Scan(&n.ID, &n.Kind, &n.Body, &unread, &n.CreatedAt); err != nil {
+		if err := rows.Scan(&n.ID, &n.Kind, &n.Body, &n.TargetKind, &n.TargetRef, &unread, &n.CreatedAt); err != nil {
 			return nil, err
 		}
 		n.Unread = unread != 0
@@ -482,12 +485,21 @@ func (s *Store) SubmitDraftForReview(ns, name, version, note, author string, rev
 		ns, name, version, "review", author, note, id); err != nil {
 		return nil, err
 	}
+	// Snapshot the file bundle the author is asking reviewers to look at,
+	// alongside the body of each path in the previous approved review (if
+	// any). The diff view reads this back; subsequent edits to skill_files
+	// won't change what the reviewer sees.
+	if err := snapshotReviewFiles(tx, id, ns, name); err != nil {
+		return nil, err
+	}
 	notifBody := "@" + author + " 请求审批 " + ns + "/" + name + " v" + version
+	reviewRef := strconv.FormatInt(id, 10)
 	for _, rv := range reviewers {
 		if rv == "" || rv == author {
 			continue
 		}
-		if _, err := tx.Exec(`INSERT INTO notifications(user,kind,body) VALUES(?,?,?)`, rv, "review", notifBody); err != nil {
+		if _, err := tx.Exec(`INSERT INTO notifications(user,kind,target_kind,target_ref,body) VALUES(?,?,?,?,?)`,
+			rv, "review", "review", reviewRef, notifBody); err != nil {
 			return nil, err
 		}
 	}
@@ -503,17 +515,39 @@ func (s *Store) GetUser(username string) (*model.Me, error) {
 	// type to TEXT and breaks the scan.
 	row := s.DB.QueryRow(`SELECT username,display,role,team,
 		COALESCE(email,''),COALESCE(bio,''),COALESCE(location,''),
+		COALESCE(avatar_url,''),COALESCE(cover_preset,'sunset'),
+		COALESCE(cover_from,''),COALESCE(cover_to,''),
+		COALESCE(is_admin,0),
 		joined_at
 		FROM users WHERE username=?`, username)
 	var u model.Me
+	var isAdmin int
 	if err := row.Scan(&u.Username, &u.Display, &u.Role, &u.Team,
-		&u.Email, &u.Bio, &u.Location, &u.JoinedAt); err != nil {
+		&u.Email, &u.Bio, &u.Location,
+		&u.AvatarURL, &u.CoverPreset, &u.CoverFrom, &u.CoverTo,
+		&isAdmin,
+		&u.JoinedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
 	}
+	u.IsAdmin = isAdmin == 1
 	return &u, nil
+}
+
+// IsAdmin reports whether the user has the system-wide admin flag set.
+// Used by the requireAdmin middleware to gate AI provider configuration.
+func (s *Store) IsAdmin(username string) (bool, error) {
+	var n int
+	err := s.DB.QueryRow(`SELECT COALESCE(is_admin,0) FROM users WHERE username = ?`, username).Scan(&n)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
 // SetSkillLifecycleStatus transitions a skill into a non-versioning lifecycle
@@ -545,8 +579,115 @@ func (s *Store) SetSkillLifecycleStatus(ns, name, newStatus, actor, reason strin
 	if reason != "" {
 		body += "：" + reason
 	}
-	if _, err := tx.Exec(`INSERT INTO notifications(user,kind,body,unread) VALUES(?,?,?,1)`, author, "warn", body); err != nil {
+	if _, err := tx.Exec(`INSERT INTO notifications(user,kind,target_kind,target_ref,body,unread) VALUES(?,?,?,?,?,1)`,
+		author, "warn", "skill", ns+"/"+name, body); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// snapshotReviewFiles writes one row per file in the skill bundle into
+// review_files, capturing both the body the author is submitting *and* the
+// body of the same path in the most recent approved/published review (if
+// any). Runs inside the SubmitDraftForReview transaction so the snapshot is
+// atomic with the review row creation.
+//
+// The "previous approved" lookup is intentionally simple: we take the newest
+// review for (ns, name) whose status is "approved" or "closed". That covers
+// the lifecycle: a published version is reachable via its old review's
+// snapshot, and never-published skills correctly produce empty base content.
+func snapshotReviewFiles(tx *sql.Tx, reviewID int64, ns, name string) error {
+	// Step 1: resolve the previous review id (might be 0 if never approved).
+	var prevID int64
+	err := tx.QueryRow(`
+		SELECT id FROM reviews
+		WHERE ns = ? AND skill_name = ? AND status IN ('approved','closed') AND id < ?
+		ORDER BY id DESC LIMIT 1
+	`, ns, name, reviewID).Scan(&prevID)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	prevContents := map[string]string{}
+	if prevID != 0 {
+		rows, err := tx.Query(`SELECT path, new_content FROM review_files WHERE review_id = ?`, prevID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var p, c string
+			if err := rows.Scan(&p, &c); err != nil {
+				rows.Close()
+				return err
+			}
+			prevContents[p] = c
+		}
+		rows.Close()
+	}
+
+	// Step 2: pull every file currently in the bundle.
+	curRows, err := tx.Query(`SELECT path, content FROM skill_files WHERE ns = ? AND skill_name = ?`, ns, name)
+	if err != nil {
+		return err
+	}
+	curContents := map[string]string{}
+	for curRows.Next() {
+		var p, c string
+		if err := curRows.Scan(&p, &c); err != nil {
+			curRows.Close()
+			return err
+		}
+		curContents[p] = c
+	}
+	curRows.Close()
+
+	// Step 3: union of paths so deletions show up too.
+	seen := map[string]bool{}
+	for p := range prevContents {
+		seen[p] = true
+	}
+	for p := range curContents {
+		seen[p] = true
+	}
+	for p := range seen {
+		base, hadBase := prevContents[p]
+		newC, hasNew := curContents[p]
+		var kind string
+		switch {
+		case !hadBase && hasNew:
+			kind = "added"
+		case hadBase && !hasNew:
+			kind = "deleted"
+		case base == newC:
+			kind = "unchanged"
+		default:
+			kind = "modified"
+		}
+		if _, err := tx.Exec(`INSERT INTO review_files(review_id, path, base_content, new_content, change_kind)
+			VALUES(?,?,?,?,?)`,
+			reviewID, p, base, newC, kind); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListReviewFiles returns the snapshot rows for one review id. Empty list is
+// a valid response (e.g. legacy reviews submitted before the snapshot table
+// existed).
+func (s *Store) ListReviewFiles(reviewID int64) ([]model.ReviewFile, error) {
+	rows, err := s.DB.Query(`SELECT path, base_content, new_content, change_kind
+		FROM review_files WHERE review_id = ? ORDER BY path`, reviewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.ReviewFile{}
+	for rows.Next() {
+		var f model.ReviewFile
+		if err := rows.Scan(&f.Path, &f.BaseContent, &f.NewContent, &f.ChangeKind); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }

@@ -532,6 +532,32 @@ table.tbl tbody tr:hover { background: var(--bg-hover); cursor: pointer; }
 .tab.active { color: var(--text); border-bottom-color: var(--primary); font-weight: 600; }
 .tab .count { background: var(--bg-muted); padding: 0 6px; border-radius: 10px; font-size: 11px; color: var(--text-subtle); }
 
+/* Inline counter badge — same look as the tab count pill, but usable anywhere
+   (card titles, custom tab bars, headers). */
+.count-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; padding: 0 6px; background: var(--bg-muted); color: var(--text-subtle); border-radius: 10px; font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1; }
+
+/* Compact markdown styling for the AI assistant output preview. The drawer
+   is narrow, so we shave default heading sizes and tighten spacing to fit. */
+.ai-output-rendered h1,
+.ai-output-rendered h2,
+.ai-output-rendered h3,
+.ai-output-rendered h4 { margin: 12px 0 6px; font-weight: 600; line-height: 1.3; }
+.ai-output-rendered h1 { font-size: 16px; }
+.ai-output-rendered h2 { font-size: 14.5px; }
+.ai-output-rendered h3 { font-size: 13.5px; }
+.ai-output-rendered h4 { font-size: 13px; color: var(--text-muted); }
+.ai-output-rendered p  { margin: 6px 0; }
+.ai-output-rendered ul,
+.ai-output-rendered ol { margin: 6px 0; padding-left: 22px; }
+.ai-output-rendered li { margin: 2px 0; }
+.ai-output-rendered code { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; padding: 1px 4px; background: var(--bg-muted); border-radius: 3px; }
+.ai-output-rendered pre { margin: 8px 0; padding: 10px 12px; background: var(--bg-muted); border-radius: 6px; overflow-x: auto; }
+.ai-output-rendered pre code { padding: 0; background: transparent; font-size: 11.5px; line-height: 1.55; }
+.ai-output-rendered a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.ai-output-rendered strong { font-weight: 600; }
+.ai-output-rendered :first-child { margin-top: 0; }
+.ai-output-rendered :last-child { margin-bottom: 0; }
+
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--gap); }
 
 .readme { font-size: 14px; line-height: 1.7; color: var(--text); }
@@ -602,6 +628,11 @@ table.tbl tbody tr:hover { background: var(--bg-hover); cursor: pointer; }
 .editor-side { border-left: 1px solid var(--border); background: var(--bg-soft); overflow: auto; }
 .editor-side-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
 .editor-side-title { font-size: 11px; font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+
+/* "Create file" slot — blends into the file tree with a dashed outline. */
+.file-tree-new { margin: 10px 8px 6px; width: calc(100% - 16px); padding: 7px 10px; background: transparent; border: 1px dashed var(--border-strong); border-radius: 6px; color: var(--text-subtle); font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: border-color 0.15s, color 0.15s, background 0.15s; }
+.file-tree-new:hover { border-color: var(--primary); color: var(--primary); background: rgba(79, 70, 229, 0.06); }
+.file-tree-new:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Admin */
 .admin-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--gap); }

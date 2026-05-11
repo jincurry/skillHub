@@ -1,23 +1,32 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ClassificationTag, StatusPill } from '../components/Tags';
-import { Sparkline } from '../components/Sparkline';
 import {
-  IconStar, IconFire, IconUsers, IconCopy, IconBookmark, IconCode, IconDownload,
+  IconStar, IconFire, IconCode,
   IconArrowUp, IconArrowDown, IconAlertTriangle,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { RatingsPanel } from '../components/RatingsPanel';
 import { renderMarkdown } from '../lib/markdown';
+import { fmtRelative } from '../lib/notify';
+import {
+  AUDIT_ACTION_COLOR, AUDIT_ACTION_LABEL, auditCategory, shortTarget,
+  type AuditCategory,
+} from '../lib/audit';
 
 export function SkillDetail() {
   const { ns = '', name = '' } = useParams();
   const navigate = useNavigate();
   const [tab, setTab] = useState<'overview' | 'versions' | 'health' | 'audit'>('overview');
+  const [auditFilter, setAuditFilter] = useState<'all' | AuditCategory>('all');
   const skill = useAsync(() => api.getSkill(ns, name), [ns, name]);
   const versions = useAsync(() => api.listVersions(ns, name), [ns, name]);
   const members = useAsync(() => api.namespaceMembers(ns), [ns]);
+  const auditLogs = useAsync(
+    () => api.listAuditLogs({ target: `${ns}/${name}`, limit: 100 }),
+    [ns, name],
+  );
 
   if (skill.loading) return <div className="content-inner"><div className="card"><div className="card-body">加载中...</div></div></div>;
   if (skill.error || !skill.data) return (
@@ -76,20 +85,11 @@ export function SkillDetail() {
             <span style={{ color: 'var(--text-faint)' }}>·</span>
             <span><IconFire size={12} /> <strong style={{ color: 'var(--text)' }}>{p.activations.toLocaleString()}</strong> 激活/周</span>
             <span style={{ color: 'var(--text-faint)' }}>·</span>
-            <span><IconUsers size={12} /> {Math.max(1, Math.round(p.activations / 10))} 用户</span>
-            <span style={{ color: 'var(--text-faint)' }}>·</span>
             <span>由 <span className="mono">@{p.author}</span> 维护 · 更新于 {new Date(p.updatedAt).toLocaleDateString()}</span>
-          </div>
-          <div className="install-block">
-            <span className="pmt">$</span>
-            <span className="cmd">skillhub install {p.ns}/{p.name}@{p.version}</span>
-            <button className="copy-btn"><IconCopy size={11} /> 复制</button>
           </div>
         </div>
         <div className="detail-hero-actions">
-          <button className="btn"><IconBookmark size={14} /> 收藏</button>
-          <button className="btn" onClick={() => navigate(`/skills/${p.ns}/${p.name}/edit`)}><IconCode size={14} /> 编辑</button>
-          <button className="btn primary"><IconDownload size={14} /> 安装</button>
+          <button className="btn primary" onClick={() => navigate(`/skills/${p.ns}/${p.name}/edit`)}><IconCode size={14} /> 编辑</button>
           {p.status !== 'yanked' && p.status !== 'deprecated' && (
             <>
               <button className="btn" onClick={doDeprecate} title="标记为弃用，仍保留访问">弃用</button>
@@ -143,15 +143,9 @@ export function SkillDetail() {
                     {p.longDesc ? (
                       <div dangerouslySetInnerHTML={{ __html: renderMarkdown(p.longDesc) }} />
                     ) : (
-                      <>
-                        <h3>使用示例</h3>
-                        <pre><code>{`# 安装并运行
-skillhub install ${p.ns}/${p.name}@${p.version}
-skillhub run ${p.name}`}</code></pre>
-                        <p style={{ color: 'var(--text-faint)', fontSize: 12 }}>
-                          作者还没有撰写详细 README。
-                        </p>
-                      </>
+                      <p style={{ color: 'var(--text-faint)', fontSize: 12 }}>
+                        作者还没有撰写详细 README。点击“编辑”可补充 SKILL.md / README.md。
+                      </p>
                     )}
                   </div>
                 </div>
@@ -218,19 +212,105 @@ skillhub run ${p.name}`}</code></pre>
                 <div className="stat"><div className="stat-label">激活/周</div><div><span className="stat-value num">{p.activations.toLocaleString()}</span><span className={`stat-delta ${p.delta > 0 ? 'up' : p.delta < 0 ? 'down' : 'flat'}`}>
                   {p.delta > 0 ? <IconArrowUp size={11} /> : p.delta < 0 ? <IconArrowDown size={11} /> : null}
                   {Math.abs(p.delta)}%
-                </span></div><Sparkline data={[820, 860, 900, 950, 1010, 1080, 1120, 1180, p.activations]} /></div>
+                </span></div></div>
                 <div className="stat"><div className="stat-label">用户评分</div><div><span className="stat-value num">{p.rating || '—'}</span></div></div>
                 <div className="stat"><div className="stat-label">评分数</div><div><span className="stat-value num">{p.ratings}</span></div></div>
                 <div className="stat"><div className="stat-label">状态</div><div style={{ marginTop: 6 }}><StatusPill status={p.status} /></div></div>
               </div>
+              <div className="card" style={{ marginTop: 'var(--gap)' }}>
+                <div className="card-body" style={{ fontSize: 12.5, color: 'var(--text-subtle)', lineHeight: 1.55 }}>
+                  趋势图表依赖后端时间序列接口，未实现。现仅呈现当前统计快照。
+                </div>
+              </div>
             </div>
           )}
 
-          {tab === 'audit' && (
-            <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>
-              单 skill 审计视图待实现 — 暂时请到 <a style={{ color: 'var(--primary)', cursor: 'pointer' }} onClick={() => navigate('/audit')}>审计日志</a> 查看全局记录。
-            </div></div>
-          )}
+          {tab === 'audit' && (() => {
+            const all = auditLogs.data ?? [];
+            const filtered = auditFilter === 'all'
+              ? all
+              : all.filter((e) => auditCategory(e.action) === auditFilter);
+            const filters: Array<{ id: 'all' | AuditCategory; label: string }> = [
+              { id: 'all',     label: '全部' },
+              { id: 'release', label: '发布' },
+              { id: 'review',  label: '评审' },
+              { id: 'file',    label: '文件编辑' },
+              { id: 'other',   label: '其它' },
+            ];
+            return (
+              <div className="card">
+                <div className="card-header" style={{ padding: '12px 16px' }}>
+                  <h3 className="card-title">
+                    审计记录
+                    {all.length > 0 && (
+                      <span className="count-pill" style={{ marginLeft: 6 }}>{all.length}</span>
+                    )}
+                  </h3>
+                  <a
+                    style={{ fontSize: 12, color: 'var(--primary)', cursor: 'pointer' }}
+                    onClick={() => navigate(`/audit?target=${encodeURIComponent(`${ns}/${name}`)}`)}
+                  >查看全局日志 →</a>
+                </div>
+                <div style={{ display: 'flex', gap: 6, padding: '8px 16px 10px', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)', flexWrap: 'wrap' }}>
+                  {filters.map((f) => {
+                    const isActive = auditFilter === f.id;
+                    const count = f.id === 'all' ? all.length : all.filter((e) => auditCategory(e.action) === f.id).length;
+                    return (
+                      <button
+                        key={f.id}
+                        onClick={() => setAuditFilter(f.id)}
+                        disabled={count === 0 && f.id !== 'all'}
+                        style={{
+                          padding: '3px 10px', fontSize: 12, borderRadius: 999,
+                          border: '1px solid ' + (isActive ? 'var(--primary)' : 'var(--border)'),
+                          background: isActive ? 'var(--primary)' : 'transparent',
+                          color: isActive ? 'white' : count === 0 ? 'var(--text-faint)' : 'var(--text-subtle)',
+                          cursor: count === 0 && f.id !== 'all' ? 'default' : 'pointer',
+                          fontWeight: isActive ? 500 : 400,
+                          opacity: count === 0 && f.id !== 'all' ? 0.5 : 1,
+                          transition: 'all 0.12s',
+                        }}
+                      >{f.label}{f.id !== 'all' && count > 0 ? ` · ${count}` : ''}</button>
+                    );
+                  })}
+                </div>
+                <div className="card-body flush">
+                  {auditLogs.loading && <div style={{ padding: 16, color: 'var(--text-subtle)', fontSize: 13 }}>加载中...</div>}
+                  {auditLogs.error && <div style={{ padding: 16, color: 'var(--red-text)', fontSize: 13 }}>{auditLogs.error.message}</div>}
+                  {!auditLogs.loading && !auditLogs.error && filtered.length === 0 && (
+                    <div style={{ padding: '28px 16px', color: 'var(--text-subtle)', textAlign: 'center', fontSize: 13 }}>
+                      {all.length === 0 ? '该 skill 还没有任何审计记录' : `暂无此类别记录`}
+                    </div>
+                  )}
+                  {filtered.map((e) => {
+                    const detail = shortTarget(e.target, ns, name);
+                    return (
+                      <div key={e.id} style={{
+                        display: 'grid',
+                        gridTemplateColumns: '120px 110px 130px minmax(0, 1fr)',
+                        gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--border)',
+                        fontSize: 12.5, alignItems: 'center',
+                      }}>
+                        <span style={{ color: 'var(--text-subtle)', fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5 }} title={new Date(e.createdAt).toLocaleString()}>
+                          {fmtRelative(e.createdAt)}
+                        </span>
+                        <span className="mono" style={{ fontSize: 11.5, color: e.actor === 'system' ? 'var(--text-faint)' : 'var(--primary)' }}>@{e.actor}</span>
+                        <span><span className={`tag ${AUDIT_ACTION_COLOR[e.action] || ''}`}>{AUDIT_ACTION_LABEL[e.action] || e.action}</span></span>
+                        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {detail ? (
+                            <span className="mono" style={{ color: 'var(--text)' }}>{detail}</span>
+                          ) : (
+                            <span style={{ color: 'var(--text-faint)' }}>—</span>
+                          )}
+                          {e.version && <span className="mono" style={{ color: 'var(--text-faint)', marginLeft: 6, fontSize: 11 }}>{e.version}</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         <div>
@@ -242,7 +322,6 @@ skillhub run ${p.name}`}</code></pre>
                 <div className="meta-row"><span className="k">当前版本</span><span className="v mono">v{p.version}</span></div>
                 <div className="meta-row"><span className="k">密级</span><span className="v"><ClassificationTag level={p.classification} /></span></div>
                 <div className="meta-row"><span className="k">作者</span><span className="v mono">@{p.author}</span></div>
-                <div className="meta-row"><span className="k">License</span><span className="v">Internal</span></div>
               </div>
             </div>
           </div>

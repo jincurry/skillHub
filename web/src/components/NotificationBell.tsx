@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IconBell } from './Icons';
 import { api } from '../api/client';
+import { fmtRelative, notifTargetUrl } from '../lib/notify';
 import type { Notification } from '../api/types';
 
 const KIND_COLOR: Record<string, string> = {
@@ -60,12 +61,13 @@ export function NotificationBell() {
 
   async function clickItem(n: Notification) {
     if (n.unread) {
-      await api.markNotificationsRead({ ids: [n.id] });
+      // Optimistic update first so the bell badge updates instantly.
       setItems((arr) => arr.map((x) => (x.id === n.id ? { ...x, unread: false } : x)));
+      void api.markNotificationsRead({ ids: [n.id] }).catch(() => void load());
     }
     setOpen(false);
-    if (n.kind === 'review') navigate('/reviews');
-    else if (n.kind === 'comment' || n.kind === 'publish') navigate('/workspace');
+    const url = notifTargetUrl(n);
+    if (url) navigate(url);
   }
 
   return (
@@ -124,35 +126,47 @@ export function NotificationBell() {
               暂无通知
             </div>
           )}
-          {items.map((n) => (
-            <div
-              key={n.id}
-              onClick={() => clickItem(n)}
-              style={{
-                padding: '10px 14px', borderBottom: '1px solid var(--border)',
-                cursor: 'pointer',
-                background: n.unread ? 'var(--bg-muted, transparent)' : 'transparent',
-                display: 'flex', gap: 10, alignItems: 'flex-start',
-              }}
-            >
-              <div style={{
-                width: 8, height: 8, marginTop: 6, borderRadius: 4,
-                background: KIND_COLOR[n.kind] ?? 'var(--text-faint)',
-                flexShrink: 0,
-              }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, lineHeight: 1.45, color: 'var(--text)', wordBreak: 'break-word' }}>
-                  {n.body}
+          {[...items]
+            .sort((a, b) => {
+              if (a.unread !== b.unread) return a.unread ? -1 : 1;
+              return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+            })
+            .map((n) => {
+              const url = notifTargetUrl(n);
+              return (
+                <div
+                  key={n.id}
+                  onClick={() => clickItem(n)}
+                  title={url ? `点击打开 ${url}` : undefined}
+                  style={{
+                    padding: '10px 14px', borderBottom: '1px solid var(--border)',
+                    cursor: url ? 'pointer' : 'default',
+                    background: n.unread ? 'rgba(79,70,229,0.04)' : 'transparent',
+                    display: 'flex', gap: 10, alignItems: 'flex-start',
+                    position: 'relative', transition: 'background 0.12s',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-hover)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = n.unread ? 'rgba(79,70,229,0.04)' : 'transparent'; }}
+                >
+                  {n.unread && (
+                    <span style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, background: KIND_COLOR[n.kind] ?? 'var(--primary)', borderRadius: '0 2px 2px 0' }} />
+                  )}
+                  <div style={{
+                    width: 8, height: 8, marginTop: 6, borderRadius: 4,
+                    background: KIND_COLOR[n.kind] ?? 'var(--text-faint)',
+                    flexShrink: 0,
+                  }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, lineHeight: 1.45, color: 'var(--text)', wordBreak: 'break-word', fontWeight: n.unread ? 600 : 400 }}>
+                      {n.body}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }} title={new Date(n.createdAt).toLocaleString()}>
+                      {fmtRelative(n.createdAt)}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>
-                  {new Date(n.createdAt).toLocaleString()}
-                </div>
-              </div>
-              {n.unread && (
-                <span style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--primary)', marginTop: 6, flexShrink: 0 }} />
-              )}
-            </div>
-          ))}
+              );
+            })}
         </div>
       )}
     </div>

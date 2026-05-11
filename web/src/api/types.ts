@@ -43,6 +43,16 @@ export interface Review {
   submittedAt: string;
 }
 
+// ReviewFile is one file's snapshot inside a review request, returned by
+// GET /reviews/:id/files. The base/new contents power the diff view; the
+// pre-computed changeKind drives the file-list sidebar.
+export interface ReviewFile {
+  path: string;
+  baseContent: string;
+  newContent: string;
+  changeKind: 'added' | 'modified' | 'deleted' | 'unchanged';
+}
+
 export interface Comment {
   id: number;
   reviewId: number;
@@ -65,6 +75,10 @@ export interface Notification {
   id: number;
   kind: 'review' | 'comment' | 'publish' | 'warn';
   body: string;
+  /** 'skill' | 'review' | 'audit' | '' (no target) */
+  targetKind: string;
+  /** For target_kind=skill -> "ns/name"; review -> review id; audit -> "" */
+  targetRef: string;
   unread: boolean;
   createdAt: string;
 }
@@ -77,6 +91,15 @@ export interface Me {
   email: string;
   bio: string;
   location: string;
+  /** Empty string -> render initial-letter gradient fallback */
+  avatarUrl: string;
+  /** Cover preset id (e.g. 'sunset', 'ocean'). Used when coverFrom/coverTo are empty. */
+  coverPreset: string;
+  /** Custom hex color overriding the preset (#rrggbb). Empty string means "use preset". */
+  coverFrom: string;
+  coverTo: string;
+  /** True for users with users.is_admin = 1; gates the AI provider config UI. */
+  isAdmin: boolean;
   joinedAt: string;
 }
 
@@ -85,6 +108,9 @@ export interface UpdateMeRequest {
   email?: string;
   bio?: string;
   location?: string;
+  coverPreset?: string;
+  coverFrom?: string;
+  coverTo?: string;
 }
 
 export interface MeStats {
@@ -208,4 +234,68 @@ export interface SearchResult {
   skills: Skill[];
   namespaces: Namespace[];
   users: SearchUserHit[];
+}
+
+// AI provider config (admin-only view). The API key itself is never returned;
+// `hasKey` indicates whether one is currently stored.
+export interface AIProvider {
+  id: number;
+  name: string;
+  baseUrl: string;
+  model: string;
+  hasKey: boolean;
+  enabled: boolean;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Trimmed projection visible to non-admin users (the editor dropdown).
+export interface AIProviderRef {
+  id: number;
+  name: string;
+  model: string;
+  isDefault: boolean;
+}
+
+export interface CreateAIProviderRequest {
+  name: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  enabled: boolean;
+  isDefault: boolean;
+}
+
+// All fields optional. Omitting `apiKey` preserves the stored key — sending an
+// empty string is rejected by the server to avoid accidental clears.
+export interface UpdateAIProviderRequest {
+  name?: string;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  enabled?: boolean;
+  isDefault?: boolean;
+}
+
+export type AIAssistAction =
+  | 'outline' | 'expand' | 'polish' | 'examples'
+  | 'summary' | 'translate' | 'review' | 'freeform';
+
+// One prior turn in a multi-turn AI assist conversation. The server only
+// accepts user + assistant; system is owned by the backend.
+export interface AIAssistTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AIAssistRequest {
+  providerId: number;
+  action: AIAssistAction;
+  instruction?: string;
+  selection?: string;
+  currentContent: string;
+  filePath: string;
+  /** Prior turns; omit or empty for the first message. */
+  history?: AIAssistTurn[];
 }

@@ -1,6 +1,8 @@
 package model
 
-import "time"
+import (
+	"time"
+)
 
 type Skill struct {
 	ID             int64     `json:"id"`
@@ -63,32 +65,42 @@ type AuditLog struct {
 }
 
 type Notification struct {
-	ID        int64     `json:"id"`
-	Kind      string    `json:"kind"` // review|comment|publish|warn
-	Body      string    `json:"body"`
-	Unread    bool      `json:"unread"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID         int64     `json:"id"`
+	Kind       string    `json:"kind"` // review|comment|publish|warn
+	Body       string    `json:"body"`
+	TargetKind string    `json:"targetKind"` // skill | review | audit | "" (no target)
+	TargetRef  string    `json:"targetRef"`  // skill -> "ns/name" ; review -> review_id ; audit -> ""
+	Unread     bool      `json:"unread"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 type Me struct {
-	Username string    `json:"username"`
-	Display  string    `json:"display"`
-	Role     string    `json:"role"`
-	Team     string    `json:"team"`
-	Email    string    `json:"email"`
-	Bio      string    `json:"bio"`
-	Location string    `json:"location"`
-	JoinedAt time.Time `json:"joinedAt"`
+	Username    string    `json:"username"`
+	Display     string    `json:"display"`
+	Role        string    `json:"role"`
+	Team        string    `json:"team"`
+	Email       string    `json:"email"`
+	Bio         string    `json:"bio"`
+	Location    string    `json:"location"`
+	AvatarURL   string    `json:"avatarUrl"`
+	CoverPreset string    `json:"coverPreset"`
+	CoverFrom   string    `json:"coverFrom"`
+	CoverTo     string    `json:"coverTo"`
+	IsAdmin     bool      `json:"isAdmin"`
+	JoinedAt    time.Time `json:"joinedAt"`
 }
 
 // UpdateMeRequest carries the editable subset of the user profile. All fields
 // are pointers so that an omitted field means "leave unchanged" while an empty
 // string means "clear it out".
 type UpdateMeRequest struct {
-	Display  *string `json:"display" binding:"omitempty,max=80"`
-	Email    *string `json:"email" binding:"omitempty,max=200"`
-	Bio      *string `json:"bio" binding:"omitempty,max=500"`
-	Location *string `json:"location" binding:"omitempty,max=120"`
+	Display     *string `json:"display" binding:"omitempty,max=80"`
+	Email       *string `json:"email" binding:"omitempty,max=200"`
+	Bio         *string `json:"bio" binding:"omitempty,max=500"`
+	Location    *string `json:"location" binding:"omitempty,max=120"`
+	CoverPreset *string `json:"coverPreset" binding:"omitempty,max=32"`
+	CoverFrom   *string `json:"coverFrom" binding:"omitempty,max=16"`
+	CoverTo     *string `json:"coverTo" binding:"omitempty,max=16"`
 }
 
 // MeStats aggregates "what does this user own / care about" counts for the
@@ -130,6 +142,19 @@ type SkillFile struct {
 	Size      int       `json:"size"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	UpdatedBy string    `json:"updatedBy"`
+}
+
+// ReviewFile is one file's snapshot inside a review request. BaseContent is
+// the same path's body in the previous approved review (empty if this is a
+// brand-new file or the skill has no prior approval). NewContent is what the
+// author submitted *for this review*. ChangeKind is precomputed at submit
+// time so the UI doesn't have to diff every file just to render a sidebar.
+type ReviewFile struct {
+	Path        string `json:"path"`
+	BaseContent string `json:"baseContent"`
+	NewContent  string `json:"newContent"`
+	// ChangeKind ∈ "added" | "modified" | "deleted" | "unchanged".
+	ChangeKind string `json:"changeKind"`
 }
 
 // PutFileRequest is the body for PUT /skills/:ns/:name/files/*path.
@@ -219,4 +244,67 @@ type SkillVersion struct {
 	ReviewID  int64     `json:"reviewId"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// AIProvider is the admin-facing view of a configured LLM endpoint. The raw
+// api_key is *never* serialised back; HasKey reports whether one is stored.
+type AIProvider struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	BaseURL   string    `json:"baseUrl"`
+	Model     string    `json:"model"`
+	HasKey    bool      `json:"hasKey"`
+	Enabled   bool      `json:"enabled"`
+	IsDefault bool      `json:"isDefault"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// AIProviderRef is the trimmed form returned to non-admin users; just enough
+// for the editor's "pick a model" dropdown.
+type AIProviderRef struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Model     string `json:"model"`
+	IsDefault bool   `json:"isDefault"`
+}
+
+type CreateAIProviderRequest struct {
+	Name      string `json:"name"      binding:"required,max=80"`
+	BaseURL   string `json:"baseUrl"   binding:"required,max=300"`
+	Model     string `json:"model"     binding:"required,max=120"`
+	APIKey    string `json:"apiKey"    binding:"required,max=400"`
+	Enabled   bool   `json:"enabled"`
+	IsDefault bool   `json:"isDefault"`
+}
+
+// UpdateAIProviderRequest uses pointers so callers can leave fields untouched.
+// In particular, leaving APIKey nil preserves the existing encrypted key.
+type UpdateAIProviderRequest struct {
+	Name      *string `json:"name"      binding:"omitempty,max=80"`
+	BaseURL   *string `json:"baseUrl"   binding:"omitempty,max=300"`
+	Model     *string `json:"model"     binding:"omitempty,max=120"`
+	APIKey    *string `json:"apiKey"    binding:"omitempty,max=400"`
+	Enabled   *bool   `json:"enabled"`
+	IsDefault *bool   `json:"isDefault"`
+}
+
+// AIAssistRequest is the editor -> server message that kicks off a streaming
+// LLM call for documentation help.
+type AIAssistRequest struct {
+	ProviderID     int64           `json:"providerId"     binding:"required"`
+	Action         string          `json:"action"`         // outline|expand|polish|examples|summary|translate|review|freeform
+	Instruction    string          `json:"instruction"`    // user's free-form intent
+	Selection      string          `json:"selection"`      // optional: only-this-region edits
+	CurrentContent string          `json:"currentContent"` // full file body for context
+	FilePath       string          `json:"filePath"`       // SKILL.md / README.md
+	History        []AIAssistTurn  `json:"history"`        // optional: prior turns in a multi-turn chat
+}
+
+// AIAssistTurn is one prior message kept around so the LLM can see what the
+// user already asked / what it already answered. We deliberately accept only
+// "user" and "assistant" roles from the client (system is owned by the server).
+type AIAssistTurn struct {
+	Role    string `json:"role"    binding:"required,oneof=user assistant"`
+	Content string `json:"content" binding:"required"`
 }

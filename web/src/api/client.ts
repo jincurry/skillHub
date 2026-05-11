@@ -1,4 +1,4 @@
-import type { Achievement, AuditFilter, AuditLog, Comment, Me, MeStats, Namespace, NamespaceMember, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, UpdateMeRequest, ValidationReport } from './types';
+import type { Achievement, AIProvider, AIProviderRef, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, Me, MeStats, Namespace, NamespaceMember, Notification, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, UpdateAIProviderRequest, UpdateMeRequest, ValidationReport } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -47,6 +47,31 @@ export const api = {
   me: () => request<Me>('/me'),
   updateMe: (body: UpdateMeRequest) =>
     request<Me>('/me', { method: 'PATCH', body: JSON.stringify(body) }),
+  /** Upload a new avatar image (multipart). Returns the refreshed Me row. */
+  uploadAvatar: async (file: File): Promise<Me> => {
+    const fd = new FormData();
+    fd.append('avatar', file);
+    const tok = getToken();
+    const headers: Record<string, string> = {};
+    if (tok) headers['Authorization'] = `Bearer ${tok}`;
+    const res = await fetch(BASE + '/me/avatar', { method: 'POST', body: fd, headers });
+    if (res.status === 401) {
+      clearAuth();
+      if (onUnauthorized) onUnauthorized();
+      throw new Error('401 unauthorized');
+    }
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const j = (await res.json()) as { error?: string };
+        if (j?.error) detail = j.error;
+      } catch { /* ignore */ }
+      throw new Error(`${res.status} ${detail}`);
+    }
+    return (await res.json()) as Me;
+  },
+  /** Remove the current user's avatar (server deletes the file). */
+  deleteAvatar: () => request<Me>('/me/avatar', { method: 'DELETE' }),
   meStats: () => request<MeStats>('/me/stats'),
   meAchievements: () => request<Achievement[]>('/me/achievements'),
   search: (q: string) => request<SearchResult>('/search' + qs({ q })),
@@ -115,6 +140,7 @@ export const api = {
   listComments: (id: number | string) => request<Comment[]>(`/reviews/${id}/comments`),
   addComment: (id: number | string, body: string) =>
     request<Comment>(`/reviews/${id}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
+  listReviewFiles: (id: number | string) => request<ReviewFile[]>(`/reviews/${id}/files`),
 
   listAuditLogs: (filter: AuditFilter = {}) => {
     const limit = filter.limit ?? 200;
@@ -126,4 +152,19 @@ export const api = {
       limit: String(limit),
     }));
   },
+
+  // ---- AI providers (admin) ---------------------------------------------
+  listAIProviders: () => request<AIProvider[]>('/admin/ai-providers'),
+  createAIProvider: (body: CreateAIProviderRequest) =>
+    request<AIProvider>('/admin/ai-providers', { method: 'POST', body: JSON.stringify(body) }),
+  updateAIProvider: (id: number, body: UpdateAIProviderRequest) =>
+    request<AIProvider>(`/admin/ai-providers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteAIProvider: (id: number) =>
+    request<{ ok: true }>(`/admin/ai-providers/${id}`, { method: 'DELETE' }),
+  /** One-token ping against the upstream. Returns `{ok:true}` on success or throws. */
+  testAIProvider: (id: number) =>
+    request<{ ok: true; status: number }>(`/admin/ai-providers/${id}/test`, { method: 'POST' }),
+
+  // ---- AI providers (any logged-in user) --------------------------------
+  listAIProviderRefs: () => request<AIProviderRef[]>('/ai/providers'),
 };

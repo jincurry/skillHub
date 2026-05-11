@@ -31,11 +31,29 @@ func Open(path string) (*Store, error) {
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN email     TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN bio       TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN location  TEXT NOT NULL DEFAULT ''`)
-	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`)
+	// SQLite forbids ADD COLUMN with a non-constant default such as
+	// CURRENT_TIMESTAMP. Use a constant sentinel and backfill afterwards.
+	if _, err := db.Exec(`ALTER TABLE users ADD COLUMN joined_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'`); err == nil {
+		_, _ = db.Exec(`UPDATE users SET joined_at = CURRENT_TIMESTAMP WHERE joined_at = '1970-01-01 00:00:00'`)
+	}
 	// Backfill: long-form description for skills (markdown-ish README body).
 	_, _ = db.Exec(`ALTER TABLE skills ADD COLUMN long_desc TEXT NOT NULL DEFAULT ''`)
 	// Backfill: when a review was decided, used by the avg-decision-hours stat.
 	_, _ = db.Exec(`ALTER TABLE reviews ADD COLUMN decided_at DATETIME`)
+	// Backfill: structured target fields on notifications so click-through works.
+	_, _ = db.Exec(`ALTER TABLE notifications ADD COLUMN target_kind TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE notifications ADD COLUMN target_ref  TEXT NOT NULL DEFAULT ''`)
+	// Backfill: avatar + cover (banner gradient) customisation columns on users.
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN avatar_url   TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN cover_preset TEXT NOT NULL DEFAULT 'sunset'`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN cover_from   TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN cover_to     TEXT NOT NULL DEFAULT ''`)
+	// Backfill: system-wide admin flag (separate from the display-only role).
+	if _, err := db.Exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`); err == nil {
+		// First time the column exists — seed alice as the bootstrap admin so
+		// the AI provider config UI is reachable on a fresh install.
+		_, _ = db.Exec(`UPDATE users SET is_admin = 1 WHERE username = 'alice'`)
+	}
 	s := &Store{DB: db}
 	if err := s.seedIfEmpty(); err != nil {
 		return nil, fmt.Errorf("seed: %w", err)

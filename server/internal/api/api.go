@@ -2,11 +2,13 @@ package api
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
-
 	"github.com/jincurry/skillhub/server/internal/auth"
 	"github.com/jincurry/skillhub/server/internal/config"
 	"github.com/jincurry/skillhub/server/internal/model"
@@ -33,6 +35,9 @@ func (s *Server) Routes() *gin.Engine {
 	{
 		// public
 		v1.POST("/auth/login", s.login)
+		// Avatars are served publicly so <img src=...> works without auth headers.
+		// gin.Static safely scopes file serving to the given directory.
+		v1.Static("/avatars", "./data/avatars")
 	}
 
 	auth := v1.Group("")
@@ -45,6 +50,8 @@ func (s *Server) Routes() *gin.Engine {
 		auth.GET("/me/notifications", s.listNotifications)
 		auth.POST("/me/notifications/read", s.markNotificationsRead)
 		auth.GET("/me/drafts", s.listMyDrafts)
+		auth.POST("/me/avatar", s.uploadAvatar)
+		auth.DELETE("/me/avatar", s.deleteAvatar)
 
 		auth.GET("/search", s.search)
 
@@ -75,8 +82,25 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/reviews/:id/decision", s.decideReview)
 		auth.GET("/reviews/:id/comments", s.listComments)
 		auth.POST("/reviews/:id/comments", s.addComment)
+		auth.GET("/reviews/:id/files", s.listReviewFiles)
 
 		auth.GET("/audit-logs", s.listAuditLogs)
+
+		// AI assistance: any logged-in user can list available providers and
+		// run an assist call against a skill they can edit.
+		auth.GET("/ai/providers", s.listAIProviderRefs)
+		auth.POST("/ai/skills/:ns/:name/assist", s.aiAssist)
+	}
+
+	// Admin-only configuration. requireAdmin checks users.is_admin = 1.
+	adminAI := auth.Group("/admin")
+	adminAI.Use(s.requireAdmin())
+	{
+		adminAI.GET("/ai-providers", s.listAIProviders)
+		adminAI.POST("/ai-providers", s.createAIProvider)
+		adminAI.PATCH("/ai-providers/:id", s.updateAIProvider)
+		adminAI.DELETE("/ai-providers/:id", s.deleteAIProvider)
+		adminAI.POST("/ai-providers/:id/test", s.testAIProvider)
 	}
 	return r
 }
@@ -489,6 +513,22 @@ func (s *Server) listComments(c *gin.Context) {
 	c.JSON(200, out)
 }
 
+// listReviewFiles serves the file-by-file diff snapshot for a review. Any
+// authenticated user can read it — same audience as listComments — because
+// surfacing what was changed is the whole point of the review queue.
+func (s *Server) listReviewFiles(c *gin.Context) {
+	id, ok := s.parseID(c)
+	if !ok {
+		return
+	}
+	out, err := s.store.ListReviewFiles(id)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, out)
+}
+
 func (s *Server) addComment(c *gin.Context) {
 	id, ok := s.parseID(c)
 	if !ok {
@@ -536,6 +576,85 @@ func (s *Server) patchMe(c *gin.Context) {
 		return
 	}
 	c.JSON(200, user)
+}
+
+// allowedAvatarExts is the whitelist of file extensions accepted by the avatar
+// upload handler. Anything else is rejected to keep the static directory free
+// of weird MIME types.
+var allowedAvatarExts = map[string]bool{
+	".jpg":  true,
+	".jpeg": true,
+	".png":  true,
+	".webp": true,
+	".gif":  true,
+}
+
+const maxAvatarBytes = 2 * 1024 * 1024 // 2 MiB
+
+// uploadAvatar accepts a multipart upload (field name "avatar") and saves it
+// to ./data/avatars/<username><ext>. Old files for that user are removed first
+// so the directory keeps at most one file per user. The returned URL embeds a
+// cache-buster query so browsers always pick up the new image.
+func (s *Server) uploadAvatar(c *gin.Context) {
+	file, err := c.FormFile("avatar")
+	if err != nil {
+		c.JSON(400, gin.H{"error": "missing 'avatar' file"})
+		return
+	}
+	if file.Size > maxAvatarBytes {
+		c.JSON(413, gin.H{"error": "file too large (max 2MB)"})
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if !allowedAvatarExts[ext] {
+		c.JSON(400, gin.H{"error": "unsupported file type, allowed: jpg, jpeg, png, webp, gif"})
+		return
+	}
+
+	user := s.currentUser(c)
+	dir := "./data/avatars"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		c.JSON(500, gin.H{"error": "mkdir: " + err.Error()})
+		return
+	}
+
+	// Remove any previous avatar(s) for this user (different ext, etc.).
+	if old, _ := filepath.Glob(filepath.Join(dir, user+".*")); len(old) > 0 {
+		for _, p := range old {
+			_ = os.Remove(p)
+		}
+	}
+
+	dst := filepath.Join(dir, user+ext)
+	if err := c.SaveUploadedFile(file, dst); err != nil {
+		c.JSON(500, gin.H{"error": "save: " + err.Error()})
+		return
+	}
+
+	url := "/api/v1/avatars/" + user + ext + "?v=" + strconv.FormatInt(time.Now().Unix(), 10)
+	me, err := s.store.SetAvatarURL(user, url)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, me)
+}
+
+// deleteAvatar removes the on-disk file(s) for the current user and clears the
+// avatar_url column so the UI falls back to the gradient initial.
+func (s *Server) deleteAvatar(c *gin.Context) {
+	user := s.currentUser(c)
+	if old, _ := filepath.Glob(filepath.Join("./data/avatars", user+".*")); len(old) > 0 {
+		for _, p := range old {
+			_ = os.Remove(p)
+		}
+	}
+	me, err := s.store.SetAvatarURL(user, "")
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, me)
 }
 
 // getMeStats returns aggregate counts for the current user's dashboard.

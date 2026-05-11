@@ -2,11 +2,41 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ClassificationTag } from '../components/Tags';
 import {
-  IconDownload, IconCheckCircle, IconChevronRight,
+  IconDownload, IconChevronRight,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import type { Review } from '../api/types';
+
+function csvEscape(s: string): string {
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function exportReviewsCSV(rows: Review[]) {
+  const header = 'id,ns,name,version,classification,author,reviewers,status,urgency,sla,submitted_at,note';
+  const body = rows.map((r) => [
+    String(r.id),
+    r.ns,
+    r.name,
+    r.version,
+    r.classification,
+    r.author,
+    r.reviewers.join('|'),
+    r.status,
+    r.urgency,
+    r.sla,
+    new Date(r.submittedAt).toISOString(),
+    r.note,
+  ].map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([header + '\n' + body + '\n'], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `skillhub-reviews-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 function fmtHours(h: number): string {
   if (h < 0) return '—';
@@ -50,11 +80,16 @@ export function Reviews() {
       <div className="page-header">
         <div>
           <h1 className="page-title">审批中心</h1>
-          <p className="page-subtitle">作为 maintainer,你需要审核即将发布或撤回的 Skill 版本。SLA 默认 72 小时。</p>
+          <p className="page-subtitle">作为 maintainer，你需要审核即将发布的 Skill 版本。SLA 按密级区分：L1 24h / L2 48h / L3 72h。</p>
         </div>
         <div className="page-actions">
-          <button className="btn"><IconDownload size={14} /> 导出报表</button>
-          <button className="btn primary"><IconCheckCircle size={14} /> 批量批准</button>
+          <button
+            className="btn"
+            onClick={() => exportReviewsCSV(filtered)}
+            disabled={filtered.length === 0}
+          >
+            <IconDownload size={14} /> 导出当前视图 (CSV)
+          </button>
         </div>
       </div>
 
