@@ -148,6 +148,7 @@ export function Editor() {
 
   const skill = useAsync(() => api.getSkill(ns, name), [ns, name]);
   const me = useAsync(() => api.me(), []);
+  const members = useAsync(() => api.namespaceMembers(ns), [ns]);
   const files = useAsync(() => api.listFiles(ns, name), [ns, name]);
   const validation = useAsync<ValidationReport>(() => api.validate(ns, name), [ns, name]);
   const policy = useAsync(
@@ -244,14 +245,14 @@ export function Editor() {
   const anyDirty = dirtyPaths.size > 0;
 
   // Permission gate: only the author or an owner/maintainer of the namespace
-  // is allowed to PUT/DELETE files. This mirrors the backend rule so the
-  // editor disables UI ahead of any 403.
+  // is allowed to PUT/DELETE files. This mirrors the backend rule
+  // (api.go: canEditSkill) so the editor disables UI ahead of any 403.
   const canEdit = useMemo(() => {
     if (!skill.data || !me.data) return false;
-    return skill.data.author === me.data.username;
-    // NB: we don't have a "my role in ns" endpoint to check owner/maintainer
-    // here; backend will still enforce the full rule on writes.
-  }, [skill.data, me.data]);
+    if (skill.data.author === me.data.username) return true;
+    const myRole = (members.data ?? []).find((m) => m.username === me.data!.username)?.role;
+    return myRole === 'owner' || myRole === 'maintainer';
+  }, [skill.data, me.data, members.data]);
 
   const tree = useMemo(() => buildTree(files.data ?? []), [files.data]);
   const activeBuf = activePath ? buffers[activePath] : undefined;

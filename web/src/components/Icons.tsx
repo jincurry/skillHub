@@ -43,6 +43,7 @@ export const IconSidebar = (p: Props) => <Base {...p}><rect x="3" y="3" width="1
 export const IconChat = (p: Props) => <Base {...p}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></Base>;
 export const IconRocket = (p: Props) => <Base {...p}><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" /><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" /></Base>;
 export const IconCode = (p: Props) => <Base {...p}><path d="M16 18l6-6-6-6M8 6l-6 6 6 6" /></Base>;
+export const IconFile = (p: Props) => <Base {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></Base>;
 export const IconClock = (p: Props) => <Base {...p}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></Base>;
 export const IconUsers = (p: Props) => <Base {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></Base>;
 export const IconArrowUp = (p: Props) => <Base {...p}><path d="M12 19V5M5 12l7-7 7 7" /></Base>;
