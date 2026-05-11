@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ClassificationTag, StatusPill } from '../components/Tags';
 import {
   IconPlus, IconSearch, IconChevronDown, IconGrid, IconList,
-  IconStar, IconFire,
+  IconStar, IconFire, IconX,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
@@ -137,6 +137,16 @@ export function Browse() {
   const [sort, setSort] = useState<SortKey>('updated');
   const [sortOpen, setSortOpen] = useState(false);
 
+  // Single-valued author filter. Driven from URL (?author=foo) only — we don't
+  // expose a sidebar selector for it, only the dismissible chip in the main
+  // pane. Clearing the chip clears the query param.
+  const authorFilter = searchParams.get('author') ?? '';
+  const clearAuthor = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('author');
+    setSearchParams(next, { replace: true });
+  };
+
   const namespaces = useAsync(() => api.namespaces(), []);
   const skills = useAsync(() => api.listSkills(), []);
 
@@ -147,6 +157,7 @@ export function Browse() {
       if (selectedClass.size && !selectedClass.has(s.classification)) return false;
       if (selectedStatus.size && !selectedStatus.has(s.status)) return false;
       if (selectedTags.size && !s.tags.some((t) => selectedTags.has(t))) return false;
+      if (authorFilter && s.author !== authorFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         if (!(s.name + s.desc + s.tags.join(',')).toLowerCase().includes(q)) return false;
@@ -162,7 +173,7 @@ export function Browse() {
       }
     });
     return out;
-  }, [skills.data, selectedNs, selectedClass, selectedStatus, selectedTags, search, sort]);
+  }, [skills.data, selectedNs, selectedClass, selectedStatus, selectedTags, authorFilter, search, sort]);
 
   const openSkill = (s: Skill) => navigate(`/skills/${s.ns}/${s.name}`);
   const toggle = (set: Set<string>, setter: (n: Set<string>) => void, id: string) => {
@@ -244,11 +255,34 @@ export function Browse() {
           <div style={{ paddingTop: 14, borderTop: '1px solid var(--border)' }}>
             <button className="btn" style={{ width: '100%' }} onClick={() => {
               setSelectedNs(new Set()); setSelectedClass(new Set()); setSelectedStatus(new Set()); setSelectedTags(new Set()); setSearch('');
+              clearAuthor();
             }}>清空所有过滤</button>
           </div>
         </aside>
 
         <div>
+          {authorFilter && (
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '4px 10px 4px 12px', marginBottom: 10,
+              background: 'var(--primary-50, rgba(79,70,229,0.08))',
+              color: 'var(--primary-700, var(--primary))',
+              borderRadius: 999, fontSize: 12, fontWeight: 500,
+              border: '1px solid var(--primary-200, rgba(79,70,229,0.18))',
+            }}>
+              <span>作者: <span className="mono">@{authorFilter}</span></span>
+              <button
+                onClick={clearAuthor}
+                title="清除作者过滤"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 18, height: 18, padding: 0, border: 'none',
+                  background: 'transparent', cursor: 'pointer',
+                  color: 'inherit', borderRadius: '50%',
+                }}
+              ><IconX size={11} /></button>
+            </div>
+          )}
           <div className="browse-toolbar">
             <div className="input-wrap">
               <span className="icon-left"><IconSearch size={15} /></span>

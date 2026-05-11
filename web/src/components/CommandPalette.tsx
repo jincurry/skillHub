@@ -48,7 +48,10 @@ function flatten(r: SearchResult): FlatItem[] {
       bucket: 'user',
       label: `@${u.username}`,
       detail: `${u.display}${u.team ? ' · ' + u.team : ''}`,
-      to: `/profile`, // No public-profile route yet; always lands on /profile.
+      // We don't have a public-profile route, so the most useful place to
+      // land is the Browse page filtered by this user's authored skills.
+      // (Clicking "我的主页" in the sidebar always shows the logged-in user.)
+      to: `/skills?author=${encodeURIComponent(u.username)}`,
       icon: <IconUsers size={16} />,
     });
   }
