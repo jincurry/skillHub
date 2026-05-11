@@ -9,6 +9,7 @@ import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import type { AIAssistAction, SkillFile, ValidationReport } from '../api/types';
 import { AIAssistDrawer, type EditorBridge } from '../components/AIAssistDrawer';
+import { runAssist, type AssistHandle } from '../lib/aiAssist';
 import { languageFor } from '../lib/files';
 
 // --------- helpers --------------------------------------------------------
@@ -303,6 +304,11 @@ export function Editor() {
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
 
+  // AI 起草提交说明：直接流式写入 submitNote，不走抽屉。
+  const [draftingNote, setDraftingNote] = useState(false);
+  const [draftErr, setDraftErr] = useState<string | null>(null);
+  const draftHandleRef = useRef<AssistHandle | null>(null);
+
   // Pick a sensible default file once the listing comes back. SKILL.md is the
   // primary authoring surface so it wins over skill.yaml / README.md.
   useEffect(() => {
@@ -372,6 +378,64 @@ export function Editor() {
     }
     return m;
   }, [buffers, activePath]);
+
+  // Stream a commit-summary directly into the submitNote textarea, bypassing
+  // the AI drawer entirely. The drawer's z-index sits below the modal, and
+  // its output goes into its own buffer — neither is useful here.
+  async function draftSubmitNote() {
+    if (draftingNote) {
+      draftHandleRef.current?.abort();
+      draftHandleRef.current = null;
+      setDraftingNote(false);
+      return;
+    }
+    setDraftErr(null);
+    let providerId: number | null = null;
+    try {
+      const list = await api.listAIProviderRefs();
+      const def = list.find((p) => p.isDefault) ?? list[0];
+      if (!def) {
+        setDraftErr('未配置 AI 模型，请联系管理员');
+        return;
+      }
+      providerId = def.id;
+    } catch (e) {
+      setDraftErr((e as Error).message);
+      return;
+    }
+    // Use SKILL.md if present in buffers, otherwise the active buffer.
+    const skillMd = buffers['SKILL.md']?.content;
+    const content = skillMd ?? (activePath ? buffers[activePath]?.content ?? '' : '');
+    const filePath = skillMd ? 'SKILL.md' : (activePath ?? 'SKILL.md');
+    setSubmitNote('');
+    setDraftingNote(true);
+    draftHandleRef.current = runAssist(ns, name, {
+      providerId,
+      action: 'commit-summary',
+      currentContent: content,
+      filePath,
+    }, {
+      onDelta: (chunk) => setSubmitNote((prev) => prev + chunk),
+      onDone: () => {
+        setDraftingNote(false);
+        draftHandleRef.current = null;
+      },
+      onError: (m) => {
+        setDraftErr(m);
+        setDraftingNote(false);
+        draftHandleRef.current = null;
+      },
+    });
+  }
+
+  // Cancel any in-flight draft when the modal closes.
+  useEffect(() => {
+    if (!showSubmit && draftHandleRef.current) {
+      draftHandleRef.current.abort();
+      draftHandleRef.current = null;
+      setDraftingNote(false);
+    }
+  }, [showSubmit]);
 
   // Collect validation error strings for the AI fix-validation action.
   const validationErrors = useMemo(() => {
@@ -710,14 +774,17 @@ export function Editor() {
                     type="button"
                     className="btn sm ghost"
                     style={{ fontSize: 10.5, padding: '2px 8px', gap: 4 }}
-                    onClick={() => {
-                      setAIOpen(true);
-                      setAiTrigger({ action: 'commit-summary' });
-                    }}
-                    title="让 AI 根据文档内容起草提交说明"
-                  ><IconSparkles size={11} /> AI 起草</button>
+                    onClick={draftSubmitNote}
+                    disabled={submitting}
+                    title={draftingNote ? '点击停止生成' : '让 AI 根据文档内容起草提交说明'}
+                  >
+                    <IconSparkles size={11} /> {draftingNote ? '生成中... 点击停止' : 'AI 起草'}
+                  </button>
                 </div>
-                <textarea className="input" rows={4} value={submitNote} onChange={(e) => setSubmitNote(e.target.value)} placeholder="本次变更的关键点,会显示给审批人..." style={{ width: '100%', resize: 'vertical' }} />
+                <textarea className="input" rows={4} value={submitNote} onChange={(e) => setSubmitNote(e.target.value)} placeholder={draftingNote ? 'AI 正在生成...' : '本次变更的关键点,会显示给审批人...'} style={{ width: '100%', resize: 'vertical' }} />
+                {draftErr && (
+                  <div style={{ fontSize: 11.5, color: 'var(--red-text)', marginTop: 4 }}>{draftErr}</div>
+                )}
               </label>
               {policy.data && (
                 <div style={{ fontSize: 12, color: 'var(--text-subtle)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
