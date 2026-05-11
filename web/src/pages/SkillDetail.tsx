@@ -57,6 +57,19 @@ export function SkillDetail() {
     [tab, ns, name],
   );
 
+  // Pick a sensible default file once the listing comes back. SKILL.md is
+  // the primary surface so it wins over README.md / skill.yaml.
+  // IMPORTANT: this must run BEFORE the early-return guards below so the
+  // hook order stays stable between loading and loaded renders.
+  useEffect(() => {
+    if (!files.data || files.data.length === 0) return;
+    if (activePath && files.data.some((f) => f.path === activePath)) return;
+    const preferred = ['SKILL.md', 'README.md', 'skill.yaml'];
+    const pick = preferred.find((pp) => files.data!.some((f) => f.path === pp))
+      ?? files.data[0].path;
+    setActivePath(pick);
+  }, [files.data, activePath]);
+
   if (skill.loading) return <div className="content-inner"><div className="card"><div className="card-body">加载中...</div></div></div>;
   if (skill.error || !skill.data) return (
     <div className="content-inner"><div className="card"><div className="card-body" style={{ color: 'var(--red-text)' }}>
@@ -80,17 +93,6 @@ export function SkillDetail() {
   const canEdit = isAuthor || isMaintainer;
   const canManageLifecycle = isMaintainer; // author alone is NOT allowed
   const showLifecycleButtons = canManageLifecycle && p.status !== 'yanked' && p.status !== 'deprecated';
-
-  // Pick a sensible default file once the listing comes back. SKILL.md is
-  // the primary surface so it wins over README.md / skill.yaml.
-  useEffect(() => {
-    if (!files.data || files.data.length === 0) return;
-    if (activePath && files.data.some((f) => f.path === activePath)) return;
-    const preferred = ['SKILL.md', 'README.md', 'skill.yaml'];
-    const pick = preferred.find((p) => files.data!.some((f) => f.path === p))
-      ?? files.data[0].path;
-    setActivePath(pick);
-  }, [files.data, activePath]);
 
   async function doYank() {
     const reason = window.prompt('请输入撤销原因（必填，将通知作者）：');
