@@ -82,6 +82,21 @@ export function ReviewDetail() {
   // surface in the tab badge — that's what reviewers actually need to look at.
   const changeCount = (files.data ?? []).filter((f) => f.changeKind !== 'unchanged').length;
 
+  // Mirror the backend's authorisation rules (api.go:decideReview) so the
+  // buttons reflect reality instead of letting the user click and then
+  // showing an error toast. We compute one shared reason string and use it
+  // as the tooltip on every disabled button — that way the user
+  // understands *why* the action is blocked.
+  const myName = me.data?.username ?? '';
+  const isAuthor = myName !== '' && r.author === myName;
+  const isReviewer = myName !== '' && r.reviewers.includes(myName);
+  const isClosed = r.status !== 'pending';
+  const canDecide = !isClosed && !isAuthor && isReviewer;
+  const disabledReason = isClosed ? '该审批已结束'
+    : isAuthor ? '不能审批自己提交的请求'
+    : !isReviewer ? '你不是这条审批的指派 reviewer'
+    : '';
+
   return (
     <div className="content-inner">
       <div onClick={() => navigate('/reviews')}
@@ -101,17 +116,51 @@ export function ReviewDetail() {
           </p>
         </div>
         <div className="page-actions">
-          <button className="btn" disabled={r.status !== 'pending'} style={r.status !== 'pending' ? { opacity: 0.5, cursor: 'not-allowed' } : { color: 'var(--red-text)', borderColor: 'var(--red-bg)' }} onClick={() => decide('reject')}>
+          <button
+            className="btn"
+            disabled={!canDecide}
+            title={canDecide ? '驳回该审批' : disabledReason}
+            style={canDecide
+              ? { color: 'var(--red-text)', borderColor: 'var(--red-bg)' }
+              : { opacity: 0.5, cursor: 'not-allowed' }}
+            onClick={() => decide('reject')}
+          >
             <IconXCircle size={14} /> 驳回
           </button>
-          <button className="btn" disabled={r.status !== 'pending'} style={r.status !== 'pending' ? { opacity: 0.5, cursor: 'not-allowed' } : { color: 'var(--amber-text)', borderColor: 'var(--amber-bg)' }} onClick={requestChanges}>
+          <button
+            className="btn"
+            disabled={!canDecide}
+            title={canDecide ? '要求作者修改' : disabledReason}
+            style={canDecide
+              ? { color: 'var(--amber-text)', borderColor: 'var(--amber-bg)' }
+              : { opacity: 0.5, cursor: 'not-allowed' }}
+            onClick={requestChanges}
+          >
             <IconAlertTriangle size={14} /> 要求修改
           </button>
-          <button className="btn primary" disabled={r.status !== 'pending'} style={r.status !== 'pending' ? { opacity: 0.5, cursor: 'not-allowed' } : {}} onClick={() => decide('approve')}>
+          <button
+            className="btn primary"
+            disabled={!canDecide}
+            title={canDecide ? '批准并发布' : disabledReason}
+            style={canDecide ? undefined : { opacity: 0.5, cursor: 'not-allowed' }}
+            onClick={() => decide('approve')}
+          >
             <IconCheckCircle size={14} /> 批准并发布
           </button>
         </div>
       </div>
+
+      {/* Author / non-reviewer banner explains why the decision controls are
+          locked. We only show it while the review is still open — once
+          closed, the status pill in the header is enough context. */}
+      {!isClosed && !canDecide && disabledReason && (
+        <div className="card" style={{ marginBottom: 'var(--gap)', borderLeft: '3px solid var(--text-faint)' }}>
+          <div className="card-body" style={{ fontSize: 13, color: 'var(--text-subtle)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <IconAlertTriangle size={14} style={{ color: 'var(--text-faint)' }} />
+            <span>{disabledReason}。{isAuthor ? '请等待指派的 reviewer 审批。' : ''}</span>
+          </div>
+        </div>
+      )}
 
       {actionMsg && (
         <div className="card" style={{ marginBottom: 'var(--gap)', borderLeft: '3px solid var(--primary)' }}>
