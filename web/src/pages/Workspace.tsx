@@ -11,7 +11,7 @@ import { useAsync } from '../api/useAsync';
 import { openCreateSkill } from '../components/CreateSkillModal';
 import { fmtRelative, notifTargetUrl, filterAndSort, type NotifFilter } from '../lib/notify';
 import { markAllReadOptimistic, markOneReadOptimistic, useNotifStore } from '../lib/notifStore';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Notification, Review, Skill, ValidationReport } from '../api/types';
 
 const DRAFT_CHECKS_FALLBACK = [
@@ -184,6 +184,21 @@ export function Workspace() {
   // Workspace feed, topbar bell and sidebar badge stay in lockstep.
   const notifStore = useNotifStore();
   const pending = useAsync(() => api.listReviews('pending'), []);
+
+  // Keep the pending review list fresh: 30s polling + reviews:changed
+  // window event for instant updates when a decision is made anywhere.
+  // Without this, deciding a review in ReviewDetail leaves the
+  // 待我审批 feed and stat showing stale rows until full page reload.
+  useEffect(() => {
+    const t = window.setInterval(() => pending.reload(), 30_000);
+    const onChange = () => pending.reload();
+    window.addEventListener('reviews:changed', onChange);
+    return () => {
+      window.clearInterval(t);
+      window.removeEventListener('reviews:changed', onChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Filter the platform-wide pending queue down to "things I can act on".
   // Authoring my own request shouldn't count as 待我审批 — I can't approve

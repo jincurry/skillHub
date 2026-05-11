@@ -54,6 +54,9 @@ export function ReviewDetail() {
           : '已要求作者修改,Skill 已回到 draft。'
       );
       review.reload();
+      // Broadcast so the sidebar badge and Workspace 待我审批 feed reload
+      // immediately rather than waiting for their 30s poll.
+      window.dispatchEvent(new CustomEvent('reviews:changed'));
     } catch (e) {
       setActionMsg(`操作失败: ${(e as Error).message}`);
     }

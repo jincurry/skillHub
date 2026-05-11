@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useEffect, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   IconHome, IconBox, IconCheck, IconClipboard, IconSettings, IconUsers,
@@ -26,7 +26,28 @@ const NAV_ITEMS: NavItem[] = [
 
 function Sidebar() {
   const { data: me } = useAsync(() => api.me());
-  const { data: pendingReviews } = useAsync(() => api.listReviews('pending'));
+  const pendingReviewsState = useAsync(() => api.listReviews('pending'));
+  const { data: pendingReviews } = pendingReviewsState;
+
+  // The pending list is mounted-once via useAsync, so a review decided in
+  // another tab (or by us via ReviewDetail) wouldn't refresh the sidebar
+  // badge until full reload. Two cheap mechanisms keep it fresh:
+  //   1. 30s timer — eventual consistency
+  //   2. window 'reviews:changed' event — fired by ReviewDetail.decide() so
+  //      the badge updates instantly after the user clicks 批准/驳回
+  useEffect(() => {
+    const t = window.setInterval(() => pendingReviewsState.reload(), 30_000);
+    const onChange = () => pendingReviewsState.reload();
+    window.addEventListener('reviews:changed', onChange);
+    return () => {
+      window.clearInterval(t);
+      window.removeEventListener('reviews:changed', onChange);
+    };
+    // pendingReviewsState identity changes every render; the effect itself
+    // doesn't depend on it because reload is captured by closure each tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // The "审批中心" badge should reflect things I can actually act on, not
   // the platform-wide queue. We count reviews where I'm an assigned
   // reviewer; author-only rows are excluded because I can't self-approve.
