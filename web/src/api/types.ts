@@ -337,7 +337,8 @@ export interface UpdateAIProviderRequest {
 
 export type AIAssistAction =
   | 'outline' | 'expand' | 'polish' | 'examples'
-  | 'summary' | 'translate' | 'review' | 'freeform';
+  | 'summary' | 'translate' | 'review'
+  | 'fix-validation' | 'commit-summary' | 'freeform';
 
 // One prior turn in a multi-turn AI assist conversation. The server only
 // accepts user + assistant; system is owned by the backend.
@@ -355,4 +356,8 @@ export interface AIAssistRequest {
   filePath: string;
   /** Prior turns; omit or empty for the first message. */
   history?: AIAssistTurn[];
+  /** Cross-file context: path → content. */
+  additionalFiles?: Record<string, string>;
+  /** Validation errors for the fix-validation action. */
+  validationErrors?: string[];
 }

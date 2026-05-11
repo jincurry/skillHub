@@ -234,6 +234,10 @@ func actionTemplate(action string) string {
 		return "将文档翻译为英文，保留所有代码块、链接和标题层级。"
 	case "review":
 		return "不要修改文档。请阅读后给出改进清单（可读性、完整性、可运行性、安全性等维度），用 markdown 列表形式输出。"
+	case "fix-validation":
+		return "下方附带了 SkillHub 自动验证工具发现的错误或警告。请修复文档中对应的问题，直接输出修正后的完整文档。不要解释你做了什么改动。"
+	case "commit-summary":
+		return "根据文档当前内容，生成一段简洁（3-5 行）的版本发布说明，概括本次改动要点。格式为 markdown 列表，语言与文档一致。只输出发布说明本身，不需要文档全文。"
 	default:
 		return ""
 	}
@@ -277,6 +281,20 @@ func buildAssistMessages(skill *model.Skill, req *model.AIAssistRequest) []chatM
 	if req.Selection != "" {
 		userParts = append(userParts,
 			fmt.Sprintf("用户特别想改这一段：\n```\n%s\n```", req.Selection))
+	}
+	// Cross-file context: let the LLM see the rest of the skill bundle.
+	if len(req.AdditionalFiles) > 0 {
+		var parts []string
+		for p, c := range req.AdditionalFiles {
+			parts = append(parts, fmt.Sprintf("--- %s ---\n%s", p, c))
+		}
+		userParts = append(userParts,
+			"以下是同 skill 包中其他文件的内容，供参考：\n"+strings.Join(parts, "\n\n"))
+	}
+	// Validation errors for the fix-validation action.
+	if len(req.ValidationErrors) > 0 {
+		userParts = append(userParts,
+			"验证工具发现的问题：\n- "+strings.Join(req.ValidationErrors, "\n- "))
 	}
 	if tmpl != "" {
 		userParts = append(userParts, "任务："+tmpl)

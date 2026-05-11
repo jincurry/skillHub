@@ -200,6 +200,12 @@ type PutFileRequest struct {
 	Content string `json:"content"`
 }
 
+// RenameFileRequest is the body for POST /skills/:ns/:name/files/rename.
+type RenameFileRequest struct {
+	From string `json:"from" binding:"required"`
+	To   string `json:"to"   binding:"required"`
+}
+
 // Achievement is one badge surfaced on the Profile page. Server-computed from
 // existing data (stats, audit log, ownership) so we don't need a dedicated
 // achievements table for the MVP.
@@ -330,13 +336,20 @@ type UpdateAIProviderRequest struct {
 // AIAssistRequest is the editor -> server message that kicks off a streaming
 // LLM call for documentation help.
 type AIAssistRequest struct {
-	ProviderID     int64           `json:"providerId"     binding:"required"`
-	Action         string          `json:"action"`         // outline|expand|polish|examples|summary|translate|review|freeform
-	Instruction    string          `json:"instruction"`    // user's free-form intent
-	Selection      string          `json:"selection"`      // optional: only-this-region edits
-	CurrentContent string          `json:"currentContent"` // full file body for context
-	FilePath       string          `json:"filePath"`       // SKILL.md / README.md
-	History        []AIAssistTurn  `json:"history"`        // optional: prior turns in a multi-turn chat
+	ProviderID       int64                  `json:"providerId"       binding:"required"`
+	Action           string                 `json:"action"`           // outline|expand|polish|examples|summary|translate|review|fix-validation|commit-summary|freeform
+	Instruction      string                 `json:"instruction"`      // user's free-form intent
+	Selection        string                 `json:"selection"`        // optional: only-this-region edits
+	CurrentContent   string                 `json:"currentContent"`   // full file body for context
+	FilePath         string                 `json:"filePath"`         // SKILL.md / README.md
+	History          []AIAssistTurn         `json:"history"`          // optional: prior turns in a multi-turn chat
+	// AdditionalFiles gives the LLM cross-file context. Each entry maps
+	// path → content (truncated by the frontend to keep the prompt sane).
+	AdditionalFiles  map[string]string      `json:"additionalFiles"`
+	// ValidationErrors is populated by the frontend when the user triggers
+	// the "fix-validation" action. Each string is one human-readable error
+	// or warning line from the validation report.
+	ValidationErrors []string               `json:"validationErrors"`
 }
 
 // AIAssistTurn is one prior message kept around so the LLM can see what the

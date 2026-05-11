@@ -63,3 +63,4 @@ export const IconSparkles = (p: Props) => <Base {...p}><path d="M12 3l1.5 4.5L18
 export const IconStop = (p: Props) => <Base {...p}><rect x="6" y="6" width="12" height="12" rx="1" /></Base>;
 export const IconRefresh = (p: Props) => <Base {...p}><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 4v4h-4" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 20v-4h4" /></Base>;
 export const IconSend = (p: Props) => <Base {...p}><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" /></Base>;
+export const IconPencil = (p: Props) => <Base {...p}><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></Base>;

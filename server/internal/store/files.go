@@ -118,6 +118,47 @@ func (s *Store) DeleteSkillFile(ns, name, p string) (bool, error) {
 	return n > 0, nil
 }
 
+// RenameSkillFile moves a file from one path to another within the same skill.
+// Returns the updated row. Error cases:
+//   - source file doesn't exist            → sql.ErrNoRows
+//   - destination already exists           → "destination already exists"
+//   - source == destination                → "source and destination are identical"
+//
+// Both paths are assumed to have already been validated by ValidateFilePath.
+func (s *Store) RenameSkillFile(ns, name, fromPath, toPath, updatedBy string) (*model.SkillFile, error) {
+	if fromPath == toPath {
+		return nil, errors.New("source and destination are identical")
+	}
+	// Bail out early if the target slot is taken — UPDATE would silently
+	// fail the UNIQUE(ns, skill_name, path) constraint and the user wouldn't
+	// know why.
+	var exists int
+	if err := s.DB.QueryRow(
+		`SELECT COUNT(*) FROM skill_files WHERE ns = ? AND skill_name = ? AND path = ?`,
+		ns, name, toPath,
+	).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if exists > 0 {
+		return nil, errors.New("destination already exists")
+	}
+	res, err := s.DB.Exec(`
+		UPDATE skill_files
+		   SET path       = ?,
+		       updated_at = CURRENT_TIMESTAMP,
+		       updated_by = ?
+		 WHERE ns = ? AND skill_name = ? AND path = ?`,
+		toPath, updatedBy, ns, name, fromPath)
+	if err != nil {
+		return nil, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return s.GetSkillFile(ns, name, toPath)
+}
+
 // SeedDefaultFiles bootstraps a freshly-created skill with a couple of starter
 // files so the editor has something to render. No-op if the skill already has
 // any files.

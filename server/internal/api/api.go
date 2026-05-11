@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -76,6 +77,10 @@ func (s *Server) Routes() *gin.Engine {
 		auth.GET("/skills/:ns/:name/files/*path", s.getSkillFile)
 		auth.PUT("/skills/:ns/:name/files/*path", s.putSkillFile)
 		auth.DELETE("/skills/:ns/:name/files/*path", s.deleteSkillFile)
+		// Rename lives on a sibling route because the `files/*path` catch-all
+		// above would otherwise swallow a "/files/rename" segment as the
+		// wildcard value.
+		auth.POST("/skills/:ns/:name/rename-file", s.renameSkillFile)
 
 		auth.GET("/reviews", s.listReviews)
 		auth.GET("/reviews/stats", s.getReviewStats)
@@ -869,6 +874,55 @@ func (s *Server) deleteSkillFile(c *gin.Context) {
 	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
 		user, "delete_file", ns+"/"+name+":"+p, "", "127.0.0.1")
 	c.JSON(204, nil)
+}
+
+// renameSkillFile moves a file within a skill bundle. Required files are
+// pinned (matching deleteSkillFile) so the editor never ends up missing
+// SKILL.md / README.md / skill.yaml. The destination path must clear the same
+// ValidateFilePath rules as a fresh upload.
+func (s *Server) renameSkillFile(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	user := s.currentUser(c)
+	allowed, err := s.canEditSkill(user, ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(403, gin.H{"error": "需要 author 或 namespace 成员身份"})
+		return
+	}
+	var req model.RenameFileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	from, err := store.ValidateFilePath(req.From)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "from: " + err.Error()})
+		return
+	}
+	to, err := store.ValidateFilePath(req.To)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "to: " + err.Error()})
+		return
+	}
+	if from == "skill.yaml" || from == "SKILL.md" || from == "README.md" {
+		c.JSON(400, gin.H{"error": "this file is required and cannot be renamed"})
+		return
+	}
+	f, err := s.store.RenameSkillFile(ns, name, from, to, user)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(404, gin.H{"error": "source file not found"})
+			return
+		}
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
+		user, "rename_file", ns+"/"+name+":"+from+"→"+to, "", "127.0.0.1")
+	c.JSON(200, f)
 }
 
 // createNamespace lets any authenticated user spin up a namespace they will

@@ -46,9 +46,16 @@ interface Props {
   /** The drawer reads from / writes to the editor through this bridge. */
   bridge: EditorBridge;
   onClose: () => void;
+  /** All file buffers (path → content) for cross-file context. */
+  allFiles?: Record<string, string>;
+  /** Validation errors to attach when running fix-validation. */
+  validationErrors?: string[];
+  /** Imperative trigger: parent can set this to auto-start an action. */
+  triggerAction?: { action: AIAssistAction; instruction?: string } | null;
+  onTriggerConsumed?: () => void;
 }
 
-export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose }: Props) {
+export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allFiles, validationErrors, triggerAction, onTriggerConsumed }: Props) {
   const [providers, setProviders] = useState<AIProviderRef[] | null>(null);
   const [providerId, setProviderId] = useState<number | null>(null);
   const [providersErr, setProvidersErr] = useState<string | null>(null);
@@ -72,6 +79,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose }: Pr
   // the LLM sees the conversation. OFF means each call is independent.
   const [multiTurn, setMultiTurn] = useState(false);
   const [chatHistory, setChatHistory] = useState<AIAssistTurn[]>([]);
+  const [includeAllFiles, setIncludeAllFiles] = useState(false);
 
   const handleRef = useRef<AssistHandle | null>(null);
   const lastRunRef = useRef<{
@@ -149,6 +157,8 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose }: Pr
       currentContent: ctx,
       filePath,
       history: multiTurn && chatHistory.length > 0 ? chatHistory : undefined,
+      additionalFiles: includeAllFiles && allFiles ? allFiles : undefined,
+      validationErrors: action === 'fix-validation' && validationErrors?.length ? validationErrors : undefined,
     }, {
       onDelta: (chunk) => setOutput((prev) => prev + chunk),
       onDone: () => {
@@ -209,6 +219,15 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose }: Pr
     }
   }, [open]);
 
+  // Imperative trigger from parent (e.g. "AI 修复" button or "AI 起草" button).
+  useEffect(() => {
+    if (triggerAction && open && providerId && !running) {
+      start(triggerAction.action, triggerAction.instruction);
+      onTriggerConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerAction, open, providerId]);
+
   if (!open) return null;
 
   const hasOutput = output.length > 0;
@@ -265,6 +284,16 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose }: Pr
             style={{ margin: 0 }}
           />
           多轮上下文
+        </label>
+        <span style={{ color: 'var(--text-faint)' }}>·</span>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={includeAllFiles}
+            onChange={(e) => setIncludeAllFiles(e.target.checked)}
+            style={{ margin: 0 }}
+          />
+          含全部文件
         </label>
         {multiTurn && (
           <>

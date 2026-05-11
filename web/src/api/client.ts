@@ -123,6 +123,15 @@ export const api = {
     request<void>(`/skills/${ns}/${name}/files/${encodeURI(path)}`, {
       method: 'DELETE',
     }),
+  /**
+   * Move a file from one path to another inside the same skill bundle.
+   * Uses a sibling endpoint (not /files/*) because the wildcard there would
+   * eat the "rename" segment.
+   */
+  renameFile: (ns: string, name: string, from: string, to: string) =>
+    request<SkillFile>(`/skills/${ns}/${name}/rename-file`, {
+      method: 'POST', body: JSON.stringify({ from, to }),
+    }),
   listRatings: (ns: string, name: string) =>
     request<RatingsResponse>(`/skills/${ns}/${name}/ratings`),
   rateSkill: (ns: string, name: string, stars: number, comment = '') =>

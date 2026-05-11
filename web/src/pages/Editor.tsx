@@ -3,11 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import MonacoEditor, { type OnMount } from '@monaco-editor/react';
 import {
   IconCode, IconCheckCircle, IconRocket, IconChevronDown, IconChevronRight,
-  IconAlertTriangle, IconXCircle, IconPlus, IconSparkles,
+  IconAlertTriangle, IconXCircle, IconPlus, IconSparkles, IconPencil,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
-import type { SkillFile, ValidationReport } from '../api/types';
+import type { AIAssistAction, SkillFile, ValidationReport } from '../api/types';
 import { AIAssistDrawer, type EditorBridge } from '../components/AIAssistDrawer';
 import { languageFor } from '../lib/files';
 
@@ -79,6 +79,7 @@ function FileTree({
   dirtyPaths,
   onPick,
   onDelete,
+  onRename,
   canEdit,
 }: {
   root: TreeNode;
@@ -86,13 +87,54 @@ function FileTree({
   dirtyPaths: Set<string>;
   onPick: (p: string) => void;
   onDelete: (p: string) => void;
+  /** Called with (oldPath, newPath). Should return true on success so the
+      inline editor can close itself. */
+  onRename: (oldPath: string, newPath: string) => Promise<boolean>;
   canEdit: boolean;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Path currently being inline-renamed (null = none).
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameErr, setRenameErr] = useState<string | null>(null);
+
   const toggle = (p: string) => {
     const next = new Set(collapsed);
     next.has(p) ? next.delete(p) : next.add(p);
     setCollapsed(next);
+  };
+  const startRename = (p: string) => {
+    setRenaming(p);
+    setRenameValue(p);
+    setRenameErr(null);
+  };
+  const cancelRename = () => {
+    if (renameBusy) return;
+    setRenaming(null);
+    setRenameValue('');
+    setRenameErr(null);
+  };
+  const commitRename = async () => {
+    if (!renaming) return;
+    const next = renameValue.trim();
+    if (!next || next === renaming) {
+      cancelRename();
+      return;
+    }
+    setRenameBusy(true);
+    setRenameErr(null);
+    try {
+      const ok = await onRename(renaming, next);
+      if (ok) {
+        setRenaming(null);
+        setRenameValue('');
+      }
+    } catch (e) {
+      setRenameErr((e as Error).message);
+    } finally {
+      setRenameBusy(false);
+    }
   };
 
   const renderNode = (n: TreeNode, depth: number): React.ReactNode => {
@@ -113,6 +155,51 @@ function FileTree({
     const dirty = dirtyPaths.has(n.path);
     const isActive = activePath === n.path;
     const required = REQUIRED_FILES.has(n.path);
+    const isRenaming = renaming === n.path;
+    if (isRenaming) {
+      // While renaming we replace the row with an inline form. We keep the
+      // same paddingLeft so the user's eye doesn't jump.
+      return (
+        <div key={n.path} style={{ paddingLeft: 8 + depth * 16, padding: '4px 8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>{iconFor(n.path)}</span>
+            <input
+              autoFocus
+              value={renameValue}
+              disabled={renameBusy}
+              onChange={(e) => { setRenameValue(e.target.value); if (renameErr) setRenameErr(null); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+                else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                flex: 1, minWidth: 0,
+                fontSize: 12, fontFamily: 'var(--font-mono, monospace)',
+                padding: '2px 6px', height: 22,
+                border: '1px solid var(--primary, #4f46e5)', borderRadius: 4,
+                background: 'var(--bg)', color: 'var(--text)',
+              }}
+            />
+            <button
+              className="btn sm primary"
+              style={{ height: 22, padding: '0 6px', fontSize: 11 }}
+              disabled={renameBusy}
+              onClick={(e) => { e.stopPropagation(); commitRename(); }}
+            >{renameBusy ? '...' : 'OK'}</button>
+            <button
+              className="btn sm ghost"
+              style={{ height: 22, padding: '0 6px', fontSize: 11 }}
+              disabled={renameBusy}
+              onClick={(e) => { e.stopPropagation(); cancelRename(); }}
+            >取消</button>
+          </div>
+          {renameErr && (
+            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--red-text, #b91c1c)' }}>{renameErr}</div>
+          )}
+        </div>
+      );
+    }
     return (
       <div
         key={n.path}
@@ -127,12 +214,20 @@ function FileTree({
         </span>
         {dirty && <span className="file-status M" title="未保存">M</span>}
         {canEdit && !required && (
-          <button
-            className="btn sm ghost"
-            style={{ padding: '0 4px', height: 18, minWidth: 0, fontSize: 11, opacity: 0.5 }}
-            title={`删除 ${n.path}`}
-            onClick={(e) => { e.stopPropagation(); onDelete(n.path); }}
-          >×</button>
+          <>
+            <button
+              className="btn sm ghost"
+              style={{ padding: '0 4px', height: 18, minWidth: 0, opacity: 0.5 }}
+              title={`重命名 ${n.path}`}
+              onClick={(e) => { e.stopPropagation(); startRename(n.path); }}
+            ><IconPencil size={11} /></button>
+            <button
+              className="btn sm ghost"
+              style={{ padding: '0 4px', height: 18, minWidth: 0, fontSize: 11, opacity: 0.5 }}
+              title={`删除 ${n.path}`}
+              onClick={(e) => { e.stopPropagation(); onDelete(n.path); }}
+            >×</button>
+          </>
         )}
       </div>
     );
@@ -204,6 +299,7 @@ export function Editor() {
   // the current selection and apply edits through the editor's own command
   // pipeline (which keeps undo/redo intact).
   const [aiOpen, setAIOpen] = useState(false);
+  const [aiTrigger, setAiTrigger] = useState<{ action: AIAssistAction; instruction?: string } | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
 
@@ -244,6 +340,17 @@ export function Editor() {
   }, [buffers]);
   const anyDirty = dirtyPaths.size > 0;
 
+  // Warn users before leaving the page with unsaved edits.
+  useEffect(() => {
+    if (!anyDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [anyDirty]);
+
   // Permission gate: only the author or an owner/maintainer of the namespace
   // is allowed to PUT/DELETE files. This mirrors the backend rule
   // (api.go: canEditSkill) so the editor disables UI ahead of any 403.
@@ -256,6 +363,23 @@ export function Editor() {
 
   const tree = useMemo(() => buildTree(files.data ?? []), [files.data]);
   const activeBuf = activePath ? buffers[activePath] : undefined;
+
+  // Build a map of all file contents for cross-file AI context.
+  const allFilesMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const [p, b] of Object.entries(buffers)) {
+      if (p !== activePath) m[p] = b.content;
+    }
+    return m;
+  }, [buffers, activePath]);
+
+  // Collect validation error strings for the AI fix-validation action.
+  const validationErrors = useMemo(() => {
+    if (!validation.data) return [];
+    return validation.data.checks
+      .filter((c) => c.severity === 'err' || c.severity === 'warn')
+      .map((c) => `[${c.severity}] ${c.label}: ${c.detail}`);
+  }, [validation.data]);
 
   useEffect(() => {
     if (showSubmit) setSubmitVersion((v) => v || nextVersion);
@@ -379,6 +503,42 @@ export function Editor() {
     } catch (e) {
       setMsg(`删除失败: ${(e as Error).message}`);
     }
+  }
+
+  /**
+   * Rename / move a file in the bundle. We keep the in-memory buffer (with
+   * dirty state preserved) and rekey tabs so the user doesn't lose work.
+   * Returns true on success so the inline rename input can close itself.
+   */
+  async function renameFile(oldPath: string, newPath: string): Promise<boolean> {
+    if (REQUIRED_FILES.has(oldPath)) {
+      throw new Error(`${oldPath} 不可重命名`);
+    }
+    if ((files.data ?? []).some((f) => f.path === newPath)) {
+      throw new Error(`${newPath} 已存在`);
+    }
+    const buf = buffers[oldPath];
+    // If the user has unsaved edits we'd lose them after the server
+    // re-reads the file (since rename returns the on-disk content). Flush
+    // them upstream first.
+    if (buf?.dirty) {
+      try {
+        await api.putFile(ns, name, oldPath, buf.content);
+      } catch (e) {
+        throw new Error(`保存原文件失败: ${(e as Error).message}`);
+      }
+    }
+    await api.renameFile(ns, name, oldPath, newPath);
+    setBuffers((b) => {
+      const { [oldPath]: prev, ...rest } = b;
+      if (!prev) return rest;
+      return { ...rest, [newPath]: { content: prev.content, dirty: false } };
+    });
+    setOpenPaths((prev) => prev.map((x) => (x === oldPath ? newPath : x)));
+    setActivePath((cur) => (cur === oldPath ? newPath : cur));
+    files.reload();
+    setMsg(`已重命名 ${oldPath} → ${newPath}`);
+    return true;
   }
 
   async function submitForReview() {
@@ -544,7 +704,19 @@ export function Editor() {
                 <input className="input" value={submitVersion} onChange={(e) => setSubmitVersion(e.target.value)} placeholder={nextVersion} style={{ width: '100%', fontFamily: "'JetBrains Mono', monospace" }} />
               </label>
               <label style={{ display: 'block' }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>提交说明（可选）</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>提交说明（可选）</span>
+                  <button
+                    type="button"
+                    className="btn sm ghost"
+                    style={{ fontSize: 10.5, padding: '2px 8px', gap: 4 }}
+                    onClick={() => {
+                      setAIOpen(true);
+                      setAiTrigger({ action: 'commit-summary' });
+                    }}
+                    title="让 AI 根据文档内容起草提交说明"
+                  ><IconSparkles size={11} /> AI 起草</button>
+                </div>
                 <textarea className="input" rows={4} value={submitNote} onChange={(e) => setSubmitNote(e.target.value)} placeholder="本次变更的关键点,会显示给审批人..." style={{ width: '100%', resize: 'vertical' }} />
               </label>
               {policy.data && (
@@ -656,6 +828,7 @@ export function Editor() {
               dirtyPaths={dirtyPaths}
               onPick={openFile}
               onDelete={deleteFile}
+              onRename={renameFile}
               canEdit={canEdit}
             />
           )}
@@ -793,6 +966,18 @@ export function Editor() {
                   <Icon size={14} style={{ color, flexShrink: 0 }} />
                   <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.label}</span>
                   <span className={`tag ${cls}`}>{v.severity === 'ok' ? '通过' : v.severity === 'warn' ? '警告' : '错误'}</span>
+                  {v.severity !== 'ok' && (
+                    <button
+                      type="button"
+                      className="btn sm ghost"
+                      style={{ padding: '0 4px', height: 18, fontSize: 10, flexShrink: 0 }}
+                      title="让 AI 自动修复此问题"
+                      onClick={() => {
+                        setAIOpen(true);
+                        setAiTrigger({ action: 'fix-validation', instruction: `${v.label}: ${v.detail}` });
+                      }}
+                    ><IconSparkles size={10} /></button>
+                  )}
                 </div>
               );
             })}
@@ -824,6 +1009,10 @@ export function Editor() {
         filePath={activePath ?? 'SKILL.md'}
         bridge={aiBridge}
         onClose={() => setAIOpen(false)}
+        allFiles={allFilesMap}
+        validationErrors={validationErrors}
+        triggerAction={aiTrigger}
+        onTriggerConsumed={() => setAiTrigger(null)}
       />
     </div>
   );
