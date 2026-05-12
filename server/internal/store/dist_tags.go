@@ -85,6 +85,18 @@ func (s *Store) DeleteDistTag(ns, name, tag string) error {
 	return nil
 }
 
+// ResolveDistTag maps a tag string (e.g. "latest") to the version it
+// points at. Returns sql.ErrNoRows if the alias doesn't exist; callers
+// typically translate that into a 404.
+func (s *Store) ResolveDistTag(ns, name, tag string) (string, error) {
+	var v string
+	err := s.DB.QueryRow(
+		`SELECT version FROM skill_dist_tags WHERE ns=? AND skill_name=? AND tag=?`,
+		ns, name, tag,
+	).Scan(&v)
+	return v, err
+}
+
 // upsertDistTagTx is the in-transaction variant used by DecideReview to
 // auto-bump "latest" on publish without grabbing a second connection (we
 // run with SetMaxOpenConns(1)).

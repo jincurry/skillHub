@@ -233,6 +233,59 @@ func (s *Store) RemoveNamespaceMember(ns, username, actor string) error {
 	return tx.Commit()
 }
 
+// ListSkillFilesAtVersion returns the file bundle as it existed at a
+// specific published version. Used by the `?tag=` bundle download so a
+// consumer pinned to "stable" gets the right snapshot even after the
+// author has moved on.
+//
+// Resolution strategy:
+//
+//  1. If `version` matches the skill's current row, defer to the live
+//     skill_files (cheapest, also covers in-flight drafts).
+//  2. Otherwise look up the most recently submitted review for that
+//     (ns, name, version) and serve its review_files snapshot.
+//  3. If no snapshot exists (legacy skills published before snapshots
+//     landed), return ErrNoRows so the caller can 404.
+func (s *Store) ListSkillFilesAtVersion(ns, name, version string) ([]model.SkillFile, error) {
+	var currentVersion string
+	err := s.DB.QueryRow(`SELECT version FROM skills WHERE ns=? AND name=?`, ns, name).Scan(&currentVersion)
+	if err != nil {
+		return nil, err
+	}
+	if currentVersion == version {
+		return s.ListSkillFilesWithContent(ns, name)
+	}
+	// Pull the snapshot from the most recent review for that exact version.
+	// Approved reviews are preferred (those represent published bundles),
+	// but we fall back to any review id since a yanked version still gives
+	// a meaningful bundle.
+	var reviewID int64
+	err = s.DB.QueryRow(`
+		SELECT id FROM reviews
+		WHERE ns = ? AND skill_name = ? AND version = ?
+		ORDER BY (status='approved') DESC, id DESC
+		LIMIT 1`, ns, name, version).Scan(&reviewID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.Query(`SELECT path, new_content
+		FROM review_files WHERE review_id = ? ORDER BY path`, reviewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]model.SkillFile, 0)
+	for rows.Next() {
+		var f model.SkillFile
+		if err := rows.Scan(&f.Path, &f.Content); err != nil {
+			return nil, err
+		}
+		f.Size = len(f.Content)
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // ListSkillFilesWithContent is used by the bundle endpoint — the standard
 // ListSkillFiles excludes content to keep listings cheap. Order matches
 // ListSkillFiles so directory traversal is deterministic.

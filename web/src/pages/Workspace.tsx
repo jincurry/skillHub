@@ -162,6 +162,15 @@ function PendingReviewItem({ r }: { r: Review }) {
           <span>{r.name}</span>
           <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>v{r.version}</span>
           <ClassificationTag level={r.classification} />
+          {r.isHotfix && (
+            <span
+              className="tag"
+              style={{ background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 10, fontWeight: 600 }}
+              title={`Hotfix: ${r.hotfixReason || '未填写原因'}`}
+            >
+              ⚡ HOTFIX
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
           by <span className="mono">@{r.author}</span> · <span style={{ color: ucol.color, fontWeight: 500 }}>{r.note || r.sla}</span>

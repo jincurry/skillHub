@@ -70,6 +70,7 @@ export function SkillDetail() {
   const distTags = useAsync(() => api.listDistTags(ns, name), [ns, name]);
   const subState = useAsync(() => api.getSubscriptionState(ns, name), [ns, name]);
   const [subBusy, setSubBusy] = useState(false);
+  const [distModalOpen, setDistModalOpen] = useState(false);
   async function toggleSubscribe() {
     if (subBusy) return;
     setSubBusy(true);
@@ -171,32 +172,7 @@ export function SkillDetail() {
     }
   }
 
-  // dist tag management uses native prompts so we don't have to ship a full
-  // modal for an admin-only flow. The cycle is: pick action → ask values →
-  // call API → reload chips. Manual "latest" overrides act as rollbacks
-  // (the backend allows it; useful when a publish needs to be reverted).
-  async function manageDistTags() {
-    const action = window.prompt(
-      'Dist tags 管理:\n  set <tag> <version>     设置/修改 tag\n  delete <tag>            删除 tag (latest 不可删)\n例: set stable 1.2.0',
-      'set ',
-    );
-    if (!action) return;
-    const parts = action.trim().split(/\s+/);
-    try {
-      if (parts[0] === 'set' && parts.length === 3) {
-        await api.setDistTag(p.ns, p.name, parts[1], parts[2]);
-      } else if (parts[0] === 'delete' && parts.length === 2) {
-        if (!window.confirm(`确定删除 tag "${parts[1]}"?`)) return;
-        await api.deleteDistTag(p.ns, p.name, parts[1]);
-      } else {
-        alert('指令格式错误,请使用 "set <tag> <version>" 或 "delete <tag>"');
-        return;
-      }
-      distTags.reload();
-    } catch (e) {
-      alert('操作失败:' + (e as Error).message);
-    }
-  }
+  function openDistTagsModal() { setDistModalOpen(true); }
 
   return (
     <div className="content-inner">
@@ -249,7 +225,7 @@ export function SkillDetail() {
                 <button
                   className="btn sm ghost"
                   style={{ fontSize: 11, padding: '2px 8px' }}
-                  onClick={manageDistTags}
+                  onClick={openDistTagsModal}
                   title="管理 dist tags(latest/stable/beta/...)"
                 >编辑</button>
               )}
@@ -675,6 +651,145 @@ export function SkillDetail() {
                 ));
               })()}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {distModalOpen && (
+        <DistTagsModal
+          ns={p.ns}
+          name={p.name}
+          versions={(versions.data ?? []).map((v) => v.version)}
+          tags={distTags.data ?? []}
+          onClose={() => setDistModalOpen(false)}
+          onChange={() => distTags.reload()}
+        />
+      )}
+    </div>
+  );
+}
+
+// DistTagsModal: a focused panel for pinning/removing dist tags. We pass in
+// the version list so the value picker stays a controlled dropdown — typing
+// raw versions worked for the old prompt UI but was easy to get wrong.
+// "latest" is auto-managed by the publish flow; we let admins override it
+// for rollback scenarios but warn inline.
+function DistTagsModal({
+  ns, name, versions, tags, onClose, onChange,
+}: {
+  ns: string;
+  name: string;
+  versions: string[];
+  tags: import('../api/types').DistTag[];
+  onClose: () => void;
+  onChange: () => void;
+}) {
+  const [tagInput, setTagInput] = useState('stable');
+  const [versionInput, setVersionInput] = useState(versions[0] ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function applySet() {
+    setErr(null);
+    if (!tagInput.trim() || !versionInput.trim()) {
+      setErr('tag 与 version 必填'); return;
+    }
+    setBusy(true);
+    try {
+      await api.setDistTag(ns, name, tagInput.trim(), versionInput.trim());
+      onChange();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyDelete(tag: string) {
+    if (!window.confirm(`确定删除 tag "${tag}"?`)) return;
+    setErr(null); setBusy(true);
+    try {
+      await api.deleteDistTag(ns, name, tag);
+      onChange();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: 'var(--bg)', borderRadius: 10, width: 520, maxWidth: '92vw', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)' }}
+      >
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontWeight: 600 }}>管理 Dist Tags</div>
+          <button className="btn sm ghost" onClick={onClose}>关闭</button>
+        </div>
+        <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 8 }}>现有 tags</div>
+            {tags.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>暂无</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {tags.map((t) => (
+                  <div key={t.tag} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+                    <span
+                      className={`tag ${t.tag === 'latest' ? 'green' : t.tag === 'stable' ? 'indigo' : t.tag === 'beta' ? 'amber' : ''}`}
+                      style={{ fontSize: 11 }}
+                    >{t.tag}</span>
+                    <span className="mono" style={{ color: 'var(--text)' }}>v{t.version}</span>
+                    <span style={{ color: 'var(--text-faint)', fontSize: 11.5, flex: 1 }}>
+                      by @{t.updatedBy || 'system'} · {new Date(t.updatedAt).toLocaleString()}
+                    </span>
+                    <button
+                      className="btn sm ghost"
+                      disabled={busy || t.tag === 'latest'}
+                      onClick={() => applyDelete(t.tag)}
+                      title={t.tag === 'latest' ? 'latest 由发布流程自动维护,不可手动删除' : '删除该 tag'}
+                      style={{ color: t.tag === 'latest' ? 'var(--text-faint)' : 'var(--red-text)' }}
+                    >删除</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            <div style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 8 }}>新增 / 修改</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                className="input"
+                placeholder="tag (e.g. stable)"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                style={{ flex: 1, fontSize: 12.5 }}
+              />
+              <span style={{ color: 'var(--text-faint)' }}>→</span>
+              <select
+                className="input"
+                value={versionInput}
+                onChange={(e) => setVersionInput(e.target.value)}
+                style={{ flex: 1, fontSize: 12.5 }}
+              >
+                {versions.length === 0 && <option value="">(no versions)</option>}
+                {versions.map((v) => <option key={v} value={v}>v{v}</option>)}
+              </select>
+              <button className="btn primary sm" disabled={busy} onClick={applySet}>
+                {busy ? '...' : '应用'}
+              </button>
+            </div>
+            {tagInput.trim() === 'latest' && (
+              <div style={{ fontSize: 11, color: 'var(--amber-text)', marginTop: 6 }}>
+                提示:latest 通常由发布流程自动管理,手动修改可作为回滚使用。
+              </div>
+            )}
+            {err && <div style={{ fontSize: 11.5, color: 'var(--red-text)', marginTop: 6 }}>{err}</div>}
           </div>
         </div>
       </div>

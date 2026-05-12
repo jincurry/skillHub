@@ -1316,13 +1316,31 @@ func (s *Server) downloadSkillBundle(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "skill not found"})
 		return
 	}
-	files, err := s.store.ListSkillFilesWithContent(ns, name)
+	// ?tag=latest|stable|beta|<custom> resolves through skill_dist_tags;
+	// ?version=x.y.z hits a specific version directly. Without either,
+	// we serve whatever version is on the skill row (current behaviour).
+	version := k.Version
+	tagParam := strings.TrimSpace(c.Query("tag"))
+	versionParam := strings.TrimSpace(c.Query("version"))
+	switch {
+	case tagParam != "":
+		v, err := s.store.ResolveDistTag(ns, name, tagParam)
+		if err != nil {
+			c.JSON(404, gin.H{"error": "tag '" + tagParam + "' not found for " + ns + "/" + name})
+			return
+		}
+		version = v
+	case versionParam != "":
+		version = versionParam
+	}
+
+	files, err := s.store.ListSkillFilesAtVersion(ns, name, version)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		c.JSON(404, gin.H{"error": "no bundle snapshot for v" + version + " (" + err.Error() + ")"})
 		return
 	}
 
-	root := ns + "-" + name + "-v" + k.Version
+	root := ns + "-" + name + "-v" + version
 	filename := root + ".tar.gz"
 	c.Header("Content-Type", "application/gzip")
 	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
@@ -1351,6 +1369,10 @@ func (s *Server) downloadSkillBundle(c *gin.Context) {
 		}
 	}
 	// Best-effort audit; failure here doesn't affect the streamed bytes.
+	target := ns + "/" + name
+	if tagParam != "" {
+		target += "@" + tagParam
+	}
 	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		s.currentUser(c), "download_bundle", ns+"/"+name, "v"+k.Version, "127.0.0.1")
+		s.currentUser(c), "download_bundle", target, "v"+version, "127.0.0.1")
 }

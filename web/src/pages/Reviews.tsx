@@ -214,7 +214,16 @@ export function Reviews() {
                     <div className="tbl-name">
                       <div className="skill-icon blue" style={{ width: 24, height: 24, fontSize: 11 }}>{r.name.slice(0, 2).toUpperCase()}</div>
                       <div>
-                        <div className="skill-name-text"><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{r.ns}/</span>{r.name}</div>
+                        <div className="skill-name-text" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{r.ns}/</span>{r.name}</span>
+                          {r.isHotfix && (
+                            <span
+                              className="tag"
+                              style={{ background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 10, fontWeight: 600 }}
+                              title={`Hotfix: ${r.hotfixReason || '未填写原因'}`}
+                            >⚡ HOTFIX</span>
+                          )}
+                        </div>
                         <div className="skill-name-desc"><span className="mono">v{r.version}</span></div>
                       </div>
                     </div>

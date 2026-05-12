@@ -108,20 +108,36 @@ skills                          GET   列表（filter: ns, classification, statu
 skills                          POST  新建草稿
 skills/:ns/:name                GET   详情
 skills/:ns/:name/validate       GET   触发校验
-skills/:ns/:name/submit         POST  提交评审（自动挑 reviewer）
+skills/:ns/:name/submit         POST  提交评审（body 可带 isHotfix + hotfixReason）
 skills/:ns/:name/versions       GET   版本列表
 skills/:ns/:name/ratings        GET/POST  评分
 skills/:ns/:name/yank           POST  紧急下架（必填 reason）
 skills/:ns/:name/deprecate      POST  标记弃用
+skills/:ns/:name/bundle         GET   下载 tar.gz；?tag=latest|stable|... 或 ?version=x.y.z
+
+skills/:ns/:name/tags           GET   dist tags 列表
+skills/:ns/:name/tags/:tag      PUT   {version} 设置/修改 tag
+skills/:ns/:name/tags/:tag      DELETE  删除 tag（latest 不可删,由发布流程自动维护）
+
+skills/:ns/:name/subscribe      POST/DELETE  关注 / 取消关注
+skills/:ns/:name/subscription   GET   {subscribed, count}
+me/subscriptions                GET   我关注的 skill 列表
 
 reviews                         GET   列表（filter: status）
-reviews/:id                     GET   详情
+reviews/:id                     GET   详情（含 isHotfix, hotfixReason, policySnapshot）
 reviews/:id/decision            POST  approve / reject / request_changes
 reviews/:id/comments            GET/POST  评论
 
 audit-logs                      GET   审计流
 healthz                         GET   健康检查
 ```
+
+### 平台特性
+
+- **策略快照**：`reviews.policy_snapshot` 在 submit 时冻结 JSON,审批中 admin 修改 namespace policy 不会影响在途请求。
+- **Hotfix 通道**:`isHotfix=true` 切换到 `policy.HotfixPolicy`(1 审批人 / 4h SLA),仅限 namespace owner / maintainer,必填 `hotfixReason` 并写 `audit_logs.hotfix_submit`。
+- **订阅 + 发布通知**:`DecideReview(approve)` 同事务里 `fanOutPublishNotifTx` 给所有订阅者(排除 author + actor)写站内通知。
+- **Dist tags**:`skill_dist_tags` 表;`latest` 由 approve 同事务自动 upsert,`stable` / `beta` / 自定义由 owner / maintainer 手动维护;`/bundle?tag=` 解析后从 `review_files` 拿对应版本的快照。
 
 ---
 

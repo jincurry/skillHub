@@ -96,9 +96,17 @@ export const api = {
     }),
   // downloadBundle fetches a tar.gz and triggers a browser download. Returns
   // the suggested filename so the caller can surface a "downloaded X" toast.
-  downloadBundle: async (ns: string, name: string): Promise<string> => {
+  downloadBundle: async (
+    ns: string,
+    name: string,
+    opts: { tag?: string; version?: string } = {},
+  ): Promise<string> => {
     const tok = getToken();
-    const res = await fetch(`${BASE}/skills/${ns}/${name}/bundle`, {
+    const qp = new URLSearchParams();
+    if (opts.tag) qp.set('tag', opts.tag);
+    else if (opts.version) qp.set('version', opts.version);
+    const query = qp.toString() ? `?${qp.toString()}` : '';
+    const res = await fetch(`${BASE}/skills/${ns}/${name}/bundle${query}`, {
       headers: tok ? { Authorization: `Bearer ${tok}` } : {},
     });
     if (!res.ok) {
