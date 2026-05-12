@@ -77,6 +77,10 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/skills/:ns/:name/ratings", s.rateSkill)
 		auth.POST("/skills/:ns/:name/yank", s.yankSkill)
 		auth.POST("/skills/:ns/:name/deprecate", s.deprecateSkill)
+		// Author-facing hard delete. Only works while the skill is still a
+		// draft and only the original author can call it — anything else
+		// (published / yanked / deprecated) routes through the admin path.
+		auth.DELETE("/skills/:ns/:name", s.deleteDraftSkill)
 
 		auth.GET("/skills/:ns/:name/files", s.listSkillFiles)
 		auth.GET("/skills/:ns/:name/files/*path", s.getSkillFile)
@@ -1195,6 +1199,41 @@ func (s *Server) adminMetrics(c *gin.Context) {
 		return
 	}
 	c.JSON(200, out)
+}
+
+// deleteDraftSkill is the author-facing variant of HardDeleteSkill. It
+// refuses anything that has progressed past `draft` (use yank/deprecate
+// once a version is out in the world) and rejects callers who didn't
+// create the skill — even ns owners route through the admin endpoint so
+// the audit trail stays clear.
+func (s *Server) deleteDraftSkill(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	k, err := s.store.GetSkill(ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if k == nil {
+		c.JSON(404, gin.H{"error": "skill not found"})
+		return
+	}
+	if k.Status != "draft" {
+		c.JSON(409, gin.H{"error": "只能删除草稿状态的 skill;已发布请使用 yank/deprecate,或联系管理员"})
+		return
+	}
+	actor := s.currentUser(c)
+	if actor != k.Author {
+		c.JSON(403, gin.H{"error": "只有作者可以删除自己的草稿"})
+		return
+	}
+	if err := s.store.HardDeleteSkill(ns, name); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	_, _ = s.store.DB.Exec(
+		`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
+		actor, "delete_draft", ns+"/"+name, "", c.ClientIP())
+	c.JSON(200, gin.H{"ok": true})
 }
 
 // adminDeleteSkill is the admin escape hatch for wiping a skill entirely,

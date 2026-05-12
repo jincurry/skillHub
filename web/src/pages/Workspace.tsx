@@ -18,12 +18,107 @@ const DRAFT_CHECKS_FALLBACK = [
   { severity: 'ok' as const, label: 'Schema' },
 ];
 
-function DraftCard({ d }: { d: Skill }) {
+// Minimal styled menu row used inside DraftCard's kebab popover. Keeping
+// these as plain inline-styled spans avoids spinning up a new CSS class
+// for what is essentially a one-off list.
+function DraftMenuItem({
+  onClick, disabled, danger, title, children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  const color = disabled
+    ? 'var(--text-faint)'
+    : danger ? 'var(--red-text)' : 'var(--text)';
+  return (
+    <div
+      role="menuitem"
+      title={title}
+      onClick={() => { if (!disabled) onClick(); }}
+      style={{
+        padding: '7px 12px',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        color,
+        opacity: disabled ? 0.6 : 1,
+        userSelect: 'none',
+      }}
+      onMouseEnter={(e) => { if (!disabled) (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-soft)'; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function DraftMenuDivider() {
+  return <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />;
+}
+
+function DraftCard({ d, meName, onChanged }: {
+  d: Skill;
+  meName: string;
+  onChanged: () => void;
+}) {
   const navigate = useNavigate();
   const v = useAsync<ValidationReport>(() => api.validate(d.ns, d.name), [d.ns, d.name]);
   const checks = v.data?.checks ?? DRAFT_CHECKS_FALLBACK;
   const blocked = (v.data?.checks ?? []).some((c) => c.severity === 'err');
   const editPath = `/skills/${d.ns}/${d.name}/edit`;
+  const isAuthor = meName !== '' && meName === d.author;
+
+  // Kebab menu — closed by default, click-outside dismisses. We pass the
+  // shared validate-handle in so "重新校验" reuses the same useAsync the
+  // header chips read from (no duplicate fetch).
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    // Defer attach so the click that opened the menu doesn't immediately
+    // close it. Capture phase so a click anywhere shuts the popover before
+    // the menu items get a chance to react.
+    const t = window.setTimeout(() => document.addEventListener('click', close, true), 0);
+    return () => {
+      window.clearTimeout(t);
+      document.removeEventListener('click', close, true);
+    };
+  }, [menuOpen]);
+
+  async function copyRef() {
+    try {
+      await navigator.clipboard.writeText(`${d.ns}/${d.name}`);
+    } catch {
+      // Fallback: synthesize a textarea so users on insecure contexts still
+      // get something. Silent swallow if even that fails.
+      const ta = document.createElement('textarea');
+      ta.value = `${d.ns}/${d.name}`;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch { /* ignore */ }
+      ta.remove();
+    }
+  }
+
+  async function downloadBundle() {
+    try { await api.downloadBundle(d.ns, d.name); }
+    catch (e) { window.alert('下载失败: ' + (e as Error).message); }
+  }
+
+  async function deleteDraft() {
+    if (!isAuthor) return;
+    if (!window.confirm(
+      `确定删除草稿 ${d.ns}/${d.name}?\n\n该操作会同时清掉文件、版本、评论、通知等附属数据,且无法恢复。`,
+    )) return;
+    try {
+      await api.deleteDraftSkill(d.ns, d.name);
+      onChanged();
+    } catch (e) {
+      window.alert('删除失败: ' + (e as Error).message);
+    }
+  }
+
   return (
     <div className="draft-card">
       <div className="draft-card-head">
@@ -42,7 +137,55 @@ function DraftCard({ d }: { d: Skill }) {
             </div>
           </div>
         </div>
-        <button className="icon-btn" style={{ width: 28, height: 28 }}><IconMore size={16} /></button>
+        <div style={{ position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+          <button
+            className="icon-btn"
+            style={{ width: 28, height: 28 }}
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-label="更多操作"
+            aria-expanded={menuOpen}
+          ><IconMore size={16} /></button>
+          {menuOpen && (
+            <div
+              role="menu"
+              style={{
+                position: 'absolute', top: 32, right: 0, zIndex: 20,
+                background: 'var(--bg)', border: '1px solid var(--border)',
+                borderRadius: 8, boxShadow: '0 8px 24px rgba(15,23,42,0.12)',
+                minWidth: 180, padding: '4px 0', fontSize: 13,
+              }}
+            >
+              <DraftMenuItem onClick={() => navigate(`/skills/${d.ns}/${d.name}`)}>
+                预览公开页
+              </DraftMenuItem>
+              <DraftMenuItem onClick={() => navigate(editPath)}>
+                继续编辑
+              </DraftMenuItem>
+              <DraftMenuDivider />
+              <DraftMenuItem onClick={copyRef}>
+                复制 ns/name
+              </DraftMenuItem>
+              <DraftMenuItem onClick={downloadBundle}>
+                下载 bundle
+              </DraftMenuItem>
+              <DraftMenuItem
+                onClick={() => v.reload()}
+                disabled={v.loading}
+              >
+                {v.loading ? '校验中…' : '重新校验'}
+              </DraftMenuItem>
+              <DraftMenuDivider />
+              <DraftMenuItem
+                onClick={deleteDraft}
+                disabled={!isAuthor}
+                title={isAuthor ? '永久删除此草稿' : '只有作者可以删除自己的草稿'}
+                danger
+              >
+                🗑 删除草稿
+              </DraftMenuItem>
+            </div>
+          )}
+        </div>
       </div>
       <div style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 12px', lineHeight: 1.5 }}>{d.desc}</div>
       <div className="draft-checks">
@@ -312,7 +455,14 @@ export function Workspace() {
             {drafts.loading && <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>加载中...</div></div>}
             {drafts.error && <div className="card"><div className="card-body" style={{ color: 'var(--red-text)' }}>加载失败: {drafts.error.message}</div></div>}
             {drafts.data?.length === 0 && <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>暂无草稿</div></div>}
-            {drafts.data?.map((d) => <DraftCard key={d.id} d={d} />)}
+            {drafts.data?.map((d) => (
+              <DraftCard
+                key={d.id}
+                d={d}
+                meName={me.data?.username ?? ''}
+                onChanged={() => drafts.reload()}
+              />
+            ))}
           </div>
 
           <div className="card">

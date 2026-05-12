@@ -88,6 +88,10 @@ export const api = {
     request<{ ok: true; status: string }>(`/skills/${ns}/${name}/deprecate`, {
       method: 'POST', body: JSON.stringify({ reason: reason ?? '' }),
     }),
+  // deleteDraftSkill is the author-facing hard delete. Server enforces
+  // status='draft' and actor==author; anything else returns 4xx.
+  deleteDraftSkill: (ns: string, name: string) =>
+    request<{ ok: true }>(`/skills/${ns}/${name}`, { method: 'DELETE' }),
   // createSkillDraft transitions a published/yanked/deprecated skill into a
   // fresh editable draft. Empty body = auto-bump patch.
   createSkillDraft: (ns: string, name: string, version?: string) =>
