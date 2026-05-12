@@ -163,6 +163,11 @@ export function ReviewDetail() {
           <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             审批 #{r.id}
             <span className={`tag ${statusCls}`}><span className="dot"></span>{statusLabel}</span>
+            {r.isHotfix && (
+              <span className="tag" style={{ background: 'var(--red-bg)', color: 'var(--red-text)', fontWeight: 600 }}>
+                ⚡ HOTFIX
+              </span>
+            )}
           </h1>
           <p className="page-subtitle">
             <span className="mono">{r.ns}/{r.name}</span> v{r.version} · 由 <span className="mono">@{r.author}</span> 提交于 {new Date(r.submittedAt).toLocaleString()}
@@ -211,6 +216,29 @@ export function ReviewDetail() {
           <div className="card-body" style={{ fontSize: 13, color: 'var(--text-subtle)', display: 'flex', alignItems: 'center', gap: 8 }}>
             <IconAlertTriangle size={14} style={{ color: 'var(--text-faint)' }} />
             <span>{disabledReason}。{isAuthor ? '请等待指派的 reviewer 审批。' : ''}</span>
+          </div>
+        </div>
+      )}
+
+      {r.isHotfix && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 'var(--gap)',
+            borderLeft: '3px solid var(--red)',
+            background: 'var(--red-bg)',
+          }}
+        >
+          <div className="card-body" style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <IconAlertTriangle size={18} style={{ color: 'var(--red-text)', flexShrink: 0, marginTop: 2 }} />
+            <div style={{ fontSize: 13, lineHeight: 1.55 }}>
+              <div style={{ fontWeight: 600, color: 'var(--red-text)', marginBottom: 2 }}>
+                Hotfix 紧急通道 · SLA 4h · 仅需 1 名审批人
+              </div>
+              <div style={{ color: 'var(--text-muted)' }}>
+                原因: {r.hotfixReason || '(未填写)'}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -289,6 +317,34 @@ export function ReviewDetail() {
                 <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>距离截止时间</div>
               </div>
             </div>
+
+            {/* Frozen policy snapshot — shows the rules that were in effect at
+                submission time so reviewers don't see surprises if a ns
+                admin changed the policy mid-review. */}
+            {r.policySnapshot && (
+              <div className="card" style={{ marginBottom: 'var(--gap)' }}>
+                <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <h3 className="card-title">策略快照</h3>
+                  <span className="tag" title="提交时已冻结,后续策略变更不影响此审批" style={{ fontSize: 10, color: 'var(--text-subtle)' }}>
+                    🔒 已冻结
+                  </span>
+                </div>
+                <div className="card-body" style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div>
+                    <span className="tag indigo">{r.policySnapshot.classification}</span>{' '}
+                    {r.policySnapshot.mode === 'parallel' ? '并行' : '串行'} · SLA{' '}
+                    <span className="mono">{r.policySnapshot.slaHours}h</span>
+                  </div>
+                  <div>
+                    {r.policySnapshot.slots.map((s, i) => (
+                      <div key={i} style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                        Slot {i + 1}: {s.count} × {s.roles.join(' / ')}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="card">
               <div className="card-header"><h3 className="card-title">参与者</h3></div>

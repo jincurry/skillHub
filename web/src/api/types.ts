@@ -37,10 +37,50 @@ export interface Review {
   author: string;
   reviewers: string[];
   status: 'pending' | 'approved' | 'rejected' | 'changes_requested';
-  urgency: 'overdue' | 'soon' | 'ok' | 'done' | 'rejected' | 'changes';
+  urgency: 'overdue' | 'soon' | 'ok' | 'done' | 'rejected' | 'changes' | 'hot';
   sla: string;
   note: string;
   submittedAt: string;
+  /** Emergency-channel marker; reviewers see a banner and SLA shortens to 4h. */
+  isHotfix: boolean;
+  /** Required text justification when isHotfix; preserved in audit logs. */
+  hotfixReason?: string;
+  /** Policy frozen at submission time; absent on legacy reviews. */
+  policySnapshot?: PolicySnapshot;
+}
+
+// PolicySnapshot mirrors model.PolicySnapshot (JSON tags are lowercase, unlike
+// the legacy PolicyPreview's capitalised Slot shape — they're separate types).
+export interface PolicySnapshotSlot {
+  roles: string[];
+  count: number;
+}
+export interface PolicySnapshot {
+  classification: 'L1' | 'L2' | 'L3';
+  mode: 'parallel' | 'serial';
+  slaHours: number;
+  slots: PolicySnapshotSlot[];
+  hotfix?: boolean;
+}
+
+// DistTag is one alias ("latest"|"stable"|"beta"|...) → version pointer.
+export interface DistTag {
+  tag: string;
+  version: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+// Subscription represents one user's interest in a skill's release stream.
+export interface Subscription {
+  ns: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface SubscriptionState {
+  subscribed: boolean;
+  count: number;
 }
 
 // ReviewFile is one file's snapshot inside a review request, returned by

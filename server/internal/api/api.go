@@ -89,6 +89,17 @@ func (s *Server) Routes() *gin.Engine {
 		// wildcard value.
 		auth.POST("/skills/:ns/:name/rename-file", s.renameSkillFile)
 
+		// dist_tags: latest/stable/beta/<custom> aliases pinning a version.
+		auth.GET("/skills/:ns/:name/tags", s.listDistTags)
+		auth.PUT("/skills/:ns/:name/tags/:tag", s.setDistTag)
+		auth.DELETE("/skills/:ns/:name/tags/:tag", s.deleteDistTag)
+
+		// subscriptions: per-user follow stream for publish events.
+		auth.POST("/skills/:ns/:name/subscribe", s.subscribeSkill)
+		auth.DELETE("/skills/:ns/:name/subscribe", s.unsubscribeSkill)
+		auth.GET("/skills/:ns/:name/subscription", s.getSubscriptionState)
+		auth.GET("/me/subscriptions", s.listMySubscriptions)
+
 		auth.GET("/reviews", s.listReviews)
 		auth.GET("/reviews/stats", s.getReviewStats)
 		auth.GET("/reviews/:id", s.getReview)
@@ -307,14 +318,36 @@ func (s *Server) submitForReview(c *gin.Context) {
 		c.JSON(403, gin.H{"error": "only the author or a namespace maintainer can submit"})
 		return
 	}
-	// Auto-pick reviewers if none provided.
-	if len(req.Reviewers) == 0 {
-		picked, _, err := s.store.PickReviewersByPolicy(ns, user, k.Classification)
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+	// Hotfix gate: only owner/maintainer of the namespace can open the
+	// emergency channel, and only with a written justification (audited).
+	if req.IsHotfix {
+		if role != "owner" && role != "maintainer" {
+			c.JSON(403, gin.H{"error": "hotfix 通道仅限命名空间 owner / maintainer 发起"})
 			return
 		}
-		req.Reviewers = picked
+		if strings.TrimSpace(req.HotfixReason) == "" {
+			c.JSON(400, gin.H{"error": "hotfix 必须填写紧急原因"})
+			return
+		}
+	}
+	// Auto-pick reviewers if none provided. Hotfix uses the relaxed
+	// (1-approver) policy; regular submits use the namespace-resolved one.
+	if len(req.Reviewers) == 0 {
+		if req.IsHotfix {
+			picked, err := s.store.PickHotfixReviewers(ns, user, k.Classification)
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			req.Reviewers = picked
+		} else {
+			picked, _, err := s.store.PickReviewersByPolicy(ns, user, k.Classification)
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			req.Reviewers = picked
+		}
 	}
 	// Enforce no-self-approval and de-duplicate.
 	seen := map[string]bool{user: true}
@@ -331,7 +364,10 @@ func (s *Server) submitForReview(c *gin.Context) {
 		return
 	}
 	req.Reviewers = cleaned
-	r, err := s.store.SubmitDraftForReview(ns, name, req.Version, req.Note, user, req.Reviewers)
+	r, err := s.store.SubmitDraftForReview(ns, name, req.Version, req.Note, user, req.Reviewers, store.SubmitDraftOptions{
+		IsHotfix:     req.IsHotfix,
+		HotfixReason: strings.TrimSpace(req.HotfixReason),
+	})
 	if err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return

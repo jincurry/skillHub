@@ -2,13 +2,29 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jincurry/skillhub/server/internal/model"
+	"github.com/jincurry/skillhub/server/internal/policy"
 )
+
+// scanReviewSnapshot decodes the policy_snapshot JSON column into a
+// *model.PolicySnapshot. Empty string (legacy rows) → nil so callers can
+// fall back to the live policy.
+func scanReviewSnapshot(raw string) *model.PolicySnapshot {
+	if raw == "" {
+		return nil
+	}
+	var snap model.PolicySnapshot
+	if err := json.Unmarshal([]byte(raw), &snap); err != nil {
+		return nil
+	}
+	return &snap
+}
 
 func splitCSV(s string) []string {
 	if s == "" {
@@ -233,9 +249,30 @@ func (s *Store) ListNamespaces() ([]model.Namespace, error) {
 	return out, rows.Err()
 }
 
+// reviewSelectCols centralises the column list so ListReviews/GetReview
+// always agree on order; new fields go here once.
+const reviewSelectCols = `id,ns,skill_name,version,classification,author,reviewers_csv,
+	status,urgency,sla,note,submitted_at,is_hotfix,hotfix_reason,policy_snapshot`
+
+// scanReviewRow reads one row from a query that selected reviewSelectCols,
+// in order. Used by both list and get paths.
+func scanReviewRow(scan func(...any) error) (model.Review, error) {
+	var r model.Review
+	var rev, snap string
+	var hotfix int
+	if err := scan(&r.ID, &r.Namespace, &r.SkillName, &r.Version, &r.Classification,
+		&r.Author, &rev, &r.Status, &r.Urgency, &r.SLA, &r.Note, &r.SubmittedAt,
+		&hotfix, &r.HotfixReason, &snap); err != nil {
+		return r, err
+	}
+	r.Reviewers = splitCSV(rev)
+	r.IsHotfix = hotfix != 0
+	r.PolicySnapshot = scanReviewSnapshot(snap)
+	return r, nil
+}
+
 func (s *Store) ListReviews(status string) ([]model.Review, error) {
-	q := `SELECT id,ns,skill_name,version,classification,author,reviewers_csv,status,urgency,sla,note,submitted_at
-	      FROM reviews`
+	q := `SELECT ` + reviewSelectCols + ` FROM reviews`
 	args := []any{}
 	if status != "" {
 		q += ` WHERE status = ?`
@@ -249,31 +286,24 @@ func (s *Store) ListReviews(status string) ([]model.Review, error) {
 	defer rows.Close()
 	var out []model.Review
 	for rows.Next() {
-		var r model.Review
-		var rev string
-		if err := rows.Scan(&r.ID, &r.Namespace, &r.SkillName, &r.Version, &r.Classification,
-			&r.Author, &rev, &r.Status, &r.Urgency, &r.SLA, &r.Note, &r.SubmittedAt); err != nil {
+		r, err := scanReviewRow(rows.Scan)
+		if err != nil {
 			return nil, err
 		}
-		r.Reviewers = splitCSV(rev)
 		out = append(out, r)
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) GetReview(id int64) (*model.Review, error) {
-	row := s.DB.QueryRow(`SELECT id,ns,skill_name,version,classification,author,reviewers_csv,status,urgency,sla,note,submitted_at
-	      FROM reviews WHERE id=?`, id)
-	var r model.Review
-	var rev string
-	if err := row.Scan(&r.ID, &r.Namespace, &r.SkillName, &r.Version, &r.Classification,
-		&r.Author, &rev, &r.Status, &r.Urgency, &r.SLA, &r.Note, &r.SubmittedAt); err != nil {
+	row := s.DB.QueryRow(`SELECT `+reviewSelectCols+` FROM reviews WHERE id=?`, id)
+	r, err := scanReviewRow(row.Scan)
+	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
 	}
-	r.Reviewers = splitCSV(rev)
 	return &r, nil
 }
 
@@ -363,6 +393,17 @@ func (s *Store) DecideReview(id int64, decision, note, actor string) error {
 		}
 		if _, err := tx.Exec(`INSERT INTO notifications(user,kind,target_kind,target_ref,body) VALUES(?,?,?,?,?)`,
 			author, notifKind, "review", strconv.FormatInt(id, 10), body); err != nil {
+			return err
+		}
+	}
+	// On a successful publish: fan out to subscribers and bump the
+	// auto-managed "latest" dist-tag so consumers pinning latest see the
+	// new version immediately.
+	if decision == "approve" {
+		if err := fanOutPublishNotifTx(tx, ns, name, version, author, actor); err != nil {
+			return err
+		}
+		if err := upsertDistTagTx(tx, ns, name, "latest", version, "system"); err != nil {
 			return err
 		}
 	}
@@ -548,9 +589,16 @@ func (s *Store) ListMyDrafts(user string) ([]model.Skill, error) {
 	return out, rows.Err()
 }
 
+// SubmitDraftOptions bundles optional parameters for SubmitDraftForReview so
+// the call sites stay readable as we add features (hotfix, policy snapshot).
+type SubmitDraftOptions struct {
+	IsHotfix     bool
+	HotfixReason string
+}
+
 // SubmitDraftForReview transitions a draft skill to "review" status and creates a Review row.
 // Returns ErrNoRows-equivalent if the skill is missing or not a draft.
-func (s *Store) SubmitDraftForReview(ns, name, version, note, author string, reviewers []string) (*model.Review, error) {
+func (s *Store) SubmitDraftForReview(ns, name, version, note, author string, reviewers []string, opts SubmitDraftOptions) (*model.Review, error) {
 	// Look up classification *before* starting the write tx. ResolvePolicy
 	// (and the classification probe below) issue independent queries on
 	// s.DB, and with SetMaxOpenConns(1) any nested DB call after tx.Begin()
@@ -572,11 +620,30 @@ func (s *Store) SubmitDraftForReview(ns, name, version, note, author string, rev
 			version = "0.1.0"
 		}
 	}
-	pol, _, err := s.ResolvePolicy(ns, classification)
+	var pol policy.Policy
+	if opts.IsHotfix {
+		// Hotfix override: 1 approver, 4h SLA. The reviewer-pick logic still
+		// runs against the namespace's hotfix-eligible roles via the slot
+		// list returned here.
+		pol = policy.HotfixPolicy(classification)
+	} else {
+		p, _, err := s.ResolvePolicy(ns, classification)
+		if err != nil {
+			return nil, err
+		}
+		pol = p
+	}
+	sla := fmt.Sprintf("%dh", pol.SLAHours)
+	urgency := "ok"
+	if opts.IsHotfix {
+		urgency = "hot" // surfaced as a red badge in review queues
+	}
+	// Freeze the policy as JSON so reviewers see the rules that were in
+	// effect at submission, even if admins change them later.
+	snapJSON, err := json.Marshal(pol.Snapshot(opts.IsHotfix))
 	if err != nil {
 		return nil, err
 	}
-	sla := fmt.Sprintf("%dh", pol.SLAHours)
 
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -588,9 +655,16 @@ func (s *Store) SubmitDraftForReview(ns, name, version, note, author string, rev
 		return nil, err
 	}
 	revCSV := strings.Join(reviewers, ",")
-	res, err := tx.Exec(`INSERT INTO reviews(ns,skill_name,version,classification,author,reviewers_csv,status,urgency,sla,note)
-		VALUES(?,?,?,?,?,?,?,?,?,?)`,
-		ns, name, version, classification, author, revCSV, "pending", "ok", sla, note)
+	hotfixInt := 0
+	if opts.IsHotfix {
+		hotfixInt = 1
+	}
+	res, err := tx.Exec(`INSERT INTO reviews
+		(ns,skill_name,version,classification,author,reviewers_csv,status,urgency,sla,note,
+		 is_hotfix,hotfix_reason,policy_snapshot)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		ns, name, version, classification, author, revCSV, "pending", urgency, sla, note,
+		hotfixInt, opts.HotfixReason, string(snapJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -598,6 +672,14 @@ func (s *Store) SubmitDraftForReview(ns, name, version, note, author string, rev
 	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
 		author, "submit_review", ns+"/"+name, "v"+version, "127.0.0.1"); err != nil {
 		return nil, err
+	}
+	if opts.IsHotfix {
+		// Persist the reason in audit so platform admins can spot abuse of
+		// the emergency channel after the fact.
+		if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
+			author, "hotfix_submit", ns+"/"+name+": "+opts.HotfixReason, "v"+version, "127.0.0.1"); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := tx.Exec(`INSERT INTO skill_versions(ns,name,version,status,author,note,review_id) VALUES(?,?,?,?,?,?,?)`,
 		ns, name, version, "review", author, note, id); err != nil {

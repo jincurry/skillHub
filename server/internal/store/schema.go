@@ -203,4 +203,33 @@ CREATE TABLE IF NOT EXISTS skill_daily_metrics (
   FOREIGN KEY (ns, name) REFERENCES skills(ns, name) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_day ON skill_daily_metrics(ns, name, day);
+
+-- skill_dist_tags: human-friendly aliases ("latest", "stable", "beta", or any
+-- custom tag) that point at a specific published version of a skill. The UI
+-- displays these chips on SkillDetail; consumers can pin a tag and not worry
+-- about chasing version bumps. "latest" is auto-set when a review is approved
+-- and published; everything else is manually maintained by the author or a
+-- namespace owner/maintainer.
+CREATE TABLE IF NOT EXISTS skill_dist_tags (
+  ns          TEXT NOT NULL,
+  skill_name  TEXT NOT NULL,
+  tag         TEXT NOT NULL,
+  version     TEXT NOT NULL,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by  TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (ns, skill_name, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_dist_tags_skill ON skill_dist_tags(ns, skill_name);
+
+-- subscriptions: users who want to be notified when a skill publishes a new
+-- version. We write an in-app notification on publish (DecideReview approve).
+CREATE TABLE IF NOT EXISTS subscriptions (
+  username    TEXT NOT NULL,
+  ns          TEXT NOT NULL,
+  skill_name  TEXT NOT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (username, ns, skill_name)
+);
+CREATE INDEX IF NOT EXISTS idx_subs_skill ON subscriptions(ns, skill_name);
+CREATE INDEX IF NOT EXISTS idx_subs_user  ON subscriptions(username);
 `

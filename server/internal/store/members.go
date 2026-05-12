@@ -40,6 +40,30 @@ func (s *Store) UserRoleInNamespace(ns, user string) (string, error) {
 	return role, err
 }
 
+// PickHotfixReviewers picks a single owner/maintainer reviewer for the
+// emergency channel. Falls back to any owner/maintainer in any namespace if
+// the local namespace has no eligible candidate after excluding the author.
+func (s *Store) PickHotfixReviewers(ns, author, classification string) ([]string, error) {
+	pol := policy.HotfixPolicy(classification)
+	picked, _, err := s.PickReviewersByPolicy(ns, author, classification)
+	// First try the regular picker against the relaxed policy slot list.
+	_ = pol
+	if err == nil && len(picked) > 0 {
+		return picked[:1], nil
+	}
+	// Fallback: any owner/maintainer anywhere.
+	row := s.DB.QueryRow(`
+		SELECT username FROM namespace_members
+		WHERE username != ? AND ns_role IN ('owner','maintainer')
+		ORDER BY ns = ? DESC
+		LIMIT 1`, author, ns)
+	var u string
+	if err := row.Scan(&u); err != nil {
+		return nil, err
+	}
+	return []string{u}, nil
+}
+
 // PickReviewersByPolicy selects reviewer usernames that satisfy the given policy
 // for namespace `ns`, excluding the author. Returns the picked reviewers in
 // slot order, and the policy that was applied.

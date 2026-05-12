@@ -44,6 +44,49 @@ type Review struct {
 	SLA            string    `json:"sla"`
 	Note           string    `json:"note"`
 	SubmittedAt    time.Time `json:"submittedAt"`
+	// IsHotfix flags the emergency channel: reviewers see a banner, the
+	// approval requirement is relaxed (1 reviewer), and the SLA is 4h.
+	IsHotfix       bool            `json:"isHotfix"`
+	HotfixReason   string          `json:"hotfixReason,omitempty"`
+	// PolicySnapshot is the policy frozen at submission time. Nil means the
+	// review predates the snapshot feature; the UI should fall back to the
+	// live policy then.
+	PolicySnapshot *PolicySnapshot `json:"policySnapshot,omitempty"`
+}
+
+// PolicySnapshot is a JSON-serialisable mirror of policy.Policy. We keep it
+// in the model package so model.Review can refer to it without importing
+// the policy package (which would create a cycle once the store reads
+// reviews through model).
+type PolicySnapshot struct {
+	Classification string         `json:"classification"`
+	Mode           string         `json:"mode"` // parallel|serial
+	SLAHours       int            `json:"slaHours"`
+	Slots          []PolicySlot   `json:"slots"`
+	// Hotfix marks this snapshot as the override used by the emergency
+	// channel — handy for the reviewer-facing UI to label it clearly.
+	Hotfix         bool           `json:"hotfix,omitempty"`
+}
+
+type PolicySlot struct {
+	Roles []string `json:"roles"`
+	Count int      `json:"count"`
+}
+
+// DistTag is one alias ("latest"|"stable"|"beta"|custom) → version pointer
+// for a skill. Multiple tags can coexist; "latest" is auto-managed.
+type DistTag struct {
+	Tag       string    `json:"tag"`
+	Version   string    `json:"version"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	UpdatedBy string    `json:"updatedBy"`
+}
+
+// Subscription represents one user's interest in a skill's release stream.
+type Subscription struct {
+	Namespace string    `json:"ns"`
+	SkillName string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type Comment struct {
@@ -254,9 +297,16 @@ type CreateSkillRequest struct {
 }
 
 type SubmitReviewRequest struct {
-	Version   string   `json:"version"`
-	Note      string   `json:"note"`
-	Reviewers []string `json:"reviewers"`
+	Version      string   `json:"version"`
+	Note         string   `json:"note"`
+	Reviewers    []string `json:"reviewers"`
+	IsHotfix     bool     `json:"isHotfix"`
+	HotfixReason string   `json:"hotfixReason"`
+}
+
+// SetDistTagRequest is the body of PUT /skills/:ns/:name/tags/:tag.
+type SetDistTagRequest struct {
+	Version string `json:"version" binding:"required"`
 }
 
 type Rating struct {

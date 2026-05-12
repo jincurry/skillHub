@@ -1,4 +1,4 @@
-import type { Achievement, AIProvider, AIProviderRef, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpsertPolicyRequest, ValidationReport } from './types';
+import type { Achievement, AIProvider, AIProviderRef, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, DistTag, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, Subscription, SubscriptionState, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpsertPolicyRequest, ValidationReport } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -148,8 +148,39 @@ export const api = {
   getSkill: (ns: string, name: string) => request<Skill>(`/skills/${ns}/${name}`),
   createSkill: (body: { ns: string; name: string; desc?: string; classification: 'L1' | 'L2' | 'L3'; tags?: string[] }) =>
     request<Skill>('/skills', { method: 'POST', body: JSON.stringify(body) }),
-  submitForReview: (ns: string, name: string, body: { version?: string; note?: string; reviewers?: string[] } = {}) =>
+  submitForReview: (
+    ns: string,
+    name: string,
+    body: {
+      version?: string;
+      note?: string;
+      reviewers?: string[];
+      isHotfix?: boolean;
+      hotfixReason?: string;
+    } = {},
+  ) =>
     request<Review>(`/skills/${ns}/${name}/submit`, { method: 'POST', body: JSON.stringify(body) }),
+
+  // ---- dist_tags --------------------------------------------------------
+  listDistTags: (ns: string, name: string) =>
+    request<DistTag[]>(`/skills/${ns}/${name}/tags`),
+  setDistTag: (ns: string, name: string, tag: string, version: string) =>
+    request<{ tag: string; version: string }>(
+      `/skills/${ns}/${name}/tags/${encodeURIComponent(tag)}`,
+      { method: 'PUT', body: JSON.stringify({ version }) },
+    ),
+  deleteDistTag: (ns: string, name: string, tag: string) =>
+    request<{ ok: boolean }>(`/skills/${ns}/${name}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' }),
+
+  // ---- subscriptions ----------------------------------------------------
+  subscribeSkill: (ns: string, name: string) =>
+    request<{ ok: boolean; subscribed: boolean }>(`/skills/${ns}/${name}/subscribe`, { method: 'POST' }),
+  unsubscribeSkill: (ns: string, name: string) =>
+    request<{ ok: boolean; subscribed: boolean }>(`/skills/${ns}/${name}/subscribe`, { method: 'DELETE' }),
+  getSubscriptionState: (ns: string, name: string) =>
+    request<SubscriptionState>(`/skills/${ns}/${name}/subscription`),
+  listMySubscriptions: () =>
+    request<Subscription[]>('/me/subscriptions'),
   validate: (ns: string, name: string) =>
     request<ValidationReport>(`/skills/${ns}/${name}/validate`),
   listVersions: (ns: string, name: string) =>

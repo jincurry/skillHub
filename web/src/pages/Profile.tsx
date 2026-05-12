@@ -187,7 +187,8 @@ function Achievement({ icon, name, desc, earned, rare, progress, hint }: {
 
 export function Profile() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<'overview' | 'skills' | 'activity' | 'achievements' | 'settings'>('overview');
+  const [tab, setTab] = useState<'overview' | 'skills' | 'subscriptions' | 'activity' | 'achievements' | 'settings'>('overview');
+  const subs = useAsync(() => api.listMySubscriptions(), []);
   const [editing, setEditing] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
@@ -379,6 +380,7 @@ export function Profile() {
         {([
           { id: 'overview', label: '概览' },
           { id: 'skills', label: 'Skills', count: mySkills.length },
+          { id: 'subscriptions', label: '关注', count: subs.data?.length ?? 0 },
           { id: 'activity', label: '动态', count: activity.data?.length ?? 0 },
           { id: 'achievements', label: '成就', count: achievements.data?.length ?? 0 },
           { id: 'settings', label: '设置' },
@@ -497,6 +499,45 @@ export function Profile() {
                       <td><span className={`tag ${s.status === 'published' ? 'green' : s.status === 'review' ? 'amber' : s.status === 'yanked' ? 'red' : 'slate'}`}>{s.status}</span></td>
                       <td style={{ textAlign: 'right' }}><span className="mono num">v{s.version}</span></td>
                       <td className="num" style={{ textAlign: 'right', fontWeight: 500 }}>{s.activations > 0 ? s.activations.toLocaleString() : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* subscriptions tab --------------------------------------------- */}
+      {tab === 'subscriptions' && (
+        <div className="card">
+          <div className="card-body flush">
+            {subs.loading && <div style={{ padding: 16, fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
+            {!subs.loading && (subs.data?.length ?? 0) === 0 && (
+              <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-subtle)' }}>
+                <div style={{ fontSize: 14, marginBottom: 6 }}>还没有关注的 Skill</div>
+                <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+                  在任意 skill 详情页点击 + 关注,新版本发布时会推送站内通知。
+                </div>
+              </div>
+            )}
+            {(subs.data?.length ?? 0) > 0 && (
+              <table className="tbl">
+                <thead><tr><th>Skill</th><th style={{ textAlign: 'right' }}>关注于</th></tr></thead>
+                <tbody>
+                  {subs.data!.map((s) => (
+                    <tr
+                      key={`${s.ns}/${s.name}`}
+                      onClick={() => navigate(`/skills/${s.ns}/${s.name}`)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td>
+                        <span style={{ color: 'var(--text-subtle)' }}>{s.ns}/</span>
+                        <span style={{ fontWeight: 500 }}>{s.name}</span>
+                      </td>
+                      <td style={{ textAlign: 'right', color: 'var(--text-subtle)', fontSize: 12.5 }}>
+                        {new Date(s.createdAt).toLocaleDateString()}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

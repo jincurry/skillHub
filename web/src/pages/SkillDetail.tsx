@@ -65,6 +65,26 @@ export function SkillDetail() {
     [tab, ns, name],
   );
 
+  // dist_tags + subscription state. Kept top-level (above early returns) so
+  // hook order stays stable on the loading branch.
+  const distTags = useAsync(() => api.listDistTags(ns, name), [ns, name]);
+  const subState = useAsync(() => api.getSubscriptionState(ns, name), [ns, name]);
+  const [subBusy, setSubBusy] = useState(false);
+  async function toggleSubscribe() {
+    if (subBusy) return;
+    setSubBusy(true);
+    try {
+      const subbed = subState.data?.subscribed ?? false;
+      if (subbed) await api.unsubscribeSkill(ns, name);
+      else await api.subscribeSkill(ns, name);
+      subState.reload();
+    } catch (e) {
+      window.alert((e as Error).message);
+    } finally {
+      setSubBusy(false);
+    }
+  }
+
   // Pick a sensible default file once the listing comes back. SKILL.md is
   // the primary surface so it wins over README.md / skill.yaml.
   // IMPORTANT: this must run BEFORE the early-return guards below so the
@@ -151,6 +171,33 @@ export function SkillDetail() {
     }
   }
 
+  // dist tag management uses native prompts so we don't have to ship a full
+  // modal for an admin-only flow. The cycle is: pick action → ask values →
+  // call API → reload chips. Manual "latest" overrides act as rollbacks
+  // (the backend allows it; useful when a publish needs to be reverted).
+  async function manageDistTags() {
+    const action = window.prompt(
+      'Dist tags 管理:\n  set <tag> <version>     设置/修改 tag\n  delete <tag>            删除 tag (latest 不可删)\n例: set stable 1.2.0',
+      'set ',
+    );
+    if (!action) return;
+    const parts = action.trim().split(/\s+/);
+    try {
+      if (parts[0] === 'set' && parts.length === 3) {
+        await api.setDistTag(p.ns, p.name, parts[1], parts[2]);
+      } else if (parts[0] === 'delete' && parts.length === 2) {
+        if (!window.confirm(`确定删除 tag "${parts[1]}"?`)) return;
+        await api.deleteDistTag(p.ns, p.name, parts[1]);
+      } else {
+        alert('指令格式错误,请使用 "set <tag> <version>" 或 "delete <tag>"');
+        return;
+      }
+      distTags.reload();
+    } catch (e) {
+      alert('操作失败:' + (e as Error).message);
+    }
+  }
+
   return (
     <div className="content-inner">
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-subtle)', marginBottom: 14 }}>
@@ -179,7 +226,35 @@ export function SkillDetail() {
             <span><IconFire size={12} /> <strong style={{ color: 'var(--text)' }}>{p.activations.toLocaleString()}</strong> 激活/周</span>
             <span style={{ color: 'var(--text-faint)' }}>·</span>
             <span>由 <span className="mono">@{p.author}</span> 维护 · 更新于 {new Date(p.updatedAt).toLocaleDateString()}</span>
+            {(subState.data?.count ?? 0) > 0 && (
+              <>
+                <span style={{ color: 'var(--text-faint)' }}>·</span>
+                <span>{subState.data!.count} 关注</span>
+              </>
+            )}
           </div>
+          {(distTags.data ?? []).length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+              {distTags.data!.map((t) => (
+                <span
+                  key={t.tag}
+                  className={`tag ${t.tag === 'latest' ? 'green' : t.tag === 'stable' ? 'indigo' : t.tag === 'beta' ? 'amber' : ''}`}
+                  title={`${t.tag} → v${t.version} · 更新于 ${new Date(t.updatedAt).toLocaleString()} by @${t.updatedBy || 'system'}`}
+                  style={{ fontSize: 11 }}
+                >
+                  {t.tag} <span className="mono" style={{ marginLeft: 4, opacity: 0.85 }}>v{t.version}</span>
+                </span>
+              ))}
+              {canEdit && (
+                <button
+                  className="btn sm ghost"
+                  style={{ fontSize: 11, padding: '2px 8px' }}
+                  onClick={manageDistTags}
+                  title="管理 dist tags(latest/stable/beta/...)"
+                >编辑</button>
+              )}
+            </div>
+          )}
         </div>
         <div className="detail-hero-actions">
           {/* Download bundle — available to everyone who can see the skill. */}
@@ -188,6 +263,16 @@ export function SkillDetail() {
             onClick={doDownloadBundle}
             title={`下载 ${p.ns}/${p.name} v${p.version} 的文件 bundle (.tar.gz)`}
           ><IconDownload size={14} /> 下载</button>
+
+          {/* Subscribe: writes an in-app notification on every publish. */}
+          <button
+            className={`btn ${subState.data?.subscribed ? 'primary' : ''}`}
+            onClick={toggleSubscribe}
+            disabled={subBusy}
+            title={subState.data?.subscribed ? '取消关注以停止接收发布通知' : '关注以接收新版本发布通知'}
+          >
+            {subState.data?.subscribed ? '✓ 已关注' : '+ 关注'}
+          </button>
 
           {canEdit ? (
             // The primary CTA depends on status: draft/review → continue

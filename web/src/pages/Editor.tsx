@@ -289,6 +289,10 @@ export function Editor() {
   const [showSubmit, setShowSubmit] = useState(false);
   const [submitVersion, setSubmitVersion] = useState('');
   const [submitNote, setSubmitNote] = useState('');
+  // Hotfix channel: requires owner/maintainer + a written reason. The submit
+  // call below sends both fields; backend re-validates the role gate.
+  const [submitHotfix, setSubmitHotfix] = useState(false);
+  const [submitHotfixReason, setSubmitHotfixReason] = useState('');
 
   // New-file dialog state.
   const [showNewFile, setShowNewFile] = useState(false);
@@ -640,6 +644,9 @@ export function Editor() {
 
   async function submitForReview() {
     if (!submitVersion.trim()) { setMsg('请填写新版本号'); return; }
+    if (submitHotfix && !submitHotfixReason.trim()) {
+      setMsg('启用 Hotfix 通道时必须填写紧急原因'); return;
+    }
     // If a draft is still streaming, stop it first so we submit what we have.
     if (draftingNote) stopDraft();
     if (anyDirty) {
@@ -655,6 +662,8 @@ export function Editor() {
       const r = await api.submitForReview(ns, name, {
         version: submitVersion.trim(),
         note: submitNote.trim() || '请审批',
+        isHotfix: submitHotfix,
+        hotfixReason: submitHotfix ? submitHotfixReason.trim() : undefined,
       });
       setShowSubmit(false);
       setMsg(`已提交 审批 #${r.id}`);
@@ -821,7 +830,37 @@ export function Editor() {
                   <div style={{ fontSize: 11.5, color: 'var(--red-text)', marginTop: 4 }}>{draftErr}</div>
                 )}
               </label>
-              {policy.data && (
+              {/* Hotfix channel: relaxes policy to 1 approver / 4h SLA. Backend
+                  rejects this if the user isn't ns owner/maintainer. */}
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={submitHotfix}
+                    onChange={(e) => setSubmitHotfix(e.target.checked)}
+                    style={{ accentColor: 'var(--red)' }}
+                  />
+                  <span style={{ fontWeight: 600, color: submitHotfix ? 'var(--red-text)' : 'var(--text)' }}>
+                    Hotfix 紧急通道
+                  </span>
+                  <span style={{ color: 'var(--text-faint)', fontSize: 11.5 }}>
+                    1 审批人 · SLA 4h · 仅生产事故
+                  </span>
+                </label>
+                {submitHotfix && (
+                  <div style={{ marginTop: 8 }}>
+                    <textarea
+                      className="input"
+                      rows={2}
+                      value={submitHotfixReason}
+                      onChange={(e) => setSubmitHotfixReason(e.target.value)}
+                      placeholder="必填:简要说明紧急原因(将进入审计日志)"
+                      style={{ width: '100%', resize: 'vertical', borderColor: 'var(--red)' }}
+                    />
+                  </div>
+                )}
+              </div>
+              {policy.data && !submitHotfix && (
                 <div style={{ fontSize: 12, color: 'var(--text-subtle)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
                   策略: <span className="tag indigo">{policy.data.classification}</span>{' '}
                   {policy.data.mode} · SLA <span className="mono">{policy.data.slaHours}h</span>

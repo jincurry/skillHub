@@ -150,6 +150,7 @@ function PendingReviewItem({ r }: { r: Review }) {
     done: { color: 'var(--green-text)', dot: 'var(--green)' },
     rejected: { color: 'var(--text-subtle)', dot: 'var(--text-faint)' },
     changes: { color: 'var(--amber-text)', dot: 'var(--amber)' },
+    hot:     { color: 'var(--red-text)', dot: 'var(--red)' },
   } as const)[r.urgency] ?? { color: 'var(--text-subtle)', dot: 'var(--text-faint)' };
   return (
     <div onClick={() => navigate(`/reviews/${r.id}`)}

@@ -40,6 +40,14 @@ func Open(path string) (*Store, error) {
 	_, _ = db.Exec(`ALTER TABLE skills ADD COLUMN long_desc TEXT NOT NULL DEFAULT ''`)
 	// Backfill: when a review was decided, used by the avg-decision-hours stat.
 	_, _ = db.Exec(`ALTER TABLE reviews ADD COLUMN decided_at DATETIME`)
+	// Backfill: frozen approval-policy JSON captured at submit time. Without
+	// this snapshot, editing namespace_policies would retroactively change
+	// what reviewers see for in-flight requests. Empty = use live policy.
+	_, _ = db.Exec(`ALTER TABLE reviews ADD COLUMN policy_snapshot TEXT NOT NULL DEFAULT ''`)
+	// Backfill: hotfix channel — emergency reviews skip the usual SLA + slot
+	// requirements and require a written reason that's preserved in audit.
+	_, _ = db.Exec(`ALTER TABLE reviews ADD COLUMN is_hotfix     INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE reviews ADD COLUMN hotfix_reason TEXT    NOT NULL DEFAULT ''`)
 	// Backfill: structured target fields on notifications so click-through works.
 	_, _ = db.Exec(`ALTER TABLE notifications ADD COLUMN target_kind TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE notifications ADD COLUMN target_ref  TEXT NOT NULL DEFAULT ''`)

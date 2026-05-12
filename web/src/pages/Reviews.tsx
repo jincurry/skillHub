@@ -52,6 +52,7 @@ const URGENCY_BG: Record<Review['urgency'], { bg: string; color: string }> = {
   done: { bg: 'var(--green-bg)', color: 'var(--green-text)' },
   rejected: { bg: 'var(--slate-bg, var(--bg-muted))', color: 'var(--slate-text, var(--text-subtle))' },
   changes: { bg: 'var(--amber-bg)', color: 'var(--amber-text)' },
+  hot:     { bg: 'var(--red-bg)', color: 'var(--red-text)' },
 };
 
 // Reviews supports two URL params so other pages can deep-link in:
