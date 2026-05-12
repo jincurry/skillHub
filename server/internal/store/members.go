@@ -40,18 +40,20 @@ func (s *Store) UserRoleInNamespace(ns, user string) (string, error) {
 	return role, err
 }
 
-// PickHotfixReviewers picks a single owner/maintainer reviewer for the
-// emergency channel. Falls back to any owner/maintainer in any namespace if
-// the local namespace has no eligible candidate after excluding the author.
+// PickHotfixReviewers picks reviewers using the relaxed `HotfixPolicy`
+// (1 approver among owner/maintainer/reviewer, 4h SLA). Same selection rules
+// as the regular picker — local namespace first, then cross-namespace
+// fallback — just driven by a different slot list. We use the same code
+// path so behaviour stays consistent (no special "first match" cheat).
 func (s *Store) PickHotfixReviewers(ns, author, classification string) ([]string, error) {
 	pol := policy.HotfixPolicy(classification)
-	picked, _, err := s.PickReviewersByPolicy(ns, author, classification)
-	// First try the regular picker against the relaxed policy slot list.
-	_ = pol
-	if err == nil && len(picked) > 0 {
-		return picked[:1], nil
+	picked, err := s.pickReviewersForPolicy(ns, author, pol)
+	if err != nil || len(picked) > 0 {
+		return picked, err
 	}
-	// Fallback: any owner/maintainer anywhere.
+	// Last-ditch fallback: any owner/maintainer anywhere. This only fires
+	// when no namespace member matched the hotfix slot at all (small / new
+	// org), so we don't lose the ability to start an emergency review.
 	row := s.DB.QueryRow(`
 		SELECT username FROM namespace_members
 		WHERE username != ? AND ns_role IN ('owner','maintainer')
@@ -79,10 +81,17 @@ func (s *Store) PickReviewersByPolicy(ns, author, classification string) ([]stri
 	if err != nil {
 		return nil, pol, err
 	}
+	picked, err := s.pickReviewersForPolicy(ns, author, pol)
+	return picked, pol, err
+}
 
+// pickReviewersForPolicy is the shared slot-walking algorithm. It runs
+// against an arbitrary policy so callers can inject HotfixPolicy without
+// touching the namespace_policies table.
+func (s *Store) pickReviewersForPolicy(ns, author string, pol policy.Policy) ([]string, error) {
 	localMembers, err := s.ListNamespaceMembers(ns)
 	if err != nil {
-		return nil, pol, err
+		return nil, err
 	}
 
 	picked := make([]string, 0, pol.TotalRequired())
@@ -127,14 +136,14 @@ func (s *Store) PickReviewersByPolicy(ns, author, classification string) ([]stri
 				ELSE 3
 			END`, ns)
 		if err != nil {
-			return nil, pol, err
+			return nil, err
 		}
 		var crossMembers []NamespaceMember
 		for rows.Next() {
 			var m NamespaceMember
 			if err := rows.Scan(&m.Username, &m.Role); err != nil {
 				rows.Close()
-				return nil, pol, err
+				return nil, err
 			}
 			crossMembers = append(crossMembers, m)
 		}
@@ -142,5 +151,5 @@ func (s *Store) PickReviewersByPolicy(ns, author, classification string) ([]stri
 		_ = tryPickFrom(crossMembers, slot, need)
 	}
 
-	return picked, pol, nil
+	return picked, nil
 }
