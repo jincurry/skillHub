@@ -11,7 +11,7 @@ import { useAsync } from '../api/useAsync';
 import { openCreateSkill } from '../components/CreateSkillModal';
 import { fmtRelative, notifTargetUrl, filterAndSort, type NotifFilter } from '../lib/notify';
 import { markAllReadOptimistic, markOneReadOptimistic, useNotifStore } from '../lib/notifStore';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Notification, Review, Skill, ValidationReport } from '../api/types';
 
 const DRAFT_CHECKS_FALLBACK = [
@@ -69,20 +69,25 @@ function DraftCard({ d, meName, onChanged }: {
   const editPath = `/skills/${d.ns}/${d.name}/edit`;
   const isAuthor = meName !== '' && meName === d.author;
 
-  // Kebab menu — closed by default, click-outside dismisses. We pass the
-  // shared validate-handle in so "重新校验" reuses the same useAsync the
-  // header chips read from (no duplicate fetch).
+  // Kebab menu — closed by default, click-outside dismisses. We use a ref
+  // on the wrapper and only close when the click target lives outside it,
+  // otherwise the capture-phase handler would fire before the menu-item's
+  // bubble-phase onClick and make every row feel dead.
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!menuOpen) return;
-    const close = () => setMenuOpen(false);
-    // Defer attach so the click that opened the menu doesn't immediately
-    // close it. Capture phase so a click anywhere shuts the popover before
-    // the menu items get a chance to react.
-    const t = window.setTimeout(() => document.addEventListener('click', close, true), 0);
+    const onDocClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    // Defer attach so the click that opened the menu isn't counted as
+    // "outside" on the same tick.
+    const t = window.setTimeout(() => document.addEventListener('mousedown', onDocClick), 0);
     return () => {
       window.clearTimeout(t);
-      document.removeEventListener('click', close, true);
+      document.removeEventListener('mousedown', onDocClick);
     };
   }, [menuOpen]);
 
@@ -137,7 +142,7 @@ function DraftCard({ d, meName, onChanged }: {
             </div>
           </div>
         </div>
-        <div style={{ position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+        <div ref={menuRef} style={{ position: 'relative' }}>
           <button
             className="icon-btn"
             style={{ width: 28, height: 28 }}
@@ -155,28 +160,30 @@ function DraftCard({ d, meName, onChanged }: {
                 minWidth: 180, padding: '4px 0', fontSize: 13,
               }}
             >
-              <DraftMenuItem onClick={() => navigate(`/skills/${d.ns}/${d.name}`)}>
+              {/* Every action self-closes the popover via `pick()` so the
+                  user doesn't have to click elsewhere to dismiss. */}
+              <DraftMenuItem onClick={() => { setMenuOpen(false); navigate(`/skills/${d.ns}/${d.name}`); }}>
                 预览公开页
               </DraftMenuItem>
-              <DraftMenuItem onClick={() => navigate(editPath)}>
+              <DraftMenuItem onClick={() => { setMenuOpen(false); navigate(editPath); }}>
                 继续编辑
               </DraftMenuItem>
               <DraftMenuDivider />
-              <DraftMenuItem onClick={copyRef}>
+              <DraftMenuItem onClick={() => { setMenuOpen(false); void copyRef(); }}>
                 复制 ns/name
               </DraftMenuItem>
-              <DraftMenuItem onClick={downloadBundle}>
+              <DraftMenuItem onClick={() => { setMenuOpen(false); void downloadBundle(); }}>
                 下载 bundle
               </DraftMenuItem>
               <DraftMenuItem
-                onClick={() => v.reload()}
+                onClick={() => { setMenuOpen(false); v.reload(); }}
                 disabled={v.loading}
               >
                 {v.loading ? '校验中…' : '重新校验'}
               </DraftMenuItem>
               <DraftMenuDivider />
               <DraftMenuItem
-                onClick={deleteDraft}
+                onClick={() => { setMenuOpen(false); void deleteDraft(); }}
                 disabled={!isAuthor}
                 title={isAuthor ? '永久删除此草稿' : '只有作者可以删除自己的草稿'}
                 danger
