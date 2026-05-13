@@ -43,6 +43,16 @@ const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
 const REQUIRED_FILES = new Set(['skill.yaml', 'SKILL.md', 'README.md']);
 
+// Draft backup keys live under one namespace so we can sweep them later
+// (e.g. on logout) without hitting unrelated keys.
+function draftKeyFor(ns: string, name: string, path: string): string {
+  return `skillHub:draft:${ns}/${name}/${path}`;
+}
+
+// Debounce window for the network autosave. The localStorage backup is
+// written eagerly on every buffer change since it's cheap.
+const AUTOSAVE_MS = 1500;
+
 function iconFor(path: string): string {
   const ext = path.toLowerCase().split('.').pop() || '';
   if (ext === 'yaml' || ext === 'yml') return '⚙️';
@@ -349,6 +359,26 @@ export function Editor() {
   // Force the model-sync effect to re-run once the editor finishes mounting.
   const [editorMountTick, setEditorMountTick] = useState(0);
 
+  // Autosave: debounce per-path. localStorage backup runs alongside so
+  // crashed browsers / closed tabs can recover unsaved work even when
+  // autosave is disabled or the network is down.
+  const [autosaveOn, setAutosaveOn] = useState<boolean>(() => {
+    try { return localStorage.getItem('skillHub.editor.autosave') !== '0'; }
+    catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('skillHub.editor.autosave', autosaveOn ? '1' : '0'); }
+    catch { /* private mode etc. — ignore */ }
+  }, [autosaveOn]);
+  const autosaveTimers = useRef<Map<string, number>>(new Map());
+  // Latest buffers reachable from inside the (delayed) autosave callback
+  // without going stale. We update this on every render below.
+  const buffersRef = useRef(buffers);
+  // Per-path drafts the user hasn't responded to yet. When a file is
+  // loaded from the server and the local backup disagrees, we surface a
+  // banner instead of silently overwriting either side.
+  const [pendingRestore, setPendingRestore] = useState<Record<string, { content: string; ts: number }>>({});
+
   // AI 起草提交说明：直接流式写入 submitNote，不走抽屉。
   const [draftingNote, setDraftingNote] = useState(false);
   const [draftErr, setDraftErr] = useState<string | null>(null);
@@ -370,7 +400,10 @@ export function Editor() {
     setOpenPaths((prev) => prev.includes(pick) ? prev : [...prev, pick]);
   }, [files.data, activePath]);
 
-  // Lazy-load file content on first activation.
+  // Lazy-load file content on first activation. After the server responds
+  // we also peek at the localStorage backup for the same path; if the
+  // backup disagrees with what the server has, we queue a restore prompt
+  // instead of silently overwriting either side.
   useEffect(() => {
     if (!activePath) return;
     if (buffers[activePath]) return;
@@ -378,7 +411,20 @@ export function Editor() {
     inflight.current.add(activePath);
     api.getFile(ns, name, activePath)
       .then((f) => {
-        setBuffers((b) => ({ ...b, [activePath]: { content: f.content ?? '', dirty: false } }));
+        const server = f.content ?? '';
+        setBuffers((b) => ({ ...b, [activePath]: { content: server, dirty: false } }));
+        // Check for a local draft backup the user might want to restore.
+        try {
+          const raw = localStorage.getItem(draftKeyFor(ns, name, activePath));
+          if (!raw) return;
+          const parsed = JSON.parse(raw) as { content: string; ts: number };
+          if (parsed && typeof parsed.content === 'string' && parsed.content !== server) {
+            setPendingRestore((p) => ({ ...p, [activePath]: parsed }));
+          } else {
+            // Backup matches the server (or is corrupt) — clean it up.
+            localStorage.removeItem(draftKeyFor(ns, name, activePath));
+          }
+        } catch { /* private mode / quota — ignore */ }
       })
       .catch((e: Error) => setMsg(`加载 ${activePath} 失败: ${e.message}`))
       .finally(() => { inflight.current.delete(activePath); });
@@ -702,6 +748,78 @@ export function Editor() {
     handlersRef.current = { saveActive, saveAll };
   });
 
+  // Keep buffersRef synced so debounced timers always see fresh state.
+  useEffect(() => { buffersRef.current = buffers; });
+
+  // Autosave + localStorage backup. We re-schedule on every buffer mutation
+  // so the timer effectively "stretches" while the user keeps typing. The
+  // localStorage write fires on a tighter debounce so a crashed browser
+  // still recovers the user's most recent keystrokes.
+  useEffect(() => {
+    for (const [p, b] of Object.entries(buffers)) {
+      const prev = autosaveTimers.current.get(p);
+      if (!b.dirty) {
+        // Going clean — cancel any pending save and clear the local backup.
+        if (prev) { clearTimeout(prev); autosaveTimers.current.delete(p); }
+        try { localStorage.removeItem(draftKeyFor(ns, name, p)); } catch { /* ignore */ }
+        continue;
+      }
+      // Local backup: cheap, do it eagerly so even non-autosave users get
+      // crash recovery.
+      try {
+        localStorage.setItem(
+          draftKeyFor(ns, name, p),
+          JSON.stringify({ content: b.content, ts: Date.now() }),
+        );
+      } catch { /* quota / private mode — non-fatal */ }
+      // Network autosave: opt-out via toggle, gated on edit permission.
+      if (!autosaveOn || !canEdit) {
+        if (prev) { clearTimeout(prev); autosaveTimers.current.delete(p); }
+        continue;
+      }
+      if (prev) clearTimeout(prev);
+      const timer = window.setTimeout(async () => {
+        autosaveTimers.current.delete(p);
+        const cur = buffersRef.current[p];
+        if (!cur || !cur.dirty) return;
+        try {
+          const updated = await api.putFile(ns, name, p, cur.content);
+          setBuffers((bs) => {
+            const exist = bs[p];
+            // If the user kept typing during the round-trip the buffer is
+            // already past `cur.content`; leave it dirty so the next tick
+            // schedules another save.
+            if (!exist || exist.content !== cur.content) return bs;
+            return { ...bs, [p]: { content: updated.content ?? cur.content, dirty: false } };
+          });
+          try { localStorage.removeItem(draftKeyFor(ns, name, p)); } catch { /* ignore */ }
+          // Don't trample an existing toast on every silent save.
+          validation.reload();
+        } catch (e) {
+          setMsg(`自动保存 ${p} 失败: ${(e as Error).message}`);
+        }
+      }, AUTOSAVE_MS);
+      autosaveTimers.current.set(p, timer);
+    }
+    // We deliberately omit ns/name from deps — they're stable for the
+    // life of the page and adding them only adds noise.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buffers, autosaveOn, canEdit]);
+
+  // Apply / discard a localStorage draft surfaced by pendingRestore. We
+  // mark the buffer dirty after restore so the next autosave tick (or the
+  // user's first Cmd+S) flushes the restored content to the server.
+  function applyRestore(path: string) {
+    const draft = pendingRestore[path];
+    if (!draft) return;
+    setBuffers((b) => ({ ...b, [path]: { content: draft.content, dirty: true } }));
+    setPendingRestore((p) => { const { [path]: _, ...rest } = p; return rest; });
+  }
+  function discardRestore(path: string) {
+    setPendingRestore((p) => { const { [path]: _, ...rest } = p; return rest; });
+    try { localStorage.removeItem(draftKeyFor(ns, name, path)); } catch { /* ignore */ }
+  }
+
   function openNewFileDialog() {
     setNewFilePath('');
     setNewFileErr(null);
@@ -939,6 +1057,15 @@ export function Editor() {
         </div>
         <div className="page-actions">
             <button className="btn" onClick={runValidate} title="重新校验所有文件"><IconCheckCircle size={14} /> Validate</button>
+          <button
+            className={`btn ${autosaveOn ? '' : 'ghost'}`}
+            onClick={() => setAutosaveOn((v) => !v)}
+            title={autosaveOn ? '自动保存已开启 · 1.5 秒无输入后落盘' : '自动保存已关闭 · 仍会备份到本地以防丢失'}
+            style={autosaveOn ? { color: 'var(--green-text)', borderColor: 'var(--green)' } : { color: 'var(--text-faint)' }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: autosaveOn ? 'var(--green)' : 'var(--text-faint)', display: 'inline-block', marginRight: 4 }} />
+            自动保存 {autosaveOn ? 'ON' : 'OFF'}
+          </button>
           <button
             className="btn"
             onClick={() => setAIOpen((v) => !v)}
@@ -1258,6 +1385,29 @@ export function Editor() {
               })
             )}
           </div>
+          {activePath && pendingRestore[activePath] && (
+            <div style={{
+              padding: '8px 12px', borderBottom: '1px solid var(--border)',
+              background: 'var(--amber-bg)', color: 'var(--amber-text)',
+              fontSize: 12, display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <span style={{ flex: 1 }}>
+                发现 <span className="mono">{activePath}</span> 的本地未提交草稿
+                (保存于 {new Date(pendingRestore[activePath].ts).toLocaleString()})
+                ,与服务器版本不一致。
+              </span>
+              <button
+                className="btn sm primary"
+                style={{ padding: '2px 10px', fontSize: 11 }}
+                onClick={() => applyRestore(activePath)}
+              >恢复草稿</button>
+              <button
+                className="btn sm ghost"
+                style={{ padding: '2px 10px', fontSize: 11 }}
+                onClick={() => discardRestore(activePath)}
+              >丢弃</button>
+            </div>
+          )}
           <div className="editor-code" style={{ display: 'block', padding: 0, flex: 1, minHeight: 0, background: '#1e1e1e', position: 'relative' }}>
             {/* The Monaco instance is mounted exactly once and stays alive
                 for the lifetime of this page. Tab switches just call
