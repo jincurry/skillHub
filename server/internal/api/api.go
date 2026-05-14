@@ -1111,10 +1111,11 @@ func (s *Server) deleteSkillFile(c *gin.Context) {
 		c.JSON(403, gin.H{"error": "需要 author 或 namespace 成员身份"})
 		return
 	}
-	// skill.yaml / README.md are bundle anchors; refuse to delete them so the
-	// editor never ends up empty.
-	if p == "skill.yaml" || p == "SKILL.md" || p == "README.md" {
-		c.JSON(400, gin.H{"error": "this file is required and cannot be deleted"})
+	// SKILL.md is the only pinned file — it's the canonical entry point and
+	// the validate pass treats its absence as a blocker. Everything else is
+	// fair game for deletion.
+	if p == "SKILL.md" {
+		c.JSON(400, gin.H{"error": "SKILL.md 是 skill 入口，不可删除"})
 		return
 	}
 	deleted, err := s.store.DeleteSkillFile(ns, name, p)
@@ -1131,10 +1132,10 @@ func (s *Server) deleteSkillFile(c *gin.Context) {
 	c.JSON(204, nil)
 }
 
-// renameSkillFile moves a file within a skill bundle. Required files are
-// pinned (matching deleteSkillFile) so the editor never ends up missing
-// SKILL.md / README.md / skill.yaml. The destination path must clear the same
-// ValidateFilePath rules as a fresh upload.
+// renameSkillFile moves a file within a skill bundle. SKILL.md is pinned
+// (matching deleteSkillFile) so the bundle never loses its canonical entry
+// point. The destination path must clear the same ValidateFilePath rules
+// as a fresh upload.
 func (s *Server) renameSkillFile(c *gin.Context) {
 	ns, name := c.Param("ns"), c.Param("name")
 	user := s.currentUser(c)
@@ -1162,8 +1163,8 @@ func (s *Server) renameSkillFile(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "to: " + err.Error()})
 		return
 	}
-	if from == "skill.yaml" || from == "SKILL.md" || from == "README.md" {
-		c.JSON(400, gin.H{"error": "this file is required and cannot be renamed"})
+	if from == "SKILL.md" {
+		c.JSON(400, gin.H{"error": "SKILL.md 是 skill 入口，不可重命名"})
 		return
 	}
 	f, err := s.store.RenameSkillFile(ns, name, from, to, user)

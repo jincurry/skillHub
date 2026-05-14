@@ -41,7 +41,11 @@ function bumpVersion(current?: string, kind: SemverBump = 'patch'): string {
 
 const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
-const REQUIRED_FILES = new Set(['skill.yaml', 'SKILL.md', 'README.md']);
+// Only SKILL.md is pinned — it's the bundle's canonical entry point and the
+// validate pass treats its absence as a blocker. skill.yaml / README.md are
+// useful defaults but the author can delete them if they want a different
+// structure.
+const REQUIRED_FILES = new Set(['SKILL.md']);
 
 // Recommended skill-bundle layout (matches the Anthropic skill spec).
 // We surface these in the file tree (always visible, even when empty) and in
