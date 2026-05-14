@@ -159,9 +159,11 @@ func (s *Store) RenameSkillFile(ns, name, fromPath, toPath, updatedBy string) (*
 	return s.GetSkillFile(ns, name, toPath)
 }
 
-// SeedDefaultFiles bootstraps a freshly-created skill with a couple of starter
-// files so the editor has something to render. No-op if the skill already has
-// any files.
+// SeedDefaultFiles bootstraps a freshly-created skill with the canonical
+// SKILL.md plus skill.yaml / README.md so the editor opens to a meaningful
+// bundle that already nods to the recommended layout
+// (SKILL.md + scripts/ + references/ + assets/). No-op if the skill already
+// has any files.
 func (s *Store) SeedDefaultFiles(ns, name, description, author string) error {
 	var existing int
 	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM skill_files WHERE ns = ? AND skill_name = ?`, ns, name).Scan(&existing); err != nil {
@@ -170,15 +172,50 @@ func (s *Store) SeedDefaultFiles(ns, name, description, author string) error {
 	if existing > 0 {
 		return nil
 	}
-	skillYaml := buildSkillYaml(ns, name, description)
-	readme := buildReadme(name, description)
-	if _, err := s.PutSkillFile(ns, name, "skill.yaml", skillYaml, author); err != nil {
+	if _, err := s.PutSkillFile(ns, name, "SKILL.md", buildSkillMD(name, description), author); err != nil {
 		return err
 	}
-	if _, err := s.PutSkillFile(ns, name, "README.md", readme, author); err != nil {
+	if _, err := s.PutSkillFile(ns, name, "skill.yaml", buildSkillYaml(ns, name, description), author); err != nil {
+		return err
+	}
+	if _, err := s.PutSkillFile(ns, name, "README.md", buildReadme(name, description), author); err != nil {
 		return err
 	}
 	return nil
+}
+
+// buildSkillMD renders the canonical SKILL.md scaffold: YAML frontmatter +
+// usage / examples / references sections that point at the optional dirs.
+func buildSkillMD(name, description string) string {
+	desc := strings.TrimSpace(description)
+	if desc == "" {
+		desc = "(一句话描述这个 skill 的用途)"
+	}
+	return "---\n" +
+		"name: " + name + "\n" +
+		"description: " + firstLine(desc) + "\n" +
+		"license: Apache-2.0\n" +
+		"---\n\n" +
+		"# " + name + "\n\n" +
+		desc + "\n\n" +
+		"## 何时使用\n\n" +
+		"- 适用场景 1\n- 适用场景 2\n\n" +
+		"## 使用方式\n\n" +
+		"描述如何调用这个 skill，期望的输入 / 输出。\n\n" +
+		"```bash\nskillhub run " + name + "\n```\n\n" +
+		"## 脚本\n\n" +
+		"可执行代码放在 `scripts/` 目录。例如 `scripts/main.py`。\n\n" +
+		"## 参考资料\n\n" +
+		"补充文档（API 规约、长篇说明）放在 `references/` 目录。\n\n" +
+		"## 资源\n\n" +
+		"模板与静态资源放在 `assets/` 目录。\n"
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }
 
 func buildSkillYaml(ns, name, description string) string {
