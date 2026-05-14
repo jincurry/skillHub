@@ -1,12 +1,49 @@
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ClassificationTag } from '../components/Tags';
 import {
-  IconDownload, IconCheckCircle, IconArrowDown, IconChevronRight,
+  IconDownload, IconChevronRight,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import type { Review } from '../api/types';
+
+function csvEscape(s: string): string {
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function exportReviewsCSV(rows: Review[]) {
+  const header = 'id,ns,name,version,classification,author,reviewers,status,urgency,sla,submitted_at,note';
+  const body = rows.map((r) => [
+    String(r.id),
+    r.ns,
+    r.name,
+    r.version,
+    r.classification,
+    r.author,
+    r.reviewers.join('|'),
+    r.status,
+    r.urgency,
+    r.sla,
+    new Date(r.submittedAt).toISOString(),
+    r.note,
+  ].map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([header + '\n' + body + '\n'], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `skillhub-reviews-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function fmtHours(h: number): string {
+  if (h < 0) return '—';
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 24) return `${h.toFixed(1)}h`;
+  return `${(h / 24).toFixed(1)}d`;
+}
 
 const URGENCY_BG: Record<Review['urgency'], { bg: string; color: string }> = {
   overdue: { bg: 'var(--red-bg)', color: 'var(--red-text)' },
@@ -15,46 +52,122 @@ const URGENCY_BG: Record<Review['urgency'], { bg: string; color: string }> = {
   done: { bg: 'var(--green-bg)', color: 'var(--green-text)' },
   rejected: { bg: 'var(--slate-bg, var(--bg-muted))', color: 'var(--slate-text, var(--text-subtle))' },
   changes: { bg: 'var(--amber-bg)', color: 'var(--amber-text)' },
+  hot:     { bg: 'var(--red-bg)', color: 'var(--red-text)' },
 };
 
+// Reviews supports two URL params so other pages can deep-link in:
+//   ?status=pending|approved|rejected|all   (default pending)
+//   ?mine=1                                  (only reviews where I'm author or reviewer)
+// The page mirrors any UI changes back to the URL so refresh / back keep state.
 export function Reviews() {
   const navigate = useNavigate();
-  const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const initialStatus = (() => {
+    const s = searchParams.get('status');
+    return s === 'approved' || s === 'rejected' || s === 'all' ? s : 'pending';
+  })() as 'pending' | 'approved' | 'rejected' | 'all';
+  const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>(initialStatus);
+  // mineOnly defaults to true so the entry-from-sidebar experience shows
+  // actionable items (where I'm author or assigned reviewer), not the
+  // platform-wide queue. Pass ?mine=0 to opt into the full list view —
+  // this is useful for admins/maintainers auditing other namespaces.
+  const [mineOnly, setMineOnly] = useState<boolean>(searchParams.get('mine') !== '0');
+
   const all = useAsync(() => api.listReviews(), []);
+  const stats = useAsync(() => api.reviewStats(), []);
+  const me = useAsync(() => api.me(), []);
+
+  // Keep the URL in sync with the local state. Drop the params back to
+  // defaults so /reviews stays clean when nothing is filtered.
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (filter !== 'pending') next.set('status', filter);
+    // mineOnly is the default; only persist the opt-out so /reviews stays
+    // clean for the common case.
+    if (!mineOnly) next.set('mine', '0');
+    setSearchParams(next, { replace: true });
+  }, [filter, mineOnly, setSearchParams]);
+
+  // "Mine" = I authored the request OR I'm in the reviewer slot. The Reviews
+  // payload already carries reviewers as a list of usernames, so this is a
+  // cheap client-side filter; no extra API.
+  const myUsername = me.data?.username ?? '';
+  const visibleAll = useMemo(() => {
+    const data = all.data ?? [];
+    if (!mineOnly || !myUsername) return data;
+    return data.filter((r) => r.author === myUsername || r.reviewers.includes(myUsername));
+  }, [all.data, mineOnly, myUsername]);
 
   const counts = useMemo(() => {
-    const data = all.data ?? [];
     return {
-      pending: data.filter((r) => r.status === 'pending').length,
-      approved: data.filter((r) => r.status === 'approved').length,
-      rejected: data.filter((r) => r.status === 'rejected').length,
-      all: data.length,
+      pending: visibleAll.filter((r) => r.status === 'pending').length,
+      approved: visibleAll.filter((r) => r.status === 'approved').length,
+      rejected: visibleAll.filter((r) => r.status === 'rejected').length,
+      all: visibleAll.length,
     };
-  }, [all.data]);
+  }, [visibleAll]);
 
   const filtered = useMemo(() => {
-    const data = all.data ?? [];
-    return filter === 'all' ? data : data.filter((r) => r.status === filter);
-  }, [all.data, filter]);
+    return filter === 'all' ? visibleAll : visibleAll.filter((r) => r.status === filter);
+  }, [visibleAll, filter]);
 
   return (
     <div className="content-inner">
       <div className="page-header">
         <div>
           <h1 className="page-title">审批中心</h1>
-          <p className="page-subtitle">作为 maintainer,你需要审核即将发布或撤回的 Skill 版本。SLA 默认 72 小时。</p>
+          <p className="page-subtitle">作为 maintainer，你需要审核即将发布的 Skill 版本。SLA 按密级区分：L1 24h / L2 48h / L3 72h。</p>
         </div>
         <div className="page-actions">
-          <button className="btn"><IconDownload size={14} /> 导出报表</button>
-          <button className="btn primary"><IconCheckCircle size={14} /> 批量批准</button>
+          <button
+            className={`btn${mineOnly ? ' primary' : ''}`}
+            onClick={() => setMineOnly((v) => !v)}
+            title={mineOnly ? '当前只显示与我相关的审批' : '只看作为作者或审批人的记录'}
+          >
+            {mineOnly ? '✓ 我的视角' : '我的视角'}
+          </button>
+          <button
+            className="btn"
+            onClick={() => exportReviewsCSV(filtered)}
+            disabled={filtered.length === 0}
+          >
+            <IconDownload size={14} /> 导出当前视图 (CSV)
+          </button>
         </div>
       </div>
 
       <div className="stat-strip" style={{ marginBottom: 'var(--gap)' }}>
-        <div className="stat"><div className="stat-label">本月审批数</div><div><span className="stat-value num">{counts.all}</span></div></div>
-        <div className="stat"><div className="stat-label">平均审批耗时</div><div><span className="stat-value num">8.4h</span><span className="stat-delta up"><IconArrowDown size={11} />2.1h</span></div></div>
-        <div className="stat"><div className="stat-label">SLA 达成率</div><div><span className="stat-value num">94%</span></div></div>
-        <div className="stat"><div className="stat-label">超时件数</div><div><span className="stat-value num" style={{ color: 'var(--red)' }}>{(all.data ?? []).filter((r) => r.urgency === 'overdue').length}</span></div></div>
+        <div className="stat">
+          <div className="stat-label">总审批数</div>
+          <div><span className="stat-value num">{stats.data?.total ?? counts.all}</span></div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">平均审批耗时</div>
+          <div>
+            <span className="stat-value num">
+              {stats.data ? fmtHours(stats.data.avgDecisionHours) : '—'}
+            </span>
+          </div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">SLA 达成率</div>
+          <div>
+            <span className="stat-value num">
+              {stats.data && (stats.data.approved + stats.data.rejected) > 0
+                ? `${stats.data.slaComplianceRate.toFixed(0)}%`
+                : '—'}
+            </span>
+          </div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">超时件数</div>
+          <div>
+            <span className="stat-value num" style={{ color: (stats.data?.overdue ?? 0) > 0 ? 'var(--red)' : undefined }}>
+              {stats.data?.overdue ?? 0}
+            </span>
+          </div>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
@@ -101,7 +214,16 @@ export function Reviews() {
                     <div className="tbl-name">
                       <div className="skill-icon blue" style={{ width: 24, height: 24, fontSize: 11 }}>{r.name.slice(0, 2).toUpperCase()}</div>
                       <div>
-                        <div className="skill-name-text"><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{r.ns}/</span>{r.name}</div>
+                        <div className="skill-name-text" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{r.ns}/</span>{r.name}</span>
+                          {r.isHotfix && (
+                            <span
+                              className="tag"
+                              style={{ background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 10, fontWeight: 600 }}
+                              title={`Hotfix: ${r.hotfixReason || '未填写原因'}`}
+                            >⚡ HOTFIX</span>
+                          )}
+                        </div>
                         <div className="skill-name-desc"><span className="mono">v{r.version}</span></div>
                       </div>
                     </div>

@@ -27,6 +27,41 @@ func Open(path string) (*Store, error) {
 	}
 	// Backfill: add password_hash column on legacy DBs (empty hash → no login until reseeded).
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''`)
+	// Backfill: profile fields for the Me model.
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN email     TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN bio       TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN location  TEXT NOT NULL DEFAULT ''`)
+	// SQLite forbids ADD COLUMN with a non-constant default such as
+	// CURRENT_TIMESTAMP. Use a constant sentinel and backfill afterwards.
+	if _, err := db.Exec(`ALTER TABLE users ADD COLUMN joined_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'`); err == nil {
+		_, _ = db.Exec(`UPDATE users SET joined_at = CURRENT_TIMESTAMP WHERE joined_at = '1970-01-01 00:00:00'`)
+	}
+	// Backfill: long-form description for skills (markdown-ish README body).
+	_, _ = db.Exec(`ALTER TABLE skills ADD COLUMN long_desc TEXT NOT NULL DEFAULT ''`)
+	// Backfill: when a review was decided, used by the avg-decision-hours stat.
+	_, _ = db.Exec(`ALTER TABLE reviews ADD COLUMN decided_at DATETIME`)
+	// Backfill: frozen approval-policy JSON captured at submit time. Without
+	// this snapshot, editing namespace_policies would retroactively change
+	// what reviewers see for in-flight requests. Empty = use live policy.
+	_, _ = db.Exec(`ALTER TABLE reviews ADD COLUMN policy_snapshot TEXT NOT NULL DEFAULT ''`)
+	// Backfill: hotfix channel — emergency reviews skip the usual SLA + slot
+	// requirements and require a written reason that's preserved in audit.
+	_, _ = db.Exec(`ALTER TABLE reviews ADD COLUMN is_hotfix     INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE reviews ADD COLUMN hotfix_reason TEXT    NOT NULL DEFAULT ''`)
+	// Backfill: structured target fields on notifications so click-through works.
+	_, _ = db.Exec(`ALTER TABLE notifications ADD COLUMN target_kind TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE notifications ADD COLUMN target_ref  TEXT NOT NULL DEFAULT ''`)
+	// Backfill: avatar + cover (banner gradient) customisation columns on users.
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN avatar_url   TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN cover_preset TEXT NOT NULL DEFAULT 'sunset'`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN cover_from   TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN cover_to     TEXT NOT NULL DEFAULT ''`)
+	// Backfill: system-wide admin flag (separate from the display-only role).
+	if _, err := db.Exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`); err == nil {
+		// First time the column exists — seed alice as the bootstrap admin so
+		// the AI provider config UI is reachable on a fresh install.
+		_, _ = db.Exec(`UPDATE users SET is_admin = 1 WHERE username = 'alice'`)
+	}
 	s := &Store{DB: db}
 	if err := s.seedIfEmpty(); err != nil {
 		return nil, fmt.Errorf("seed: %w", err)
@@ -36,6 +71,9 @@ func Open(path string) (*Store, error) {
 	}
 	if err := s.backfillNamespaceMembers(); err != nil {
 		return nil, fmt.Errorf("backfill members: %w", err)
+	}
+	if err := s.backfillDailyMetrics(); err != nil {
+		return nil, fmt.Errorf("backfill metrics: %w", err)
 	}
 	return s, nil
 }
@@ -68,6 +106,45 @@ func (s *Store) backfillPasswords() error {
 	}
 	for _, u := range users {
 		if _, err := s.DB.Exec(`UPDATE users SET password_hash=? WHERE username=?`, hash, u); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// backfillDailyMetrics seeds the synthetic 30-day series for every skill
+// that already exists but has no rows in skill_daily_metrics yet. This runs
+// once on upgraded DBs (where seedIfEmpty saw existing rows and skipped
+// entirely). The seed function is deterministic so reruns are no-ops as
+// long as the data is already there.
+func (s *Store) backfillDailyMetrics() error {
+	var present int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM skill_daily_metrics LIMIT 1`).Scan(&present); err != nil {
+		return err
+	}
+	if present > 0 {
+		return nil
+	}
+	rows, err := s.DB.Query(`SELECT ns, name, activations, delta_pct FROM skills WHERE activations > 0`)
+	if err != nil {
+		return err
+	}
+	type skillRow struct {
+		ns, name           string
+		weekly, deltaPct   int
+	}
+	var skills []skillRow
+	for rows.Next() {
+		var r skillRow
+		if err := rows.Scan(&r.ns, &r.name, &r.weekly, &r.deltaPct); err != nil {
+			rows.Close()
+			return err
+		}
+		skills = append(skills, r)
+	}
+	rows.Close()
+	for _, r := range skills {
+		if err := seedDailyMetrics(s.DB, r.ns, r.name, r.weekly, r.deltaPct); err != nil {
 			return err
 		}
 	}

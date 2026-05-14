@@ -50,7 +50,7 @@ export function RatingsPanel({ ns, name }: { ns: string; name: string }) {
   return (
     <div className="card" style={{ marginTop: 'var(--gap)' }}>
       <div className="card-header">
-        <h3 className="card-title">用户评分 <span className="tag outline" style={{ marginLeft: 6 }}>{summary?.count ?? 0}</span></h3>
+        <h3 className="card-title">用户评分 <span className="count-pill" style={{ marginLeft: 6 }}>{summary?.count ?? 0}</span></h3>
         {summary && summary.count > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
             <Stars value={Math.round(summary.average)} size={14} />

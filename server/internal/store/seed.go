@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,21 +24,28 @@ func (s *Store) seedIfEmpty() error {
 	}
 	defer tx.Rollback()
 
-	users := [][3]string{
-		{"alice", "Alice Chen", "Maintainer"},
-		{"bob", "Bob Wang", "Maintainer"},
-		{"charlie", "Charlie Liu", "Reviewer"},
-		{"diana", "Diana Zhao", "Member"},
-		{"frank", "Frank Sun", "Maintainer"},
-		{"system", "System", "Bot"},
+	users := []struct {
+		username, display, role, email, location, bio string
+	}{
+		{"alice", "Alice Chen", "Maintainer", "alice@example.com", "Shanghai · UTC+8", "Platform engineer · 专注 Go、Kubernetes 和开发者工具。"},
+		{"bob", "Bob Wang", "Maintainer", "bob@example.com", "Beijing", "SRE & on-call rotation lead."},
+		{"charlie", "Charlie Liu", "Reviewer", "charlie@example.com", "Shenzhen", "Security 团队,IAM / token 流程。"},
+		{"diana", "Diana Zhao", "Member", "diana@example.com", "Hangzhou", "Finance ops · 报销流程自动化。"},
+		{"frank", "Frank Sun", "Maintainer", "frank@example.com", "Chengdu", "Data team · ETL 与分析平台。"},
+		{"system", "System", "Bot", "", "", ""},
 	}
 	defaultHash, err := auth.HashPassword("password")
 	if err != nil {
 		return err
 	}
 	for _, u := range users {
-		if _, err := tx.Exec(`INSERT INTO users(username,display,role,team,password_hash) VALUES(?,?,?,?,?)`,
-			u[0], u[1], u[2], "platform-team", defaultHash); err != nil {
+		isAdmin := 0
+		if u.username == "alice" {
+			isAdmin = 1 // bootstrap admin so AI provider config is reachable
+		}
+		if _, err := tx.Exec(`INSERT INTO users(username,display,role,team,password_hash,email,bio,location,is_admin)
+			VALUES(?,?,?,?,?,?,?,?,?)`,
+			u.username, u.display, u.role, "platform-team", defaultHash, u.email, u.bio, u.location, isAdmin); err != nil {
 			return err
 		}
 	}
@@ -99,35 +108,69 @@ func (s *Store) seedIfEmpty() error {
 	}
 
 	type seedSkill struct {
-		ns, name, desc, icon, iconClass, classification, status, version, author string
-		rating                                                                   float64
-		ratings, activations, delta                                              int
-		hot                                                                      bool
-		tags                                                                     []string
+		ns, name, desc, longDesc, icon, iconClass, classification, status, version, author string
+		rating                                                                              float64
+		ratings, activations, delta                                                         int
+		hot                                                                                 bool
+		tags                                                                                []string
 	}
+	const goReviewReadme = "## 概述\n\n`go-code-review` 在 PR 合并前对 Go 代码做静态检查 — 错误处理、并发安全、idiomatic 模式、Go 1.21+ generics 边界。\n\n## 何时使用\n\n- 想在 review 前自动捕获常见漏洞\n- 团队有明确的代码风格指引\n\n## 使用示例\n\n```bash\nskillhub run go-code-review --diff origin/main\n```\n\n## 注意事项\n\n* 不会跑测试,只做静态分析\n* 警告级别可在 `.skillhub/config.yaml` 调整\n"
+	const goReviewReadmeMD = "# go-code-review\n\nReview Go code for bugs, idiomatic patterns, error handling, and Go 1.21+ generics usage.\n\n## 用法\n\n```bash\nskillhub run go-code-review --diff origin/main\n```\n\n## 规则\n\n- error-wrap: 检查 error 返回是否带上下文\n- nil-deref: 检查指针解引用前的 nil 判断\n- generics-bounds: Go 1.21+ generics 类型约束\n"
+	const sqlExplainReadme = "## 概述\n\n解析 SQL 执行计划,标记慢查询、缺失索引、笛卡尔积,并给出改写建议。支持 PostgreSQL / MySQL / Snowflake。\n\n## 适用场景\n\n* DBA 复盘事故\n* 应用工程师在 PR 中带上 query plan 自检\n\n## 使用示例\n\n```sql\nEXPLAIN ANALYZE SELECT ...\n```\n"
 	skills := []seedSkill{
-		{"platform-team", "go-code-review", "Review Go code for bugs, idiomatic patterns, error handling, and Go 1.21+ generics usage.", "Go", "blue", "L2", "published", "1.2.3", "alice", 4.3, 87, 1234, 12, true, []string{"go", "review", "lint"}},
-		{"platform-team", "k8s-debug", "Diagnose Kubernetes pod issues from kubectl output.", "k8", "blue", "L2", "published", "1.5.0", "alice", 4.6, 64, 612, 8, false, []string{"k8s", "sre", "debug"}},
-		{"data-team", "csv-import", "Validate and import CSV files into Snowflake/PG with schema inference.", "csv", "green", "L1", "published", "2.0.1", "frank", 4.1, 52, 842, -3, false, []string{"data", "etl"}},
-		{"data-team", "sql-explain", "Explain and optimise slow SQL queries.", "SQ", "green", "L2", "published", "1.1.0", "frank", 4.5, 78, 1502, 18, true, []string{"sql", "data", "perf"}},
-		{"sre-team", "incident-postmortem", "Generate post-mortem drafts from PagerDuty + chat transcripts.", "PM", "amber", "L2", "published", "1.0.4", "bob", 4.8, 41, 318, 5, false, []string{"sre", "ops"}},
-		{"finance-team", "expense-validate", "Cross-check expense reports against policy and receipts.", "EX", "violet", "L3", "review", "0.4.0", "diana", 0, 0, 0, 0, false, []string{"finance", "ops"}},
-		{"security-team", "auth-audit", "Inspect IAM roles for excessive permissions.", "Au", "red", "L3", "published", "1.7.2", "charlie", 4.9, 22, 287, 11, false, []string{"security", "iam"}},
-		{"frontend-team", "react-component-review", "Review React component for accessibility & perf.", "Rc", "violet", "L1", "published", "0.9.0", "alice", 4.0, 18, 102, -8, false, []string{"react", "frontend", "a11y"}},
-		{"platform-team", "deploy-helper", "Helm/Argo deploy helper.", "🚀", "violet", "L2", "draft", "0.1.0", "alice", 0, 0, 0, 0, false, []string{"deploy", "k8s"}},
+		{"platform-team", "go-code-review", "Review Go code for bugs, idiomatic patterns, error handling, and Go 1.21+ generics usage.", goReviewReadme, "Go", "blue", "L2", "published", "1.2.3", "alice", 4.3, 87, 1234, 12, true, []string{"go", "review", "lint"}},
+		{"platform-team", "k8s-debug", "Diagnose Kubernetes pod issues from kubectl output.", "", "k8", "blue", "L2", "published", "1.5.0", "alice", 4.6, 64, 612, 8, false, []string{"k8s", "sre", "debug"}},
+		{"data-team", "csv-import", "Validate and import CSV files into Snowflake/PG with schema inference.", "", "csv", "green", "L1", "published", "2.0.1", "frank", 4.1, 52, 842, -3, false, []string{"data", "etl"}},
+		{"data-team", "sql-explain", "Explain and optimise slow SQL queries.", sqlExplainReadme, "SQ", "green", "L2", "published", "1.1.0", "frank", 4.5, 78, 1502, 18, true, []string{"sql", "data", "perf"}},
+		{"sre-team", "incident-postmortem", "Generate post-mortem drafts from PagerDuty + chat transcripts.", "", "PM", "amber", "L2", "published", "1.0.4", "bob", 4.8, 41, 318, 5, false, []string{"sre", "ops"}},
+		{"finance-team", "expense-validate", "Cross-check expense reports against policy and receipts.", "", "EX", "violet", "L3", "review", "0.4.0", "diana", 0, 0, 0, 0, false, []string{"finance", "ops"}},
+		{"security-team", "auth-audit", "Inspect IAM roles for excessive permissions.", "", "Au", "red", "L3", "published", "1.7.2", "charlie", 4.9, 22, 287, 11, false, []string{"security", "iam"}},
+		{"frontend-team", "react-component-review", "Review React component for accessibility & perf.", "", "Rc", "violet", "L1", "published", "0.9.0", "alice", 4.0, 18, 102, -8, false, []string{"react", "frontend", "a11y"}},
+		{"platform-team", "deploy-helper", "Helm/Argo deploy helper.", "", "🚀", "violet", "L2", "draft", "0.1.0", "alice", 0, 0, 0, 0, false, []string{"deploy", "k8s"}},
 	}
 	for _, k := range skills {
 		hot := 0
 		if k.hot {
 			hot = 1
 		}
+		// Derive ratings_sum so weighted-avg calculations don't see 0.
+		ratingsSum := int(k.rating*float64(k.ratings) + 0.5)
 		if _, err := tx.Exec(`
-			INSERT INTO skills(ns,name,description,icon,icon_class,classification,status,version,author,
-				rating,ratings_count,activations,delta_pct,hot,tags_csv,updated_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			k.ns, k.name, k.desc, k.icon, k.iconClass, k.classification, k.status, k.version, k.author,
-			k.rating, k.ratings, k.activations, k.delta, hot, strings.Join(k.tags, ","), time.Now().Add(-time.Duration(len(k.name))*time.Hour),
+			INSERT INTO skills(ns,name,description,long_desc,icon,icon_class,classification,status,version,author,
+				rating,ratings_count,ratings_sum,activations,delta_pct,hot,tags_csv,updated_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			k.ns, k.name, k.desc, k.longDesc, k.icon, k.iconClass, k.classification, k.status, k.version, k.author,
+			k.rating, k.ratings, ratingsSum, k.activations, k.delta, hot, strings.Join(k.tags, ","), time.Now().Add(-time.Duration(len(k.name))*time.Hour),
 		); err != nil {
+			return err
+		}
+		// Synthetic 30-day daily metrics so the trend chart isn't empty on
+		// fresh databases. Deterministic per (ns,name) — uses a tiny FNV
+		// hash as the random seed so each demo run produces the same curve.
+		if k.activations > 0 {
+			if err := seedDailyMetrics(tx, k.ns, k.name, k.activations, k.delta); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Seed bundle files for every skill so the editor opens to real content
+	// even on the freshly-seeded demo DB. Each gets skill.yaml + README.md;
+	// go-code-review additionally ships a small rules/ folder so the tree has
+	// a non-trivial shape.
+	type seedFile struct {
+		ns, name, path, content string
+	}
+	files := []seedFile{
+		{"platform-team", "go-code-review", "skill.yaml", "name: go-code-review\nversion: \"1.2.3\"\nnamespace: platform-team\nclassification: L2\n\ndescription: |\n  Review Go code for bugs, idiomatic patterns, error handling, and Go 1.21+\n  generics usage.\n\nruntime:\n  image: \"alpine:3.19\"\n  timeout: 60s\n  memory: \"512Mi\"\n\ntags: [go, review, lint]\n\ninputs:\n  - name: diff\n    type: string\n    required: true\n"},
+		{"platform-team", "go-code-review", "README.md", goReviewReadmeMD},
+		{"platform-team", "go-code-review", "rules/error-wrap.go", "package rules\n\n// ErrorWrapRule flags errors returned without wrapping context.\nfunc ErrorWrapRule(node Node) []Issue {\n\t// TODO: walk return statements\n\treturn nil\n}\n"},
+		{"platform-team", "go-code-review", "rules/nil-deref.go", "package rules\n\n// NilDerefRule flags pointer dereferences without nil checks.\nfunc NilDerefRule(node Node) []Issue { return nil }\n"},
+		{"platform-team", "go-code-review", "tests/fixtures.go", "package rules\n\n// minimal test fixtures\nvar fixtures = []string{\n\t\"return err\",\n\t\"return nil\",\n}\n"},
+	}
+	for _, f := range files {
+		if _, err := tx.Exec(`INSERT INTO skill_files(ns, skill_name, path, content, size, updated_by) VALUES(?, ?, ?, ?, ?, ?)`,
+			f.ns, f.name, f.path, f.content, len(f.content), "alice"); err != nil {
 			return err
 		}
 	}
@@ -142,33 +185,46 @@ func (s *Store) seedIfEmpty() error {
 		{"finance-team", "expense-validate", "0.5.0", "L3", "diana", "soon", "2h", "L3 密级首次发布", []string{"alice", "charlie", "frank"}},
 		{"security-team", "auth-audit", "1.7.3", "L3", "charlie", "ok", "48h", "修复 误报", []string{"alice", "bob"}},
 	}
+	// Track inserted review ids by "ns/name" so we can wire notifications below
+	// to actual reviews instead of hard-coding ids.
+	reviewIDs := map[string]int64{}
 	for _, r := range reviews {
-		if _, err := tx.Exec(`
+		res, err := tx.Exec(`
 			INSERT INTO reviews(ns,skill_name,version,classification,author,reviewers_csv,status,urgency,sla,note,submitted_at)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 			r.ns, r.name, r.version, r.class, r.author, strings.Join(r.reviewers, ","),
 			"pending", r.urgency, r.sla, r.note, time.Now().Add(-12*time.Hour),
-		); err != nil {
+		)
+		if err != nil {
 			return err
+		}
+		if id, err := res.LastInsertId(); err == nil {
+			reviewIDs[r.ns+"/"+r.name] = id
 		}
 	}
 
+	reviewRef := func(key string) string {
+		if id, ok := reviewIDs[key]; ok {
+			return strconv.FormatInt(id, 10)
+		}
+		return ""
+	}
 	notifs := []struct {
-		kind, body string
-		unread     bool
+		kind, body, targetKind, targetRef string
+		unread                            bool
 	}{
-		{"review", "你的 platform-team/go-code-review v1.3.0 已请求 @bob @charlie 审批", true},
-		{"comment", "@charlie 在 sre-team/incident-postmortem 留下了 2 条评论", true},
-		{"publish", "data-team/csv-import v2.0.1 已成功发布", false},
-		{"warn", "security-team/auth-audit 24h 成功率下降到 92%", true},
+		{"review", "你的 platform-team/go-code-review v1.3.0 已请求 @bob @charlie 审批", "review", reviewRef("platform-team/go-code-review"), true},
+		{"comment", "@charlie 在 sre-team/incident-postmortem 留下了 2 条评论", "review", reviewRef("sre-team/incident-postmortem"), true},
+		{"publish", "data-team/csv-import v2.0.1 已成功发布", "skill", "data-team/csv-import", false},
+		{"warn", "security-team/auth-audit 24h 成功率下降到 92%", "skill", "security-team/auth-audit", true},
 	}
 	for _, n := range notifs {
 		u := 0
 		if n.unread {
 			u = 1
 		}
-		if _, err := tx.Exec(`INSERT INTO notifications(user,kind,body,unread,created_at) VALUES(?,?,?,?,?)`,
-			"alice", n.kind, n.body, u, time.Now().Add(-time.Hour)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO notifications(user,kind,target_kind,target_ref,body,unread,created_at) VALUES(?,?,?,?,?,?,?)`,
+			"alice", n.kind, n.targetKind, n.targetRef, n.body, u, time.Now().Add(-time.Hour)); err != nil {
 			return err
 		}
 	}
@@ -201,4 +257,67 @@ func itoa(i int) string {
 		i /= 10
 	}
 	return out
+}
+
+// seedDailyMetrics writes a synthetic 30-day activation series for one
+// skill. The series is deterministic — same (ns,name,weekly,delta) always
+// produces the same shape — so demos and screenshots are reproducible.
+//
+// Shape: weekly counter is interpreted as last-7-days total; the per-day
+// average is weekly/7. The first 23 days sit at base*(1-delta/100), the
+// last 7 days at base, with ±15% noise driven by a tiny FNV hash and
+// weekends discounted to 70%. Counts are clamped to >= 0.
+func seedDailyMetrics(tx interface {
+	Exec(string, ...any) (sql.Result, error)
+}, ns, name string, weekly, deltaPct int) error {
+	if weekly <= 0 {
+		return nil
+	}
+	const days = 30
+	const recent = 7
+
+	avgRecent := float64(weekly) / float64(recent)
+	avgBase := avgRecent
+	if deltaPct != 0 {
+		// avgBase * (1 + delta/100) ≈ avgRecent  ⇒  avgBase = avgRecent / (1 + delta/100)
+		avgBase = avgRecent / (1.0 + float64(deltaPct)/100.0)
+		if avgBase < 0.1 {
+			avgBase = 0.1
+		}
+	}
+
+	// FNV-1a 32-bit on ns+"/"+name → seed.
+	seed := uint32(2166136261)
+	for _, b := range []byte(ns + "/" + name) {
+		seed ^= uint32(b)
+		seed *= 16777619
+	}
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	for i := 0; i < days; i++ {
+		day := today.AddDate(0, 0, -(days - 1 - i)) // oldest first
+		dayStr := day.Format("2006-01-02")
+		isRecent := i >= days-recent
+		avg := avgBase
+		if isRecent {
+			avg = avgRecent
+		}
+		// Pseudo-random noise in [-0.15, +0.15] using the seed + day index.
+		seed = seed*1103515245 + 12345
+		noise := (float64(seed%1000)/1000.0)*0.30 - 0.15
+		// Weekend discount (Sat=6, Sun=0) for a slightly realistic shape.
+		weekend := 1.0
+		if w := day.Weekday(); w == time.Saturday || w == time.Sunday {
+			weekend = 0.70
+		}
+		count := int(avg * (1.0 + noise) * weekend)
+		if count < 0 {
+			count = 0
+		}
+		if _, err := tx.Exec(`INSERT INTO skill_daily_metrics(ns,name,day,activations) VALUES(?,?,?,?)`,
+			ns, name, dayStr, count); err != nil {
+			return err
+		}
+	}
+	return nil
 }

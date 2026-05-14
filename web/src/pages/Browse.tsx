@@ -1,16 +1,21 @@
-import { useMemo, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ClassificationTag, StatusPill } from '../components/Tags';
 import {
-  IconBookmark, IconPlus, IconSearch, IconChevronDown, IconGrid, IconList,
-  IconClock, IconStar, IconFire, IconCopy,
+  IconPlus, IconSearch, IconChevronDown, IconGrid, IconList,
+  IconStar, IconFire, IconX,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { openCreateSkill } from '../components/CreateSkillModal';
 import type { Skill } from '../api/types';
 
-const TAGS = ['data', 'sql', 'go', 'k8s', 'review', 'security', 'lint', 'frontend'];
+type SortKey = 'updated' | 'activations' | 'rating';
+const SORT_LABELS: Record<SortKey, string> = {
+  updated: '最近更新',
+  activations: '激活量',
+  rating: '评分',
+};
 
 function FilterCheckbox({ checked, onChange, label, count }: {
   checked: boolean; onChange: (next: boolean) => void; label: ReactNode; count?: number;
@@ -83,8 +88,7 @@ function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
       </div>
 
       <div className="skill-card-actions" onClick={(e) => e.stopPropagation()}>
-        <button className="btn sm" onClick={() => onOpen(s)}>查看详情</button>
-        <button className="btn sm primary"><IconCopy size={12} /> 复制安装命令</button>
+        <button className="btn sm primary" onClick={() => onOpen(s)}>查看详情</button>
       </div>
     </div>
   );
@@ -92,28 +96,84 @@ function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
 
 export function Browse() {
   const navigate = useNavigate();
+  // URL is the source of truth for namespace filter so the global search /
+  // sidebar quick-jump (/skills?ns=foo) lands on a pre-filtered view.
+  // Multiple `ns` params are supported, e.g. /skills?ns=foo&ns=bar.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const nsFromUrl = useMemo(
+    () => new Set(searchParams.getAll('ns')),
+    [searchParams],
+  );
   const [view, setView] = useState<'grid' | 'list'>('grid');
-  const [selectedNs, setSelectedNs] = useState<Set<string>>(new Set());
+  const [selectedNs, setSelectedNs] = useState<Set<string>>(nsFromUrl);
   const [selectedClass, setSelectedClass] = useState<Set<string>>(new Set());
   const [selectedStatus, setSelectedStatus] = useState<Set<string>>(new Set());
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+
+  // External URL → state: when the user clicks a namespace in the command
+  // palette while already on /skills, react-router updates the query but not
+  // the component state. We diff against the current selection to avoid
+  // touching state when the two are already in sync.
+  useEffect(() => {
+    const current = Array.from(selectedNs).sort().join(',');
+    const incoming = Array.from(nsFromUrl).sort().join(',');
+    if (current !== incoming) setSelectedNs(nsFromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nsFromUrl]);
+
+  // State → URL: keep the address bar reflecting the active namespace filter
+  // so the URL is shareable / bookmarkable. We use replace to avoid filling
+  // history with every toggle.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('ns');
+    Array.from(selectedNs).sort().forEach((n) => next.append('ns', n));
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNs]);
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortKey>('updated');
+  const [sortOpen, setSortOpen] = useState(false);
+
+  // Single-valued author filter. Driven from URL (?author=foo) only — we don't
+  // expose a sidebar selector for it, only the dismissible chip in the main
+  // pane. Clearing the chip clears the query param.
+  const authorFilter = searchParams.get('author') ?? '';
+  const clearAuthor = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('author');
+    setSearchParams(next, { replace: true });
+  };
 
   const namespaces = useAsync(() => api.namespaces(), []);
   const skills = useAsync(() => api.listSkills(), []);
 
   const filtered = useMemo(() => {
     const all = skills.data ?? [];
-    return all.filter((s) => {
+    const out = all.filter((s) => {
       if (selectedNs.size && !selectedNs.has(s.ns)) return false;
       if (selectedClass.size && !selectedClass.has(s.classification)) return false;
       if (selectedStatus.size && !selectedStatus.has(s.status)) return false;
+      if (selectedTags.size && !s.tags.some((t) => selectedTags.has(t))) return false;
+      if (authorFilter && s.author !== authorFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         if (!(s.name + s.desc + s.tags.join(',')).toLowerCase().includes(q)) return false;
       }
       return true;
     });
-  }, [skills.data, selectedNs, selectedClass, selectedStatus, search]);
+    out.sort((a, b) => {
+      switch (sort) {
+        case 'activations': return b.activations - a.activations;
+        case 'rating':      return b.rating - a.rating;
+        case 'updated':
+        default:            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      }
+    });
+    return out;
+  }, [skills.data, selectedNs, selectedClass, selectedStatus, selectedTags, authorFilter, search, sort]);
 
   const openSkill = (s: Skill) => navigate(`/skills/${s.ns}/${s.name}`);
   const toggle = (set: Set<string>, setter: (n: Set<string>) => void, id: string) => {
@@ -126,11 +186,19 @@ export function Browse() {
     const all = skills.data ?? [];
     const byClass: Record<string, number> = { L1: 0, L2: 0, L3: 0 };
     const byStatus: Record<string, number> = {};
+    const byTag: Record<string, number> = {};
     for (const s of all) {
       byClass[s.classification] = (byClass[s.classification] || 0) + 1;
       byStatus[s.status] = (byStatus[s.status] || 0) + 1;
+      for (const t of s.tags) {
+        byTag[t] = (byTag[t] || 0) + 1;
+      }
     }
-    return { byClass, byStatus };
+    const sortedTags = Object.entries(byTag)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([id, count]) => ({ id, count }));
+    return { byClass, byStatus, tags: sortedTags };
   }, [skills.data]);
 
   return (
@@ -141,7 +209,6 @@ export function Browse() {
           <p className="page-subtitle">在公司内部 {skills.data?.length ?? '...'} 个 skill 中找到你需要的能力 — 按命名空间、密级、标签筛选。</p>
         </div>
         <div className="page-actions">
-          <button className="btn"><IconBookmark size={14} /> 我的收藏</button>
           <button className="btn primary" onClick={openCreateSkill}><IconPlus size={14} /> 创建 Skill</button>
         </div>
       </div>
@@ -171,27 +238,75 @@ export function Browse() {
 
           <div className="filter-group">
             <h4 className="filter-group-title">标签</h4>
-            {TAGS.map((t) => (
-              <FilterCheckbox key={t} checked={false} onChange={() => { }} label={`#${t}`} />
+            {counts.tags.length === 0 && (
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: '4px 0' }}>暂无</div>
+            )}
+            {counts.tags.map((t) => (
+              <FilterCheckbox
+                key={t.id}
+                checked={selectedTags.has(t.id)}
+                onChange={() => toggle(selectedTags, setSelectedTags, t.id)}
+                label={`#${t.id}`}
+                count={t.count}
+              />
             ))}
           </div>
 
           <div style={{ paddingTop: 14, borderTop: '1px solid var(--border)' }}>
             <button className="btn" style={{ width: '100%' }} onClick={() => {
-              setSelectedNs(new Set()); setSelectedClass(new Set()); setSelectedStatus(new Set()); setSearch('');
+              setSelectedNs(new Set()); setSelectedClass(new Set()); setSelectedStatus(new Set()); setSelectedTags(new Set()); setSearch('');
+              clearAuthor();
             }}>清空所有过滤</button>
           </div>
         </aside>
 
         <div>
+          {authorFilter && (
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '4px 10px 4px 12px', marginBottom: 10,
+              background: 'var(--primary-50, rgba(79,70,229,0.08))',
+              color: 'var(--primary-700, var(--primary))',
+              borderRadius: 999, fontSize: 12, fontWeight: 500,
+              border: '1px solid var(--primary-200, rgba(79,70,229,0.18))',
+            }}>
+              <span>作者: <span className="mono">@{authorFilter}</span></span>
+              <button
+                onClick={clearAuthor}
+                title="清除作者过滤"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 18, height: 18, padding: 0, border: 'none',
+                  background: 'transparent', cursor: 'pointer',
+                  color: 'inherit', borderRadius: '50%',
+                }}
+              ><IconX size={11} /></button>
+            </div>
+          )}
           <div className="browse-toolbar">
             <div className="input-wrap">
               <span className="icon-left"><IconSearch size={15} /></span>
               <input className="input with-icon" placeholder="搜索 skill 名称、描述、标签..." value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            <button className="dropdown" style={{ height: 36 }}>
-              排序: <strong style={{ color: 'var(--text)' }}>相关度</strong> <IconChevronDown size={12} />
-            </button>
+            <div style={{ position: 'relative' }}>
+              <button className="dropdown" style={{ height: 36 }} onClick={() => setSortOpen((v) => !v)}>
+                排序: <strong style={{ color: 'var(--text)' }}>{SORT_LABELS[sort]}</strong> <IconChevronDown size={12} />
+              </button>
+              {sortOpen && (
+                <>
+                  <div onClick={() => setSortOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 49 }} />
+                  <div style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 50, minWidth: 160, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 8px 20px rgba(15,23,42,0.12)', overflow: 'hidden' }}>
+                    {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+                      <div key={k} onClick={() => { setSort(k); setSortOpen(false); }} style={{
+                        padding: '8px 12px', fontSize: 13, cursor: 'pointer',
+                        background: sort === k ? 'var(--primary-50, rgba(79,70,229,0.08))' : 'transparent',
+                        color: sort === k ? 'var(--primary-700, var(--primary))' : 'var(--text)',
+                      }}>{SORT_LABELS[k]}</div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
             <div className="seg">
               <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')}><IconGrid size={13} /> 网格</button>
               <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><IconList size={13} /> 列表</button>
@@ -200,7 +315,6 @@ export function Browse() {
 
           <div className="browse-meta">
             <span>共 <strong style={{ color: 'var(--text)' }} className="num">{filtered.length}</strong> 个 skill</span>
-            <span><IconClock size={12} stroke={2} /> 实时数据</span>
           </div>
 
           {skills.loading && <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>加载中...</div></div>}
@@ -221,7 +335,7 @@ export function Browse() {
                       <th style={{ textAlign: 'right' }}>评分</th>
                       <th style={{ textAlign: 'right' }}>激活/周</th>
                       <th style={{ textAlign: 'right' }}>版本</th>
-                      <th>更新</th><th></th>
+                      <th>更新</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -242,7 +356,6 @@ export function Browse() {
                         <td className="num" style={{ textAlign: 'right', fontWeight: 500 }}>{s.activations.toLocaleString()}</td>
                         <td style={{ textAlign: 'right' }}><span className="mono">v{s.version}</span></td>
                         <td style={{ color: 'var(--text-subtle)', fontSize: 12.5 }}>{new Date(s.updatedAt).toLocaleDateString()}</td>
-                        <td><button className="btn sm ghost" onClick={(e) => e.stopPropagation()}><IconCopy size={12} /></button></td>
                       </tr>
                     ))}
                   </tbody>

@@ -1,5 +1,9 @@
 package policy
 
+import (
+	"github.com/jincurry/skillhub/server/internal/model"
+)
+
 // Slot describes one required reviewer position.
 type Slot struct {
 	// Roles eligible to fill this slot, in priority order.
@@ -61,4 +65,51 @@ func (p Policy) TotalRequired() int {
 		n += s.Count
 	}
 	return n
+}
+
+// HotfixPolicy returns the emergency-channel override: a single approver,
+// 4-hour SLA, no role gating beyond "owner or maintainer". The submission
+// path still requires a justification (hotfix_reason) that's audit-logged.
+func HotfixPolicy(classification string) Policy {
+	return Policy{
+		Classification: classification,
+		Mode:           "parallel",
+		SLAHours:       4,
+		Slots: []Slot{
+			{Roles: []string{"owner", "maintainer"}, Count: 1},
+		},
+	}
+}
+
+// Snapshot converts a Policy into its JSON-serialisable model form.
+func (p Policy) Snapshot(hotfix bool) *model.PolicySnapshot {
+	slots := make([]model.PolicySlot, 0, len(p.Slots))
+	for _, s := range p.Slots {
+		slots = append(slots, model.PolicySlot{Roles: append([]string{}, s.Roles...), Count: s.Count})
+	}
+	return &model.PolicySnapshot{
+		Classification: p.Classification,
+		Mode:           p.Mode,
+		SLAHours:       p.SLAHours,
+		Slots:          slots,
+		Hotfix:         hotfix,
+	}
+}
+
+// FromSnapshot rehydrates a snapshot back into a runtime Policy so the
+// reviewer-picker can still operate on it if needed.
+func FromSnapshot(s *model.PolicySnapshot) Policy {
+	if s == nil {
+		return Policy{}
+	}
+	slots := make([]Slot, 0, len(s.Slots))
+	for _, sl := range s.Slots {
+		slots = append(slots, Slot{Roles: append([]string{}, sl.Roles...), Count: sl.Count})
+	}
+	return Policy{
+		Classification: s.Classification,
+		Mode:           s.Mode,
+		SLAHours:       s.SLAHours,
+		Slots:          slots,
+	}
 }

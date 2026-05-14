@@ -2,6 +2,7 @@
 server/skillhub.db
 server/skillhub.db-wal
 server/skillhub.db-shm
+server/data/
 
 # Node / Vite
 web/node_modules/
