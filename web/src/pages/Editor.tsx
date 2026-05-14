@@ -43,6 +43,117 @@ const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
 const REQUIRED_FILES = new Set(['skill.yaml', 'SKILL.md', 'README.md']);
 
+// Recommended skill-bundle layout (matches the Anthropic skill spec).
+// We surface these in the file tree (always visible, even when empty) and in
+// the side-panel Bundle Structure card.
+const STD_DIRS = [
+  { key: 'scripts', label: 'scripts', desc: '可执行脚本（.py / .sh / .ts …）', icon: '🔧' },
+  { key: 'references', label: 'references', desc: '参考文档与长篇说明', icon: '📚' },
+  { key: 'assets', label: 'assets', desc: '模板与静态资源', icon: '🎨' },
+] as const;
+type StdDirKey = (typeof STD_DIRS)[number]['key'];
+
+const STD_DIR_KEYS = new Set<string>(STD_DIRS.map((d) => d.key));
+
+function dirIconFor(name: string): string {
+  switch (name) {
+    case 'scripts': return '🔧';
+    case 'references': return '📚';
+    case 'assets': return '🎨';
+    case 'docs': return '📘';
+    case 'examples': return '💡';
+    case 'tests': return '🧪';
+    default: return '📁';
+  }
+}
+
+// Default seed contents used by the "Create dir" shortcut and the categorized
+// template list in the new-file dialog. The path is the file we'll actually
+// create; the content is what gets PUT to it.
+interface FileTemplate {
+  path: string;
+  content?: string;
+  desc?: string;
+}
+const TEMPLATE_GROUPS: { title: string; items: FileTemplate[] }[] = [
+  {
+    title: '核心',
+    items: [
+      {
+        path: 'SKILL.md',
+        desc: '元数据 + 说明（推荐入口）',
+        content:
+          '---\nname: my-skill\ndescription: (一句话描述)\nlicense: Apache-2.0\n---\n\n' +
+          '# my-skill\n\n## 何时使用\n\n- \n\n## 使用方式\n\n## 脚本\n\n## 参考资料\n\n## 资源\n',
+      },
+      { path: 'README.md', desc: '中文 README' },
+    ],
+  },
+  {
+    title: '🔧 scripts/ · 脚本',
+    items: [
+      {
+        path: 'scripts/main.py',
+        desc: 'Python 入口',
+        content: '#!/usr/bin/env python3\n"""Entry point for this skill."""\n\n\ndef main() -> None:\n    pass\n\n\nif __name__ == "__main__":\n    main()\n',
+      },
+      {
+        path: 'scripts/run.sh',
+        desc: 'Shell 入口',
+        content: '#!/usr/bin/env bash\nset -euo pipefail\n\n# Entry point — replace with your logic.\necho "hello from skill"\n',
+      },
+    ],
+  },
+  {
+    title: '📚 references/ · 参考',
+    items: [
+      { path: 'references/api.md', desc: 'API / 数据规约', content: '# API 规约\n\n## 输入\n\n## 输出\n' },
+      { path: 'references/notes.md', desc: '设计笔记', content: '# 设计笔记\n' },
+    ],
+  },
+  {
+    title: '🎨 assets/ · 资源',
+    items: [
+      { path: 'assets/template.json', desc: 'JSON 模板', content: '{\n  "example": true\n}\n' },
+      { path: 'assets/prompt.md', desc: 'Prompt 模板', content: '# Prompt 模板\n\n你是一个 ...\n' },
+    ],
+  },
+  {
+    title: '其他',
+    items: [
+      { path: 'docs/usage.md', desc: '使用说明' },
+      { path: 'examples/basic.md', desc: '示例' },
+      { path: 'tests/fixtures.md', desc: '测试夹具' },
+    ],
+  },
+];
+
+// Quick-create stub for a missing recommended dir. We seed the dir with a
+// short README.md so the directory actually exists in storage (the backend
+// has no concept of empty dirs) and so the file gives the maintainer a hint
+// about what to put there.
+function seedFileForDir(d: StdDirKey, name: string): { path: string; content: string } {
+  switch (d) {
+    case 'scripts':
+      return {
+        path: 'scripts/README.md',
+        content: '# scripts/\n\n可执行脚本（Python / Shell / TypeScript）。\n\n约定:\n- 第一个 shebang 行声明解释器\n- 每个脚本都应能独立运行\n',
+      };
+    case 'references':
+      return {
+        path: 'references/README.md',
+        content: '# references/\n\n参考资料与长篇说明文档放在这里。SKILL.md 应当只放最关键的指引，详细内容链接到这里。\n',
+      };
+    case 'assets':
+      return {
+        path: 'assets/README.md',
+        content: '# assets/\n\n模板、Prompt 片段、静态资源（JSON / YAML / 图片等）放在这里。\n',
+      };
+  }
+  // Unreachable but TS demands the path.
+  return { path: `${name}/README.md`, content: `# ${name}/\n` };
+}
+
 // Draft backup keys live under one namespace so we can sweep them later
 // (e.g. on logout) without hitting unrelated keys.
 function draftKeyFor(ns: string, name: string, path: string): string {
@@ -170,11 +281,20 @@ function FileTree({
   const renderNode = (n: TreeNode, depth: number): React.ReactNode => {
     if (n.isDir) {
       const isOpen = !collapsed.has(n.path);
+      // Top-level dirs that match the recommended layout get a coloured tint
+      // so users learn the convention without reading any docs.
+      const isStdDir = n.path === n.name && STD_DIR_KEYS.has(n.name);
       return (
         <div key={n.path || '(root)'}>
           {n.path && (
-            <div className="file-row dir" style={{ paddingLeft: 8 + depth * 16 }} onClick={() => toggle(n.path)}>
+            <div
+              className="file-row dir"
+              style={{ paddingLeft: 8 + depth * 16, color: isStdDir ? 'var(--primary)' : undefined }}
+              onClick={() => toggle(n.path)}
+              title={isStdDir ? `推荐目录 · ${STD_DIRS.find((d) => d.key === n.name)?.desc ?? ''}` : n.path}
+            >
               {isOpen ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+              <span style={{ marginRight: 2 }}>{dirIconFor(n.name)}</span>
               {n.name}/
             </div>
           )}
@@ -328,9 +448,12 @@ export function Editor() {
   const [submitHotfix, setSubmitHotfix] = useState(false);
   const [submitHotfixReason, setSubmitHotfixReason] = useState('');
 
-  // New-file dialog state.
+  // New-file dialog state. `newFileContent` is populated when the user picks
+  // a template; otherwise we create an empty file and let the editor own the
+  // first keystroke.
   const [showNewFile, setShowNewFile] = useState(false);
   const [newFilePath, setNewFilePath] = useState('');
+  const [newFileContent, setNewFileContent] = useState('');
   const [newFileBusy, setNewFileBusy] = useState(false);
   const [newFileErr, setNewFileErr] = useState<string | null>(null);
 
@@ -468,6 +591,53 @@ export function Editor() {
 
   const tree = useMemo(() => buildTree(files.data ?? []), [files.data]);
   const activeBuf = activePath ? buffers[activePath] : undefined;
+
+  // Whether the recommended layout is satisfied. Drives both the file-tree
+  // placeholders and the Bundle Structure side card.
+  const bundleStatus = useMemo(() => {
+    const paths = (files.data ?? []).map((f) => f.path);
+    const hasSkillMD = paths.includes('SKILL.md');
+    const dirsPresent = new Set<string>();
+    for (const p of paths) {
+      const i = p.indexOf('/');
+      if (i > 0) dirsPresent.add(p.slice(0, i));
+    }
+    const missingStdDirs = STD_DIRS
+      .filter((d) => !dirsPresent.has(d.key))
+      .map((d) => d.key);
+    return { hasSkillMD, missingStdDirs, dirsPresent };
+  }, [files.data]);
+
+  // Markdown outline for the currently-open SKILL.md (or any other .md). Used
+  // by the side panel so users can jump to a heading inside long docs. We
+  // re-parse on every buffer change but it's just a regex over a few KB so
+  // it's effectively free.
+  const outline = useMemo(() => {
+    if (!activePath || !activeBuf) return [] as { level: number; text: string; line: number }[];
+    if (!activePath.toLowerCase().endsWith('.md')) return [];
+    const lines = activeBuf.content.split('\n');
+    const result: { level: number; text: string; line: number }[] = [];
+    let inFence = false;
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      // Ignore # inside fenced code blocks (otherwise example shell prompts
+      // would crowd the outline).
+      if (l.startsWith('```')) { inFence = !inFence; continue; }
+      if (inFence) continue;
+      const m = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(l);
+      if (!m) continue;
+      result.push({ level: m[1].length, text: m[2], line: i + 1 });
+    }
+    return result;
+  }, [activePath, activeBuf]);
+
+  function jumpToLine(line: number) {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.revealLineInCenter(line);
+    ed.setPosition({ lineNumber: line, column: 1 });
+    ed.focus();
+  }
 
   // ---- Monaco model management -----------------------------------------
   //
@@ -820,8 +990,9 @@ export function Editor() {
     try { localStorage.removeItem(draftKeyFor(ns, name, path)); } catch { /* ignore */ }
   }
 
-  function openNewFileDialog() {
-    setNewFilePath('');
+  function openNewFileDialog(prefill?: { path?: string; content?: string }) {
+    setNewFilePath(prefill?.path ?? '');
+    setNewFileContent(prefill?.content ?? '');
     setNewFileErr(null);
     setShowNewFile(true);
   }
@@ -830,6 +1001,7 @@ export function Editor() {
     if (newFileBusy) return;
     setShowNewFile(false);
     setNewFilePath('');
+    setNewFileContent('');
     setNewFileErr(null);
   }
 
@@ -850,17 +1022,39 @@ export function Editor() {
     setNewFileBusy(true);
     setNewFileErr(null);
     try {
-      const f = await api.putFile(ns, name, path, '');
-      setBuffers((b) => ({ ...b, [path]: { content: f.content ?? '', dirty: false } }));
+      const f = await api.putFile(ns, name, path, newFileContent);
+      setBuffers((b) => ({ ...b, [path]: { content: f.content ?? newFileContent, dirty: false } }));
       files.reload();
       openFile(path);
       setMsg(`已创建 ${path}`);
       setShowNewFile(false);
       setNewFilePath('');
+      setNewFileContent('');
     } catch (e) {
       setNewFileErr((e as Error).message);
     } finally {
       setNewFileBusy(false);
+    }
+  }
+
+  // Quick-create a missing recommended dir by writing a README.md into it.
+  // The directory then shows up in the file tree like any other; the README
+  // doubles as guidance for what should go in the dir.
+  async function createStdDir(dir: StdDirKey) {
+    const seed = seedFileForDir(dir, dir);
+    if ((files.data ?? []).some((f) => f.path === seed.path)) {
+      openFile(seed.path);
+      return;
+    }
+    try {
+      const f = await api.putFile(ns, name, seed.path, seed.content);
+      setBuffers((b) => ({ ...b, [seed.path]: { content: f.content ?? seed.content, dirty: false } }));
+      files.reload();
+      validation.reload();
+      openFile(seed.path);
+      setMsg(`已创建 ${dir}/ 目录`);
+    } catch (e) {
+      setMsg(`创建 ${dir}/ 失败: ${(e as Error).message}`);
     }
   }
 
@@ -1254,45 +1448,69 @@ export function Editor() {
           <form
             onClick={(e) => e.stopPropagation()}
             onSubmit={(e) => { e.preventDefault(); submitNewFile(); }}
-            style={{ background: 'var(--bg)', borderRadius: 10, width: 440, maxWidth: '92vw', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)' }}
+            style={{ background: 'var(--bg)', borderRadius: 10, width: 560, maxWidth: '92vw', maxHeight: '90vh', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}
           >
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
               <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>新建文件</h3>
               <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>
-                相对路径，支持子目录（如 <span className="mono">docs/usage.md</span>）
+                选择模板可自动填入起始内容；或直接输入路径创建空文件。
               </div>
             </div>
-            <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
               <label>
                 <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>路径</div>
                 <input
                   className="input"
                   value={newFilePath}
                   onChange={(e) => { setNewFilePath(e.target.value); if (newFileErr) setNewFileErr(null); }}
-                  placeholder="docs/usage.md"
+                  placeholder="scripts/main.py"
                   autoFocus
                   disabled={newFileBusy}
                   style={{ width: '100%', fontFamily: "'JetBrains Mono', monospace" }}
                 />
+                {newFileContent && (
+                  <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
+                    已选模板 · 创建后将写入 {newFileContent.length} 字符的起始内容
+                    <button
+                      type="button"
+                      onClick={() => setNewFileContent('')}
+                      style={{ marginLeft: 8, border: 'none', background: 'transparent', color: 'var(--primary)', cursor: 'pointer', fontSize: 11, padding: 0 }}
+                    >清除</button>
+                  </div>
+                )}
               </label>
 
               <div>
-                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 6 }}>常用模板</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {['README.md', 'docs/usage.md', 'examples/basic.md', 'tests/fixtures.md'].map((s) => {
-                    const taken = (files.data ?? []).some((f) => f.path === s);
-                    return (
-                      <button
-                        key={s}
-                        type="button"
-                        className="btn sm ghost"
-                        disabled={taken || newFileBusy}
-                        onClick={() => { setNewFilePath(s); setNewFileErr(null); }}
-                        style={{ fontSize: 11, padding: '3px 8px', fontFamily: "'JetBrains Mono', monospace" }}
-                        title={taken ? '该文件已存在' : '填入路径'}
-                      >{s}</button>
-                    );
-                  })}
+                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 6 }}>模板（点击选择）</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {TEMPLATE_GROUPS.map((group) => (
+                    <div key={group.title}>
+                      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                        {group.title}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {group.items.map((tpl) => {
+                          const taken = (files.data ?? []).some((f) => f.path === tpl.path);
+                          const selected = newFilePath === tpl.path;
+                          return (
+                            <button
+                              key={tpl.path}
+                              type="button"
+                              className={`btn sm ${selected ? 'primary' : 'ghost'}`}
+                              disabled={taken || newFileBusy}
+                              onClick={() => {
+                                setNewFilePath(tpl.path);
+                                setNewFileContent(tpl.content ?? '');
+                                setNewFileErr(null);
+                              }}
+                              style={{ fontSize: 11, padding: '3px 8px', fontFamily: "'JetBrains Mono', monospace" }}
+                              title={taken ? '该文件已存在' : (tpl.desc ?? tpl.path)}
+                            >{tpl.path}</button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -1339,10 +1557,36 @@ export function Editor() {
               canEdit={canEdit}
             />
           )}
+          {/* Placeholder rows for recommended dirs that don't exist yet.
+              Clicking "+" seeds the dir with a README so it shows up in the
+              tree (the backend has no concept of empty dirs). */}
+          {canEdit && files.data && bundleStatus.missingStdDirs.length > 0 && (
+            <div style={{ margin: '6px 4px 0', paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
+              <div style={{ fontSize: 10.5, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '2px 8px 4px' }}>
+                推荐目录
+              </div>
+              {bundleStatus.missingStdDirs.map((key) => {
+                const d = STD_DIRS.find((x) => x.key === key)!;
+                return (
+                  <div
+                    key={key}
+                    className="file-row dir"
+                    style={{ paddingLeft: 8, opacity: 0.55, fontStyle: 'italic' }}
+                    title={d.desc}
+                    onClick={() => createStdDir(key)}
+                  >
+                    <IconPlus size={12} />
+                    <span style={{ marginRight: 2 }}>{d.icon}</span>
+                    {d.label}/
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {canEdit && (
             <button
               className="file-tree-new"
-              onClick={openNewFileDialog}
+              onClick={() => openNewFileDialog()}
               title="新建文件"
             >
               <IconPlus size={12} /> 新建文件
@@ -1461,6 +1705,90 @@ export function Editor() {
         </div>
 
         <div className="editor-side">
+          <div className="editor-side-section">
+            <div className="editor-side-title">Bundle 结构</div>
+            <div style={{ fontSize: 12, lineHeight: 1.55 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
+                {bundleStatus.hasSkillMD
+                  ? <IconCheckCircle size={14} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                  : <IconXCircle size={14} style={{ color: 'var(--red)', flexShrink: 0 }} />}
+                <span className="mono" style={{ flex: 1 }}>SKILL.md</span>
+                {bundleStatus.hasSkillMD ? (
+                  <button
+                    type="button"
+                    className="btn sm ghost"
+                    style={{ padding: '0 6px', height: 20, fontSize: 11 }}
+                    onClick={() => openFile('SKILL.md')}
+                  >打开</button>
+                ) : canEdit && (
+                  <button
+                    type="button"
+                    className="btn sm primary"
+                    style={{ padding: '0 6px', height: 20, fontSize: 11 }}
+                    onClick={() => {
+                      const tpl = TEMPLATE_GROUPS[0].items.find((t) => t.path === 'SKILL.md');
+                      openNewFileDialog({ path: 'SKILL.md', content: tpl?.content });
+                    }}
+                  >创建</button>
+                )}
+              </div>
+              {STD_DIRS.map((d) => {
+                const present = bundleStatus.dirsPresent.has(d.key);
+                return (
+                  <div key={d.key} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }} title={d.desc}>
+                    {present
+                      ? <IconCheckCircle size={14} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                      : <IconAlertTriangle size={14} style={{ color: 'var(--amber)', flexShrink: 0 }} />}
+                    <span style={{ flex: 1 }}>
+                      <span style={{ marginRight: 4 }}>{d.icon}</span>
+                      <span className="mono">{d.label}/</span>
+                    </span>
+                    {!present && canEdit && (
+                      <button
+                        type="button"
+                        className="btn sm ghost"
+                        style={{ padding: '0 6px', height: 20, fontSize: 11 }}
+                        onClick={() => createStdDir(d.key)}
+                        title={`一键创建 ${d.label}/ 目录（写入 README.md 占位）`}
+                      >+ 创建</button>
+                    )}
+                  </div>
+                );
+              })}
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 6, lineHeight: 1.4 }}>
+                推荐结构：SKILL.md 元数据 + scripts/ 脚本 + references/ 参考 + assets/ 资源。
+              </div>
+            </div>
+          </div>
+
+          {outline.length > 0 && (
+            <div className="editor-side-section">
+              <div className="editor-side-title">大纲 · {activePath}</div>
+              <div style={{ fontSize: 12, lineHeight: 1.5, maxHeight: 240, overflow: 'auto' }}>
+                {outline.map((h, idx) => (
+                  <div
+                    key={`${h.line}-${idx}`}
+                    onClick={() => jumpToLine(h.line)}
+                    style={{
+                      padding: '3px 0',
+                      paddingLeft: (h.level - 1) * 10,
+                      cursor: 'pointer',
+                      color: h.level === 1 ? 'var(--text)' : 'var(--text-muted)',
+                      fontWeight: h.level === 1 ? 600 : 400,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={`L${h.line} · ${h.text}`}
+                  >
+                    <span style={{ color: 'var(--text-faint)', marginRight: 4, fontSize: 10 }}>{'#'.repeat(h.level)}</span>
+                    {h.text}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="editor-side-section">
             <div className="editor-side-title">审批策略</div>
             {policy.loading && <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}

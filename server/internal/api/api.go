@@ -301,7 +301,16 @@ func (s *Server) submitForReview(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "skill not found"})
 		return
 	}
-	rep := validate.Run(k)
+	files, err := s.store.ListSkillFiles(ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = f.Path
+	}
+	rep := validate.Run(k, paths)
 	if rep.HasBlocker() {
 		c.JSON(422, gin.H{"error": "validation failed", "report": rep})
 		return
@@ -380,7 +389,8 @@ func (s *Server) submitForReview(c *gin.Context) {
 }
 
 func (s *Server) validateSkill(c *gin.Context) {
-	k, err := s.store.GetSkill(c.Param("ns"), c.Param("name"))
+	ns, name := c.Param("ns"), c.Param("name")
+	k, err := s.store.GetSkill(ns, name)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -389,7 +399,16 @@ func (s *Server) validateSkill(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "not found"})
 		return
 	}
-	c.JSON(200, validate.Run(k))
+	files, err := s.store.ListSkillFiles(ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = f.Path
+	}
+	c.JSON(200, validate.Run(k, paths))
 }
 
 func (s *Server) listVersions(c *gin.Context) {
