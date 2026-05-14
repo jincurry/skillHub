@@ -1483,6 +1483,11 @@ export function Editor() {
             {!canEdit && skill.data && me.data && (
               <span style={{ color: 'var(--text-faint)', marginLeft: 8 }}>· 只读 (你不是作者)</span>
             )}
+            <span
+              style={{ marginLeft: 8, color: 'var(--primary)', cursor: 'pointer' }}
+              onClick={() => navigate(`/skills/${ns}/${name}`, { state: { tab: 'versions' } })}
+              title="在 skill 详情页查看所有历史版本"
+            >· 历史版本 →</span>
           </p>
         </div>
         <div className="page-actions">

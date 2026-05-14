@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ClassificationTag, StatusPill } from '../components/Tags';
 import {
   IconStar, IconFire, IconCode,
@@ -10,6 +10,7 @@ import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { RatingsPanel } from '../components/RatingsPanel';
 import { TrendChart } from '../components/TrendChart';
+import { VersionExplorer } from '../components/VersionExplorer';
 import { renderMarkdown } from '../lib/markdown';
 import { fmtRelative } from '../lib/notify';
 import {
@@ -28,7 +29,19 @@ function bumpedPatch(v: string): string {
 export function SkillDetail() {
   const { ns = '', name = '' } = useParams();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<'overview' | 'files' | 'versions' | 'health' | 'audit'>('overview');
+  const location = useLocation();
+  type Tab = 'overview' | 'files' | 'versions' | 'health' | 'audit';
+  // Honor a deep-link from another page (e.g. the editor's "查看历史版本"
+  // button). We read both react-router state and the URL hash so plain
+  // /skills/ns/name#versions also works.
+  const initialTab: Tab = (() => {
+    const fromState = (location.state as { tab?: string } | null)?.tab;
+    const fromHash = location.hash.replace(/^#/, '');
+    const cand = fromState || fromHash;
+    return cand === 'files' || cand === 'versions' || cand === 'health' || cand === 'audit'
+      ? cand : 'overview';
+  })();
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [auditFilter, setAuditFilter] = useState<'all' | AuditCategory>('all');
   const skill = useAsync(() => api.getSkill(ns, name), [ns, name]);
   const versions = useAsync(() => api.listVersions(ns, name), [ns, name]);
@@ -442,55 +455,12 @@ export function SkillDetail() {
           )}
 
           {tab === 'versions' && (
-            <div className="card">
-              <div className="card-body" style={{ padding: '6px 24px' }}>
-                <div className="timeline">
-                  {(versions.data ?? []).length === 0 && (
-                    <div style={{ padding: 16, color: 'var(--text-subtle)', fontSize: 13 }}>
-                      暂无版本记录
-                    </div>
-                  )}
-                  {(versions.data ?? []).map((v) => {
-                    const isLatest = v.version === p.version;
-                    const cls = v.status === 'published' ? 'green'
-                      : v.status === 'review' ? 'amber'
-                      : v.status === 'changes_requested' ? 'amber'
-                      : v.status === 'rejected' ? 'red'
-                      : 'indigo';
-                    const label = v.status === 'published' ? '已发布'
-                      : v.status === 'review' ? '审批中'
-                      : v.status === 'changes_requested' ? '需修改'
-                      : v.status === 'rejected' ? '已驳回'
-                      : v.status;
-                    return (
-                      <div className="timeline-item" key={v.id}>
-                        <div className="timeline-dot" style={isLatest ? { background: 'var(--primary)' } : undefined} />
-                        <div className="timeline-content">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600 }}>
-                            <span className="mono">v{v.version}</span>
-                            <span className={`tag ${cls}`}>{label}</span>
-                            {isLatest && <span className="tag green">Latest</span>}
-                            {v.reviewId > 0 && (
-                              <span
-                                className="mono"
-                                style={{ fontSize: 11, color: 'var(--primary)', cursor: 'pointer' }}
-                                onClick={() => navigate(`/reviews/${v.reviewId}`)}
-                              >→ 审批 #{v.reviewId}</span>
-                            )}
-                          </div>
-                          <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 2 }}>
-                            <span className="mono">@{v.author}</span> · {new Date(v.createdAt).toLocaleString()}
-                          </div>
-                          {v.note && (
-                            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>{v.note}</div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
+            <VersionExplorer
+              ns={ns}
+              name={name}
+              versions={versions.data ?? []}
+              latestVersion={p.version}
+            />
           )}
 
           {tab === 'health' && (
