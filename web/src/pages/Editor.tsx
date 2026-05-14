@@ -11,6 +11,7 @@ import type { AIAssistAction, SkillFile, ValidationReport } from '../api/types';
 import { AIAssistDrawer, type EditorBridge } from '../components/AIAssistDrawer';
 import { runAssist, type AssistHandle } from '../lib/aiAssist';
 import { languageFor } from '../lib/files';
+import { renderMarkdown } from '../lib/markdown';
 
 // --------- helpers --------------------------------------------------------
 
@@ -158,6 +159,83 @@ function seedFileForDir(d: StdDirKey, name: string): { path: string; content: st
   return { path: `${name}/README.md`, content: `# ${name}/\n` };
 }
 
+// --------- frontmatter ----------------------------------------------------
+//
+// The frontmatter form (SKILL.md → name / description / license / ...) reads
+// and writes the YAML block between the leading `---` fences. We deliberately
+// keep the parser tiny — only scalar `key: value` lines — and quote on output
+// only when a value contains characters that would round-trip ambiguously.
+
+interface ParsedFrontmatter {
+  /** Recognized scalar fields. Unparseable lines (lists, nested objects) are
+      preserved by leaving the raw region in place when we don't write back. */
+  fields: Record<string, string>;
+  /** Doc body after the closing fence (or the whole doc when there's no fm). */
+  body: string;
+  /** True if the doc starts with a `---` block we recognised. */
+  hasFrontmatter: boolean;
+}
+
+function parseFrontmatter(src: string): ParsedFrontmatter {
+  if (!src.startsWith('---\n') && !src.startsWith('---\r\n')) {
+    return { fields: {}, body: src, hasFrontmatter: false };
+  }
+  const after = src.indexOf('\n', 3) + 1;
+  const close = src.indexOf('\n---', after);
+  if (close < 0) {
+    return { fields: {}, body: src, hasFrontmatter: false };
+  }
+  const raw = src.slice(after, close);
+  let bodyStart = close + 4;            // past "\n---"
+  if (src[bodyStart] === '\r') bodyStart++;
+  if (src[bodyStart] === '\n') bodyStart++;
+  const fields: Record<string, string> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const m = /^([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*)$/.exec(line);
+    if (!m) continue;
+    let v = m[2].trim();
+    if (
+      (v.startsWith('"') && v.endsWith('"') && v.length >= 2) ||
+      (v.startsWith("'") && v.endsWith("'") && v.length >= 2)
+    ) {
+      v = v.slice(1, -1);
+    }
+    fields[m[1]] = v;
+  }
+  return { fields, body: src.slice(bodyStart), hasFrontmatter: true };
+}
+
+function serializeFrontmatter(fields: Record<string, string>): string {
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === '') {
+      lines.push(`${k}: ""`);
+      continue;
+    }
+    const needsQuote = /[:#"']/.test(v) || /^\s|\s$/.test(v) || /^[\[{>|&*!%@`]/.test(v);
+    lines.push(`${k}: ${needsQuote ? JSON.stringify(v) : v}`);
+  }
+  return lines.join('\n');
+}
+
+/** Replace the frontmatter region in `src` with `fields`. If `src` had no
+    frontmatter, prepend a fresh one. */
+function setFrontmatter(src: string, fields: Record<string, string>): string {
+  const yaml = serializeFrontmatter(fields);
+  const parsed = parseFrontmatter(src);
+  if (parsed.hasFrontmatter) {
+    return `---\n${yaml}\n---\n${parsed.body}`;
+  }
+  return `---\n${yaml}\n---\n\n${src}`;
+}
+
+/** Strip frontmatter so the preview pane only renders the document body. */
+function bodyForPreview(src: string): string {
+  return parseFrontmatter(src).body;
+}
+
+// --------- misc -----------------------------------------------------------
+
 // Draft backup keys live under one namespace so we can sweep them later
 // (e.g. on logout) without hitting unrelated keys.
 function draftKeyFor(ns: string, name: string, path: string): string {
@@ -175,6 +253,90 @@ function iconFor(path: string): string {
   if (ext === 'go' || ext === 'py' || ext === 'ts' || ext === 'js' || ext === 'sh') return '🔧';
   if (ext === 'json' || ext === 'toml') return '🧾';
   return '📄';
+}
+
+// --------- frontmatter form ----------------------------------------------
+
+/** A single labelled input that holds its own typing buffer and only flushes
+ *  to the parent on blur (or Enter). This avoids re-rendering the Monaco
+ *  model on every keystroke when the user types in the form. */
+function FrontmatterField({
+  label,
+  fieldKey,
+  upstream,
+  placeholder,
+  multiline = false,
+  readOnly = false,
+  onCommit,
+}: {
+  label: string;
+  fieldKey: string;
+  upstream: string;
+  placeholder?: string;
+  multiline?: boolean;
+  readOnly?: boolean;
+  onCommit: (key: string, val: string) => void;
+}) {
+  const [local, setLocal] = useState(upstream);
+  const [focused, setFocused] = useState(false);
+  // Re-sync from upstream when we're not actively typing. This catches both
+  // file switches and any frontmatter edits the user might make in Monaco.
+  useEffect(() => {
+    if (!focused) setLocal(upstream);
+  }, [upstream, focused]);
+  const commit = () => {
+    if (local !== upstream) onCommit(fieldKey, local);
+  };
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    fontSize: 12,
+    padding: '4px 8px',
+    background: 'var(--bg)',
+    border: '1px solid var(--border)',
+    borderRadius: 4,
+    color: 'var(--text)',
+    fontFamily: 'inherit',
+    resize: multiline ? 'vertical' : 'none',
+  };
+  return (
+    <label style={{
+      display: 'flex', gap: 8,
+      alignItems: multiline ? 'flex-start' : 'center',
+      fontSize: 12,
+    }}>
+      <span style={{
+        width: 76, flexShrink: 0,
+        color: 'var(--text-muted)',
+        textAlign: 'right',
+        paddingTop: multiline ? 5 : 0,
+      }}>{label}</span>
+      {multiline ? (
+        <textarea
+          value={local}
+          readOnly={readOnly}
+          placeholder={placeholder}
+          rows={2}
+          onChange={(e) => setLocal(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => { setFocused(false); commit(); }}
+          style={inputStyle}
+        />
+      ) : (
+        <input
+          value={local}
+          readOnly={readOnly}
+          placeholder={placeholder}
+          onChange={(e) => setLocal(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => { setFocused(false); commit(); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); }
+          }}
+          style={inputStyle}
+        />
+      )}
+    </label>
+  );
 }
 
 // --------- file tree ------------------------------------------------------
@@ -497,6 +659,21 @@ export function Editor() {
     try { localStorage.setItem('skillHub.editor.autosave', autosaveOn ? '1' : '0'); }
     catch { /* private mode etc. — ignore */ }
   }, [autosaveOn]);
+
+  // Markdown view mode — only applies to .md files. We persist the choice so
+  // a user who prefers split-view doesn't have to re-toggle each session.
+  type EditorMode = 'code' | 'preview' | 'split';
+  const [editorMode, setEditorMode] = useState<EditorMode>(() => {
+    try {
+      const v = localStorage.getItem('skillHub.editor.mode');
+      if (v === 'preview' || v === 'split' || v === 'code') return v;
+    } catch { /* ignore */ }
+    return 'code';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('skillHub.editor.mode', editorMode); }
+    catch { /* ignore */ }
+  }, [editorMode]);
   const autosaveTimers = useRef<Map<string, number>>(new Map());
   // Latest buffers reachable from inside the (delayed) autosave callback
   // without going stale. We update this on every render below.
@@ -641,6 +818,47 @@ export function Editor() {
     ed.revealLineInCenter(line);
     ed.setPosition({ lineNumber: line, column: 1 });
     ed.focus();
+  }
+
+  // Which markdown view to actually render. Non-md files always force `code`.
+  const isMdFile = !!activePath && activePath.toLowerCase().endsWith('.md');
+  const effectiveMode: EditorMode = isMdFile ? editorMode : 'code';
+  const isSkillMd = activePath === 'SKILL.md';
+
+  // Memoise the rendered preview so we only re-run the tiny markdown parser
+  // when the buffer changes. The frontmatter block is stripped so it doesn't
+  // render as a stray paragraph.
+  const previewHtml = useMemo(() => {
+    if (!isMdFile || !activeBuf) return '';
+    return renderMarkdown(bodyForPreview(activeBuf.content));
+  }, [isMdFile, activeBuf]);
+
+  // Frontmatter form (B). The form mirrors `parseFrontmatter(activeBuf)` and
+  // writes back through writeFrontmatter on field blur. We deliberately only
+  // commit on blur so per-keystroke typing in the form doesn't fire a
+  // model.setValue on Monaco (which would reset its cursor / scroll position).
+  const skillMdFm = useMemo(() => {
+    if (!isSkillMd || !activeBuf) return null;
+    return parseFrontmatter(activeBuf.content);
+  }, [isSkillMd, activeBuf]);
+
+  const [fmCollapsed, setFmCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('skillHub.editor.fmCollapsed') === '1'; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('skillHub.editor.fmCollapsed', fmCollapsed ? '1' : '0'); }
+    catch { /* ignore */ }
+  }, [fmCollapsed]);
+
+  function writeFrontmatter(key: string, val: string) {
+    if (!activePath || !activeBuf || !isSkillMd) return;
+    const fm = parseFrontmatter(activeBuf.content);
+    // No-op when the user blurs without changing anything.
+    if ((fm.fields[key] ?? '') === val) return;
+    const newFields = { ...fm.fields, [key]: val };
+    const newContent = setFrontmatter(activeBuf.content, newFields);
+    setBuffers((b) => ({ ...b, [activePath]: { content: newContent, dirty: true } }));
   }
 
   // ---- Monaco model management -----------------------------------------
@@ -856,6 +1074,20 @@ export function Editor() {
     return validation.data.checks
       .filter((c) => c.severity === 'err' || c.severity === 'warn')
       .map((c) => `[${c.severity}] ${c.label}: ${c.detail}`);
+  }, [validation.data]);
+
+  // Pre-flight: blockers (err) prevent submission; warnings are advisory.
+  // Used both to colour the submit button and to render the checklist at
+  // the top of the submit modal.
+  const preflight = useMemo(() => {
+    const checks = validation.data?.checks ?? [];
+    const blockers = checks.filter((c) => c.severity === 'err');
+    const warnings = checks.filter((c) => c.severity === 'warn');
+    return {
+      blockers,
+      warnings,
+      ready: validation.data != null && blockers.length === 0,
+    };
   }, [validation.data]);
 
   useEffect(() => {
@@ -1302,8 +1534,34 @@ export function Editor() {
             className="btn primary"
             disabled={submitting || !canEdit}
             onClick={() => setShowSubmit(true)}
+            // Surface the pre-flight state on the button itself: a red dot
+            // when there are blockers, an amber dot when there are only
+            // warnings. Hovering reveals the count.
+            title={
+              preflight.blockers.length > 0
+                ? `${preflight.blockers.length} 项必须修复后才能提交`
+                : preflight.warnings.length > 0
+                  ? `${preflight.warnings.length} 项警告（不阻塞）`
+                  : '提交审批'
+            }
+            style={
+              preflight.blockers.length > 0
+                ? { background: 'var(--red)', borderColor: 'var(--red)' }
+                : preflight.warnings.length > 0
+                  ? { background: 'var(--amber)', borderColor: 'var(--amber)', color: 'var(--text)' }
+                  : undefined
+            }
           >
-            <IconRocket size={14} /> {submitting ? '提交中...' : '提交审批'}
+            <IconRocket size={14} />
+            {submitting ? '提交中...' : '提交审批'}
+            {preflight.blockers.length > 0 && (
+              <span
+                style={{
+                  marginLeft: 6, padding: '0 6px', borderRadius: 8,
+                  background: 'rgba(255,255,255,0.25)', fontSize: 11, fontWeight: 700,
+                }}
+              >{preflight.blockers.length}</span>
+            )}
           </button>
         </div>
       </div>
@@ -1313,14 +1571,69 @@ export function Editor() {
           onClick={() => !submitting && setShowSubmit(false)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
         >
-          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: 10, width: 480, maxWidth: '92vw', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: 10, width: 480, maxWidth: '92vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)' }}>
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
               <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>提交审批</h3>
               <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>
                 当前版本 <span className="mono">v{currentVersion}</span> · 默认 bump 到 <span className="mono">v{nextVersion}</span>
               </div>
             </div>
-            <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
+              {/* Pre-flight checklist — server re-validates on submit so we
+                  treat this as advisory, but blockers also disable the
+                  confirm button so the user can't trip the 422 round-trip. */}
+              {validation.data && (preflight.blockers.length > 0 || preflight.warnings.length > 0) && (
+                <div
+                  style={{
+                    borderRadius: 6,
+                    border: `1px solid ${preflight.blockers.length > 0 ? 'var(--red)' : 'var(--amber)'}`,
+                    background: preflight.blockers.length > 0 ? 'var(--red-bg)' : 'var(--amber-bg)',
+                    padding: '8px 12px',
+                    fontSize: 12.5,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, fontWeight: 600 }}>
+                    {preflight.blockers.length > 0
+                      ? <IconXCircle size={14} style={{ color: 'var(--red)' }} />
+                      : <IconAlertTriangle size={14} style={{ color: 'var(--amber)' }} />}
+                    <span style={{ color: preflight.blockers.length > 0 ? 'var(--red-text)' : 'var(--amber-text)' }}>
+                      提交前检查 · {preflight.blockers.length} 错误 · {preflight.warnings.length} 警告
+                    </span>
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+                    {preflight.blockers.map((c) => (
+                      <li key={c.id} style={{ color: 'var(--red-text)' }}>
+                        <strong>{c.label}</strong>{c.detail ? ` — ${c.detail}` : ''}
+                      </li>
+                    ))}
+                    {preflight.warnings.map((c) => (
+                      <li key={c.id} style={{ color: 'var(--amber-text)' }}>
+                        {c.label}{c.detail ? ` — ${c.detail}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                  {preflight.blockers.length > 0 && (
+                    <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--red-text)' }}>
+                      存在错误项 · 修复后再提交。
+                    </div>
+                  )}
+                </div>
+              )}
+              {validation.data && preflight.ready && preflight.warnings.length === 0 && (
+                <div
+                  style={{
+                    borderRadius: 6,
+                    border: '1px solid var(--green)',
+                    background: 'var(--green-bg, rgba(16,185,129,0.08))',
+                    padding: '6px 12px',
+                    fontSize: 12.5,
+                    color: 'var(--green-text)',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}
+                >
+                  <IconCheckCircle size={14} /> 所有检查通过 · 可放心提交
+                </div>
+              )}
               <label style={{ display: 'block' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                   <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>新版本号</span>
@@ -1436,7 +1749,12 @@ export function Editor() {
             </div>
             <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button className="btn" onClick={() => setShowSubmit(false)} disabled={submitting}>取消</button>
-              <button className="btn primary" disabled={submitting || !submitVersion.trim()} onClick={submitForReview}>
+              <button
+                className="btn primary"
+                disabled={submitting || !submitVersion.trim() || preflight.blockers.length > 0}
+                onClick={submitForReview}
+                title={preflight.blockers.length > 0 ? '存在 validation 错误，请先修复' : '确认提交审批'}
+              >
                 <IconRocket size={13} /> {submitting ? '提交中...' : '确认提交'}
               </button>
             </div>
@@ -1656,53 +1974,186 @@ export function Editor() {
               >丢弃</button>
             </div>
           )}
-          <div className="editor-code" style={{ display: 'block', padding: 0, flex: 1, minHeight: 0, background: '#1e1e1e', position: 'relative' }}>
-            {/* The Monaco instance is mounted exactly once and stays alive
-                for the lifetime of this page. Tab switches just call
-                editor.setModel(); see the model-management effect above. */}
-            <MonacoEditor
-              height="100%"
-              theme="vs-dark"
-              defaultLanguage="plaintext"
-              onMount={(ed, m) => {
-                editorRef.current = ed;
-                monacoNsRef.current = m;
-                // The wrapper auto-creates a default model; we own the
-                // lifecycle ourselves, so detach + dispose it.
-                const def = ed.getModel();
-                ed.setModel(null);
-                def?.dispose();
-                // Both shortcuts go through handlersRef so they always pick
-                // up the latest closures (state-dependent saves work).
-                ed.addCommand(
-                  m.KeyMod.CtrlCmd | m.KeyCode.KeyS,
-                  () => { handlersRef.current.saveActive(); },
-                );
-                ed.addCommand(
-                  m.KeyMod.CtrlCmd | m.KeyMod.Shift | m.KeyCode.KeyS,
-                  () => { handlersRef.current.saveAll(); },
-                );
-                // Kick the model-sync effect now that we have refs.
-                setEditorMountTick((n) => n + 1);
+          {/* Frontmatter form — SKILL.md only. Lets the user edit the
+              YAML metadata without hand-writing YAML. Commits to the buffer
+              on field blur so per-keystroke typing doesn't thrash Monaco. */}
+          {isSkillMd && skillMdFm && (
+            <div style={{
+              borderBottom: '1px solid var(--border)',
+              background: 'var(--bg-soft)',
+              fontSize: 12,
+            }}>
+              <div
+                onClick={() => setFmCollapsed((v) => !v)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px', cursor: 'pointer',
+                  color: 'var(--text-muted)', fontWeight: 500,
+                }}
+                title={fmCollapsed ? '展开 Frontmatter 表单' : '折叠 Frontmatter 表单'}
+              >
+                {fmCollapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
+                <span>Frontmatter</span>
+                {!skillMdFm.hasFrontmatter && (
+                  <span style={{
+                    fontSize: 10.5, padding: '1px 6px', borderRadius: 4,
+                    background: 'var(--amber-bg)', color: 'var(--amber-text)',
+                  }}>缺失</span>
+                )}
+                {skillMdFm.hasFrontmatter && skillMdFm.fields.name && (
+                  <span style={{ color: 'var(--text-faint)', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                    · {skillMdFm.fields.name}
+                  </span>
+                )}
+              </div>
+              {!fmCollapsed && (
+                <div style={{ padding: '4px 12px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <FrontmatterField
+                    label="name"
+                    fieldKey="name"
+                    upstream={skillMdFm.fields.name ?? ''}
+                    placeholder="my-skill"
+                    readOnly={!canEdit}
+                    onCommit={writeFrontmatter}
+                  />
+                  <FrontmatterField
+                    label="description"
+                    fieldKey="description"
+                    upstream={skillMdFm.fields.description ?? ''}
+                    placeholder="一句话描述这个 skill"
+                    multiline
+                    readOnly={!canEdit}
+                    onCommit={writeFrontmatter}
+                  />
+                  <FrontmatterField
+                    label="license"
+                    fieldKey="license"
+                    upstream={skillMdFm.fields.license ?? ''}
+                    placeholder="Apache-2.0"
+                    readOnly={!canEdit}
+                    onCommit={writeFrontmatter}
+                  />
+                  {/* Surface any extra keys the doc already has so users
+                      know they're preserved even though we don't expose
+                      them as named inputs. */}
+                  {Object.keys(skillMdFm.fields)
+                    .filter((k) => !['name', 'description', 'license'].includes(k))
+                    .length > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--text-faint)', paddingLeft: 84 }}>
+                      其他字段（在 Monaco 中编辑）:{' '}
+                      {Object.keys(skillMdFm.fields)
+                        .filter((k) => !['name', 'description', 'license'].includes(k))
+                        .map((k) => <span key={k} className="mono" style={{ marginRight: 6 }}>{k}</span>)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {/* Markdown view toggle — only relevant for .md files. We never
+              unmount Monaco; preview mode just hides it via display:none so
+              the editor's state (cursor, scroll, undo) survives a toggle. */}
+          {isMdFile && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+              gap: 4, padding: '4px 10px',
+              borderBottom: '1px solid var(--border)',
+              background: 'var(--bg-soft)',
+              fontSize: 11.5,
+            }}>
+              <span style={{ color: 'var(--text-faint)', marginRight: 4 }}>视图</span>
+              {([
+                { key: 'code',    label: '编辑',  title: '仅编辑器' },
+                { key: 'split',   label: '并排',  title: '左编辑右预览' },
+                { key: 'preview', label: '预览',  title: '仅预览' },
+              ] as const).map((m) => (
+                <button
+                  key={m.key}
+                  type="button"
+                  className={`btn sm ${editorMode === m.key ? 'primary' : 'ghost'}`}
+                  style={{ padding: '2px 8px', fontSize: 11 }}
+                  onClick={() => setEditorMode(m.key)}
+                  title={m.title}
+                >{m.label}</button>
+              ))}
+            </div>
+          )}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' }}>
+            <div
+              className="editor-code"
+              style={{
+                display: effectiveMode === 'preview' ? 'none' : 'block',
+                flex: effectiveMode === 'split' ? '1 1 50%' : 1,
+                minWidth: 0,
+                padding: 0,
+                background: '#1e1e1e',
+                position: 'relative',
               }}
-              options={{
-                readOnly: !canEdit,
-                minimap: { enabled: false },
-                fontSize: 12.5,
-                tabSize: 2,
-                scrollBeyondLastLine: false,
-                wordWrap: 'on',
-                automaticLayout: true,
-                renderWhitespace: 'selection',
-              }}
-            />
-            {(!activePath || !activeBuf) && (
-              <div style={{
-                position: 'absolute', inset: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: 'var(--text-faint)', background: '#1e1e1e',
-              }}>
-                {activePath ? '加载文件中...' : '请从左侧文件树选择一个文件'}
+            >
+              {/* The Monaco instance is mounted exactly once and stays alive
+                  for the lifetime of this page. Tab switches just call
+                  editor.setModel(); see the model-management effect above. */}
+              <MonacoEditor
+                height="100%"
+                theme="vs-dark"
+                defaultLanguage="plaintext"
+                onMount={(ed, m) => {
+                  editorRef.current = ed;
+                  monacoNsRef.current = m;
+                  // The wrapper auto-creates a default model; we own the
+                  // lifecycle ourselves, so detach + dispose it.
+                  const def = ed.getModel();
+                  ed.setModel(null);
+                  def?.dispose();
+                  // Both shortcuts go through handlersRef so they always pick
+                  // up the latest closures (state-dependent saves work).
+                  ed.addCommand(
+                    m.KeyMod.CtrlCmd | m.KeyCode.KeyS,
+                    () => { handlersRef.current.saveActive(); },
+                  );
+                  ed.addCommand(
+                    m.KeyMod.CtrlCmd | m.KeyMod.Shift | m.KeyCode.KeyS,
+                    () => { handlersRef.current.saveAll(); },
+                  );
+                  // Kick the model-sync effect now that we have refs.
+                  setEditorMountTick((n) => n + 1);
+                }}
+                options={{
+                  readOnly: !canEdit,
+                  minimap: { enabled: false },
+                  fontSize: 12.5,
+                  tabSize: 2,
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  automaticLayout: true,
+                  renderWhitespace: 'selection',
+                }}
+              />
+              {(!activePath || !activeBuf) && (
+                <div style={{
+                  position: 'absolute', inset: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: 'var(--text-faint)', background: '#1e1e1e',
+                }}>
+                  {activePath ? '加载文件中...' : '请从左侧文件树选择一个文件'}
+                </div>
+              )}
+            </div>
+            {(effectiveMode === 'preview' || effectiveMode === 'split') && (
+              <div
+                className="md-preview"
+                style={{
+                  flex: 1, minWidth: 0, overflow: 'auto',
+                  padding: '20px 24px',
+                  background: 'var(--bg)',
+                  borderLeft: effectiveMode === 'split' ? '1px solid var(--border)' : undefined,
+                }}
+              >
+                {activeBuf ? (
+                  <div className="readme" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                ) : (
+                  <div style={{ color: 'var(--text-faint)', fontSize: 13 }}>加载中...</div>
+                )}
               </div>
             )}
           </div>
