@@ -35,8 +35,10 @@ var (
 	reName   = regexp.MustCompile(`^[a-z][a-z0-9-]{1,40}$`)
 )
 
-// Run computes a validation report for a skill snapshot.
-func Run(s *model.Skill) Report {
+// Run computes a validation report for a skill snapshot. `files` is the list
+// of bundle file paths (without contents); pass nil to skip the structure
+// checks (handy for unit tests that only care about metadata).
+func Run(s *model.Skill, files []string) Report {
 	var checks []Check
 
 	// 1. schema: required fields
@@ -99,6 +101,38 @@ func Run(s *model.Skill) Report {
 		checks = append(checks, Check{ID: "desc", Label: "描述完整度", Severity: SevWarn, Detail: "描述过短 (<30 字符)"})
 	default:
 		checks = append(checks, Check{ID: "desc", Label: "描述完整度", Severity: SevOK, Detail: itoa(n) + " 字符"})
+	}
+
+	// 7. bundle structure — verify SKILL.md presence and surface the
+	//    recommended scripts/ references/ assets/ directories. Skipped when
+	//    the caller passes nil (e.g. metadata-only unit tests).
+	if files != nil {
+		hasSkillMD := false
+		dirs := map[string]bool{}
+		for _, p := range files {
+			if p == "SKILL.md" {
+				hasSkillMD = true
+			}
+			if i := strings.Index(p, "/"); i > 0 {
+				dirs[p[:i]] = true
+			}
+		}
+		if hasSkillMD {
+			checks = append(checks, Check{ID: "skill_md", Label: "SKILL.md", Severity: SevOK, Detail: "已存在"})
+		} else {
+			checks = append(checks, Check{ID: "skill_md", Label: "SKILL.md", Severity: SevErr, Detail: "缺少 SKILL.md — skill 的元数据与说明入口"})
+		}
+		missingDirs := []string{}
+		for _, d := range []string{"scripts", "references", "assets"} {
+			if !dirs[d] {
+				missingDirs = append(missingDirs, d+"/")
+			}
+		}
+		if len(missingDirs) == 0 {
+			checks = append(checks, Check{ID: "structure", Label: "Bundle 结构", Severity: SevOK, Detail: "推荐目录齐全 (scripts/ references/ assets/)"})
+		} else {
+			checks = append(checks, Check{ID: "structure", Label: "Bundle 结构", Severity: SevWarn, Detail: "缺少推荐目录: " + strings.Join(missingDirs, " ")})
+		}
 	}
 
 	r := Report{Skill: s.Namespace + "/" + s.Name, Version: "v" + s.Version, Checks: checks}

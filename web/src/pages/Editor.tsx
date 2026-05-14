@@ -11,6 +11,7 @@ import type { AIAssistAction, SkillFile, ValidationReport } from '../api/types';
 import { AIAssistDrawer, type EditorBridge } from '../components/AIAssistDrawer';
 import { runAssist, type AssistHandle } from '../lib/aiAssist';
 import { languageFor } from '../lib/files';
+import { renderMarkdown } from '../lib/markdown';
 
 // --------- helpers --------------------------------------------------------
 
@@ -41,7 +42,199 @@ function bumpVersion(current?: string, kind: SemverBump = 'patch'): string {
 
 const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
-const REQUIRED_FILES = new Set(['skill.yaml', 'SKILL.md', 'README.md']);
+// Only SKILL.md is pinned — it's the bundle's canonical entry point and the
+// validate pass treats its absence as a blocker. skill.yaml / README.md are
+// useful defaults but the author can delete them if they want a different
+// structure.
+const REQUIRED_FILES = new Set(['SKILL.md']);
+
+// Recommended skill-bundle layout (matches the Anthropic skill spec).
+// We surface these in the file tree (always visible, even when empty) and in
+// the side-panel Bundle Structure card.
+const STD_DIRS = [
+  { key: 'scripts', label: 'scripts', desc: '可执行脚本（.py / .sh / .ts …）', icon: '🔧' },
+  { key: 'references', label: 'references', desc: '参考文档与长篇说明', icon: '📚' },
+  { key: 'assets', label: 'assets', desc: '模板与静态资源', icon: '🎨' },
+] as const;
+type StdDirKey = (typeof STD_DIRS)[number]['key'];
+
+const STD_DIR_KEYS = new Set<string>(STD_DIRS.map((d) => d.key));
+
+function dirIconFor(name: string): string {
+  switch (name) {
+    case 'scripts': return '🔧';
+    case 'references': return '📚';
+    case 'assets': return '🎨';
+    case 'docs': return '📘';
+    case 'examples': return '💡';
+    case 'tests': return '🧪';
+    default: return '📁';
+  }
+}
+
+// Default seed contents used by the "Create dir" shortcut and the categorized
+// template list in the new-file dialog. The path is the file we'll actually
+// create; the content is what gets PUT to it.
+interface FileTemplate {
+  path: string;
+  content?: string;
+  desc?: string;
+}
+const TEMPLATE_GROUPS: { title: string; items: FileTemplate[] }[] = [
+  {
+    title: '核心',
+    items: [
+      {
+        path: 'SKILL.md',
+        desc: '元数据 + 说明（推荐入口）',
+        content:
+          '---\nname: my-skill\ndescription: (一句话描述)\nlicense: Apache-2.0\n---\n\n' +
+          '# my-skill\n\n## 何时使用\n\n- \n\n## 使用方式\n\n## 脚本\n\n## 参考资料\n\n## 资源\n',
+      },
+      { path: 'README.md', desc: '中文 README' },
+    ],
+  },
+  {
+    title: '🔧 scripts/ · 脚本',
+    items: [
+      {
+        path: 'scripts/main.py',
+        desc: 'Python 入口',
+        content: '#!/usr/bin/env python3\n"""Entry point for this skill."""\n\n\ndef main() -> None:\n    pass\n\n\nif __name__ == "__main__":\n    main()\n',
+      },
+      {
+        path: 'scripts/run.sh',
+        desc: 'Shell 入口',
+        content: '#!/usr/bin/env bash\nset -euo pipefail\n\n# Entry point — replace with your logic.\necho "hello from skill"\n',
+      },
+    ],
+  },
+  {
+    title: '📚 references/ · 参考',
+    items: [
+      { path: 'references/api.md', desc: 'API / 数据规约', content: '# API 规约\n\n## 输入\n\n## 输出\n' },
+      { path: 'references/notes.md', desc: '设计笔记', content: '# 设计笔记\n' },
+    ],
+  },
+  {
+    title: '🎨 assets/ · 资源',
+    items: [
+      { path: 'assets/template.json', desc: 'JSON 模板', content: '{\n  "example": true\n}\n' },
+      { path: 'assets/prompt.md', desc: 'Prompt 模板', content: '# Prompt 模板\n\n你是一个 ...\n' },
+    ],
+  },
+  {
+    title: '其他',
+    items: [
+      { path: 'docs/usage.md', desc: '使用说明' },
+      { path: 'examples/basic.md', desc: '示例' },
+      { path: 'tests/fixtures.md', desc: '测试夹具' },
+    ],
+  },
+];
+
+// Quick-create stub for a missing recommended dir. We seed the dir with a
+// short README.md so the directory actually exists in storage (the backend
+// has no concept of empty dirs) and so the file gives the maintainer a hint
+// about what to put there.
+function seedFileForDir(d: StdDirKey, name: string): { path: string; content: string } {
+  switch (d) {
+    case 'scripts':
+      return {
+        path: 'scripts/README.md',
+        content: '# scripts/\n\n可执行脚本（Python / Shell / TypeScript）。\n\n约定:\n- 第一个 shebang 行声明解释器\n- 每个脚本都应能独立运行\n',
+      };
+    case 'references':
+      return {
+        path: 'references/README.md',
+        content: '# references/\n\n参考资料与长篇说明文档放在这里。SKILL.md 应当只放最关键的指引，详细内容链接到这里。\n',
+      };
+    case 'assets':
+      return {
+        path: 'assets/README.md',
+        content: '# assets/\n\n模板、Prompt 片段、静态资源（JSON / YAML / 图片等）放在这里。\n',
+      };
+  }
+  // Unreachable but TS demands the path.
+  return { path: `${name}/README.md`, content: `# ${name}/\n` };
+}
+
+// --------- frontmatter ----------------------------------------------------
+//
+// The frontmatter form (SKILL.md → name / description / license / ...) reads
+// and writes the YAML block between the leading `---` fences. We deliberately
+// keep the parser tiny — only scalar `key: value` lines — and quote on output
+// only when a value contains characters that would round-trip ambiguously.
+
+interface ParsedFrontmatter {
+  /** Recognized scalar fields. Unparseable lines (lists, nested objects) are
+      preserved by leaving the raw region in place when we don't write back. */
+  fields: Record<string, string>;
+  /** Doc body after the closing fence (or the whole doc when there's no fm). */
+  body: string;
+  /** True if the doc starts with a `---` block we recognised. */
+  hasFrontmatter: boolean;
+}
+
+function parseFrontmatter(src: string): ParsedFrontmatter {
+  if (!src.startsWith('---\n') && !src.startsWith('---\r\n')) {
+    return { fields: {}, body: src, hasFrontmatter: false };
+  }
+  const after = src.indexOf('\n', 3) + 1;
+  const close = src.indexOf('\n---', after);
+  if (close < 0) {
+    return { fields: {}, body: src, hasFrontmatter: false };
+  }
+  const raw = src.slice(after, close);
+  let bodyStart = close + 4;            // past "\n---"
+  if (src[bodyStart] === '\r') bodyStart++;
+  if (src[bodyStart] === '\n') bodyStart++;
+  const fields: Record<string, string> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const m = /^([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*)$/.exec(line);
+    if (!m) continue;
+    let v = m[2].trim();
+    if (
+      (v.startsWith('"') && v.endsWith('"') && v.length >= 2) ||
+      (v.startsWith("'") && v.endsWith("'") && v.length >= 2)
+    ) {
+      v = v.slice(1, -1);
+    }
+    fields[m[1]] = v;
+  }
+  return { fields, body: src.slice(bodyStart), hasFrontmatter: true };
+}
+
+function serializeFrontmatter(fields: Record<string, string>): string {
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === '') {
+      lines.push(`${k}: ""`);
+      continue;
+    }
+    const needsQuote = /[:#"']/.test(v) || /^\s|\s$/.test(v) || /^[\[{>|&*!%@`]/.test(v);
+    lines.push(`${k}: ${needsQuote ? JSON.stringify(v) : v}`);
+  }
+  return lines.join('\n');
+}
+
+/** Replace the frontmatter region in `src` with `fields`. If `src` had no
+    frontmatter, prepend a fresh one. */
+function setFrontmatter(src: string, fields: Record<string, string>): string {
+  const yaml = serializeFrontmatter(fields);
+  const parsed = parseFrontmatter(src);
+  if (parsed.hasFrontmatter) {
+    return `---\n${yaml}\n---\n${parsed.body}`;
+  }
+  return `---\n${yaml}\n---\n\n${src}`;
+}
+
+/** Strip frontmatter so the preview pane only renders the document body. */
+function bodyForPreview(src: string): string {
+  return parseFrontmatter(src).body;
+}
+
+// --------- misc -----------------------------------------------------------
 
 // Draft backup keys live under one namespace so we can sweep them later
 // (e.g. on logout) without hitting unrelated keys.
@@ -60,6 +253,90 @@ function iconFor(path: string): string {
   if (ext === 'go' || ext === 'py' || ext === 'ts' || ext === 'js' || ext === 'sh') return '🔧';
   if (ext === 'json' || ext === 'toml') return '🧾';
   return '📄';
+}
+
+// --------- frontmatter form ----------------------------------------------
+
+/** A single labelled input that holds its own typing buffer and only flushes
+ *  to the parent on blur (or Enter). This avoids re-rendering the Monaco
+ *  model on every keystroke when the user types in the form. */
+function FrontmatterField({
+  label,
+  fieldKey,
+  upstream,
+  placeholder,
+  multiline = false,
+  readOnly = false,
+  onCommit,
+}: {
+  label: string;
+  fieldKey: string;
+  upstream: string;
+  placeholder?: string;
+  multiline?: boolean;
+  readOnly?: boolean;
+  onCommit: (key: string, val: string) => void;
+}) {
+  const [local, setLocal] = useState(upstream);
+  const [focused, setFocused] = useState(false);
+  // Re-sync from upstream when we're not actively typing. This catches both
+  // file switches and any frontmatter edits the user might make in Monaco.
+  useEffect(() => {
+    if (!focused) setLocal(upstream);
+  }, [upstream, focused]);
+  const commit = () => {
+    if (local !== upstream) onCommit(fieldKey, local);
+  };
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    fontSize: 12,
+    padding: '4px 8px',
+    background: 'var(--bg)',
+    border: '1px solid var(--border)',
+    borderRadius: 4,
+    color: 'var(--text)',
+    fontFamily: 'inherit',
+    resize: multiline ? 'vertical' : 'none',
+  };
+  return (
+    <label style={{
+      display: 'flex', gap: 8,
+      alignItems: multiline ? 'flex-start' : 'center',
+      fontSize: 12,
+    }}>
+      <span style={{
+        width: 76, flexShrink: 0,
+        color: 'var(--text-muted)',
+        textAlign: 'right',
+        paddingTop: multiline ? 5 : 0,
+      }}>{label}</span>
+      {multiline ? (
+        <textarea
+          value={local}
+          readOnly={readOnly}
+          placeholder={placeholder}
+          rows={2}
+          onChange={(e) => setLocal(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => { setFocused(false); commit(); }}
+          style={inputStyle}
+        />
+      ) : (
+        <input
+          value={local}
+          readOnly={readOnly}
+          placeholder={placeholder}
+          onChange={(e) => setLocal(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => { setFocused(false); commit(); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); }
+          }}
+          style={inputStyle}
+        />
+      )}
+    </label>
+  );
 }
 
 // --------- file tree ------------------------------------------------------
@@ -170,11 +447,20 @@ function FileTree({
   const renderNode = (n: TreeNode, depth: number): React.ReactNode => {
     if (n.isDir) {
       const isOpen = !collapsed.has(n.path);
+      // Top-level dirs that match the recommended layout get a coloured tint
+      // so users learn the convention without reading any docs.
+      const isStdDir = n.path === n.name && STD_DIR_KEYS.has(n.name);
       return (
         <div key={n.path || '(root)'}>
           {n.path && (
-            <div className="file-row dir" style={{ paddingLeft: 8 + depth * 16 }} onClick={() => toggle(n.path)}>
+            <div
+              className="file-row dir"
+              style={{ paddingLeft: 8 + depth * 16, color: isStdDir ? 'var(--primary)' : undefined }}
+              onClick={() => toggle(n.path)}
+              title={isStdDir ? `推荐目录 · ${STD_DIRS.find((d) => d.key === n.name)?.desc ?? ''}` : n.path}
+            >
               {isOpen ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+              <span style={{ marginRight: 2 }}>{dirIconFor(n.name)}</span>
               {n.name}/
             </div>
           )}
@@ -328,9 +614,12 @@ export function Editor() {
   const [submitHotfix, setSubmitHotfix] = useState(false);
   const [submitHotfixReason, setSubmitHotfixReason] = useState('');
 
-  // New-file dialog state.
+  // New-file dialog state. `newFileContent` is populated when the user picks
+  // a template; otherwise we create an empty file and let the editor own the
+  // first keystroke.
   const [showNewFile, setShowNewFile] = useState(false);
   const [newFilePath, setNewFilePath] = useState('');
+  const [newFileContent, setNewFileContent] = useState('');
   const [newFileBusy, setNewFileBusy] = useState(false);
   const [newFileErr, setNewFileErr] = useState<string | null>(null);
 
@@ -370,6 +659,21 @@ export function Editor() {
     try { localStorage.setItem('skillHub.editor.autosave', autosaveOn ? '1' : '0'); }
     catch { /* private mode etc. — ignore */ }
   }, [autosaveOn]);
+
+  // Markdown view mode — only applies to .md files. We persist the choice so
+  // a user who prefers split-view doesn't have to re-toggle each session.
+  type EditorMode = 'code' | 'preview' | 'split';
+  const [editorMode, setEditorMode] = useState<EditorMode>(() => {
+    try {
+      const v = localStorage.getItem('skillHub.editor.mode');
+      if (v === 'preview' || v === 'split' || v === 'code') return v;
+    } catch { /* ignore */ }
+    return 'code';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('skillHub.editor.mode', editorMode); }
+    catch { /* ignore */ }
+  }, [editorMode]);
   const autosaveTimers = useRef<Map<string, number>>(new Map());
   // Latest buffers reachable from inside the (delayed) autosave callback
   // without going stale. We update this on every render below.
@@ -468,6 +772,94 @@ export function Editor() {
 
   const tree = useMemo(() => buildTree(files.data ?? []), [files.data]);
   const activeBuf = activePath ? buffers[activePath] : undefined;
+
+  // Whether the recommended layout is satisfied. Drives both the file-tree
+  // placeholders and the Bundle Structure side card.
+  const bundleStatus = useMemo(() => {
+    const paths = (files.data ?? []).map((f) => f.path);
+    const hasSkillMD = paths.includes('SKILL.md');
+    const dirsPresent = new Set<string>();
+    for (const p of paths) {
+      const i = p.indexOf('/');
+      if (i > 0) dirsPresent.add(p.slice(0, i));
+    }
+    const missingStdDirs = STD_DIRS
+      .filter((d) => !dirsPresent.has(d.key))
+      .map((d) => d.key);
+    return { hasSkillMD, missingStdDirs, dirsPresent };
+  }, [files.data]);
+
+  // Markdown outline for the currently-open SKILL.md (or any other .md). Used
+  // by the side panel so users can jump to a heading inside long docs. We
+  // re-parse on every buffer change but it's just a regex over a few KB so
+  // it's effectively free.
+  const outline = useMemo(() => {
+    if (!activePath || !activeBuf) return [] as { level: number; text: string; line: number }[];
+    if (!activePath.toLowerCase().endsWith('.md')) return [];
+    const lines = activeBuf.content.split('\n');
+    const result: { level: number; text: string; line: number }[] = [];
+    let inFence = false;
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      // Ignore # inside fenced code blocks (otherwise example shell prompts
+      // would crowd the outline).
+      if (l.startsWith('```')) { inFence = !inFence; continue; }
+      if (inFence) continue;
+      const m = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(l);
+      if (!m) continue;
+      result.push({ level: m[1].length, text: m[2], line: i + 1 });
+    }
+    return result;
+  }, [activePath, activeBuf]);
+
+  function jumpToLine(line: number) {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.revealLineInCenter(line);
+    ed.setPosition({ lineNumber: line, column: 1 });
+    ed.focus();
+  }
+
+  // Which markdown view to actually render. Non-md files always force `code`.
+  const isMdFile = !!activePath && activePath.toLowerCase().endsWith('.md');
+  const effectiveMode: EditorMode = isMdFile ? editorMode : 'code';
+  const isSkillMd = activePath === 'SKILL.md';
+
+  // Memoise the rendered preview so we only re-run the tiny markdown parser
+  // when the buffer changes. The frontmatter block is stripped so it doesn't
+  // render as a stray paragraph.
+  const previewHtml = useMemo(() => {
+    if (!isMdFile || !activeBuf) return '';
+    return renderMarkdown(bodyForPreview(activeBuf.content));
+  }, [isMdFile, activeBuf]);
+
+  // Frontmatter form (B). The form mirrors `parseFrontmatter(activeBuf)` and
+  // writes back through writeFrontmatter on field blur. We deliberately only
+  // commit on blur so per-keystroke typing in the form doesn't fire a
+  // model.setValue on Monaco (which would reset its cursor / scroll position).
+  const skillMdFm = useMemo(() => {
+    if (!isSkillMd || !activeBuf) return null;
+    return parseFrontmatter(activeBuf.content);
+  }, [isSkillMd, activeBuf]);
+
+  const [fmCollapsed, setFmCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('skillHub.editor.fmCollapsed') === '1'; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('skillHub.editor.fmCollapsed', fmCollapsed ? '1' : '0'); }
+    catch { /* ignore */ }
+  }, [fmCollapsed]);
+
+  function writeFrontmatter(key: string, val: string) {
+    if (!activePath || !activeBuf || !isSkillMd) return;
+    const fm = parseFrontmatter(activeBuf.content);
+    // No-op when the user blurs without changing anything.
+    if ((fm.fields[key] ?? '') === val) return;
+    const newFields = { ...fm.fields, [key]: val };
+    const newContent = setFrontmatter(activeBuf.content, newFields);
+    setBuffers((b) => ({ ...b, [activePath]: { content: newContent, dirty: true } }));
+  }
 
   // ---- Monaco model management -----------------------------------------
   //
@@ -684,6 +1076,20 @@ export function Editor() {
       .map((c) => `[${c.severity}] ${c.label}: ${c.detail}`);
   }, [validation.data]);
 
+  // Pre-flight: blockers (err) prevent submission; warnings are advisory.
+  // Used both to colour the submit button and to render the checklist at
+  // the top of the submit modal.
+  const preflight = useMemo(() => {
+    const checks = validation.data?.checks ?? [];
+    const blockers = checks.filter((c) => c.severity === 'err');
+    const warnings = checks.filter((c) => c.severity === 'warn');
+    return {
+      blockers,
+      warnings,
+      ready: validation.data != null && blockers.length === 0,
+    };
+  }, [validation.data]);
+
   useEffect(() => {
     if (showSubmit) setSubmitVersion((v) => v || nextVersion);
   }, [showSubmit, nextVersion]);
@@ -820,8 +1226,9 @@ export function Editor() {
     try { localStorage.removeItem(draftKeyFor(ns, name, path)); } catch { /* ignore */ }
   }
 
-  function openNewFileDialog() {
-    setNewFilePath('');
+  function openNewFileDialog(prefill?: { path?: string; content?: string }) {
+    setNewFilePath(prefill?.path ?? '');
+    setNewFileContent(prefill?.content ?? '');
     setNewFileErr(null);
     setShowNewFile(true);
   }
@@ -830,6 +1237,7 @@ export function Editor() {
     if (newFileBusy) return;
     setShowNewFile(false);
     setNewFilePath('');
+    setNewFileContent('');
     setNewFileErr(null);
   }
 
@@ -850,17 +1258,39 @@ export function Editor() {
     setNewFileBusy(true);
     setNewFileErr(null);
     try {
-      const f = await api.putFile(ns, name, path, '');
-      setBuffers((b) => ({ ...b, [path]: { content: f.content ?? '', dirty: false } }));
+      const f = await api.putFile(ns, name, path, newFileContent);
+      setBuffers((b) => ({ ...b, [path]: { content: f.content ?? newFileContent, dirty: false } }));
       files.reload();
       openFile(path);
       setMsg(`已创建 ${path}`);
       setShowNewFile(false);
       setNewFilePath('');
+      setNewFileContent('');
     } catch (e) {
       setNewFileErr((e as Error).message);
     } finally {
       setNewFileBusy(false);
+    }
+  }
+
+  // Quick-create a missing recommended dir by writing a README.md into it.
+  // The directory then shows up in the file tree like any other; the README
+  // doubles as guidance for what should go in the dir.
+  async function createStdDir(dir: StdDirKey) {
+    const seed = seedFileForDir(dir, dir);
+    if ((files.data ?? []).some((f) => f.path === seed.path)) {
+      openFile(seed.path);
+      return;
+    }
+    try {
+      const f = await api.putFile(ns, name, seed.path, seed.content);
+      setBuffers((b) => ({ ...b, [seed.path]: { content: f.content ?? seed.content, dirty: false } }));
+      files.reload();
+      validation.reload();
+      openFile(seed.path);
+      setMsg(`已创建 ${dir}/ 目录`);
+    } catch (e) {
+      setMsg(`创建 ${dir}/ 失败: ${(e as Error).message}`);
     }
   }
 
@@ -1053,6 +1483,11 @@ export function Editor() {
             {!canEdit && skill.data && me.data && (
               <span style={{ color: 'var(--text-faint)', marginLeft: 8 }}>· 只读 (你不是作者)</span>
             )}
+            <span
+              style={{ marginLeft: 8, color: 'var(--primary)', cursor: 'pointer' }}
+              onClick={() => navigate(`/skills/${ns}/${name}`, { state: { tab: 'versions' } })}
+              title="在 skill 详情页查看所有历史版本"
+            >· 历史版本 →</span>
           </p>
         </div>
         <div className="page-actions">
@@ -1104,8 +1539,34 @@ export function Editor() {
             className="btn primary"
             disabled={submitting || !canEdit}
             onClick={() => setShowSubmit(true)}
+            // Surface the pre-flight state on the button itself: a red dot
+            // when there are blockers, an amber dot when there are only
+            // warnings. Hovering reveals the count.
+            title={
+              preflight.blockers.length > 0
+                ? `${preflight.blockers.length} 项必须修复后才能提交`
+                : preflight.warnings.length > 0
+                  ? `${preflight.warnings.length} 项警告（不阻塞）`
+                  : '提交审批'
+            }
+            style={
+              preflight.blockers.length > 0
+                ? { background: 'var(--red)', borderColor: 'var(--red)' }
+                : preflight.warnings.length > 0
+                  ? { background: 'var(--amber)', borderColor: 'var(--amber)', color: 'var(--text)' }
+                  : undefined
+            }
           >
-            <IconRocket size={14} /> {submitting ? '提交中...' : '提交审批'}
+            <IconRocket size={14} />
+            {submitting ? '提交中...' : '提交审批'}
+            {preflight.blockers.length > 0 && (
+              <span
+                style={{
+                  marginLeft: 6, padding: '0 6px', borderRadius: 8,
+                  background: 'rgba(255,255,255,0.25)', fontSize: 11, fontWeight: 700,
+                }}
+              >{preflight.blockers.length}</span>
+            )}
           </button>
         </div>
       </div>
@@ -1115,14 +1576,69 @@ export function Editor() {
           onClick={() => !submitting && setShowSubmit(false)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
         >
-          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: 10, width: 480, maxWidth: '92vw', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: 10, width: 480, maxWidth: '92vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)' }}>
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
               <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>提交审批</h3>
               <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>
                 当前版本 <span className="mono">v{currentVersion}</span> · 默认 bump 到 <span className="mono">v{nextVersion}</span>
               </div>
             </div>
-            <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
+              {/* Pre-flight checklist — server re-validates on submit so we
+                  treat this as advisory, but blockers also disable the
+                  confirm button so the user can't trip the 422 round-trip. */}
+              {validation.data && (preflight.blockers.length > 0 || preflight.warnings.length > 0) && (
+                <div
+                  style={{
+                    borderRadius: 6,
+                    border: `1px solid ${preflight.blockers.length > 0 ? 'var(--red)' : 'var(--amber)'}`,
+                    background: preflight.blockers.length > 0 ? 'var(--red-bg)' : 'var(--amber-bg)',
+                    padding: '8px 12px',
+                    fontSize: 12.5,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, fontWeight: 600 }}>
+                    {preflight.blockers.length > 0
+                      ? <IconXCircle size={14} style={{ color: 'var(--red)' }} />
+                      : <IconAlertTriangle size={14} style={{ color: 'var(--amber)' }} />}
+                    <span style={{ color: preflight.blockers.length > 0 ? 'var(--red-text)' : 'var(--amber-text)' }}>
+                      提交前检查 · {preflight.blockers.length} 错误 · {preflight.warnings.length} 警告
+                    </span>
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+                    {preflight.blockers.map((c) => (
+                      <li key={c.id} style={{ color: 'var(--red-text)' }}>
+                        <strong>{c.label}</strong>{c.detail ? ` — ${c.detail}` : ''}
+                      </li>
+                    ))}
+                    {preflight.warnings.map((c) => (
+                      <li key={c.id} style={{ color: 'var(--amber-text)' }}>
+                        {c.label}{c.detail ? ` — ${c.detail}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                  {preflight.blockers.length > 0 && (
+                    <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--red-text)' }}>
+                      存在错误项 · 修复后再提交。
+                    </div>
+                  )}
+                </div>
+              )}
+              {validation.data && preflight.ready && preflight.warnings.length === 0 && (
+                <div
+                  style={{
+                    borderRadius: 6,
+                    border: '1px solid var(--green)',
+                    background: 'var(--green-bg, rgba(16,185,129,0.08))',
+                    padding: '6px 12px',
+                    fontSize: 12.5,
+                    color: 'var(--green-text)',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}
+                >
+                  <IconCheckCircle size={14} /> 所有检查通过 · 可放心提交
+                </div>
+              )}
               <label style={{ display: 'block' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                   <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>新版本号</span>
@@ -1238,7 +1754,12 @@ export function Editor() {
             </div>
             <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button className="btn" onClick={() => setShowSubmit(false)} disabled={submitting}>取消</button>
-              <button className="btn primary" disabled={submitting || !submitVersion.trim()} onClick={submitForReview}>
+              <button
+                className="btn primary"
+                disabled={submitting || !submitVersion.trim() || preflight.blockers.length > 0}
+                onClick={submitForReview}
+                title={preflight.blockers.length > 0 ? '存在 validation 错误，请先修复' : '确认提交审批'}
+              >
                 <IconRocket size={13} /> {submitting ? '提交中...' : '确认提交'}
               </button>
             </div>
@@ -1254,45 +1775,69 @@ export function Editor() {
           <form
             onClick={(e) => e.stopPropagation()}
             onSubmit={(e) => { e.preventDefault(); submitNewFile(); }}
-            style={{ background: 'var(--bg)', borderRadius: 10, width: 440, maxWidth: '92vw', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)' }}
+            style={{ background: 'var(--bg)', borderRadius: 10, width: 560, maxWidth: '92vw', maxHeight: '90vh', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}
           >
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
               <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>新建文件</h3>
               <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>
-                相对路径，支持子目录（如 <span className="mono">docs/usage.md</span>）
+                选择模板可自动填入起始内容；或直接输入路径创建空文件。
               </div>
             </div>
-            <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
               <label>
                 <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>路径</div>
                 <input
                   className="input"
                   value={newFilePath}
                   onChange={(e) => { setNewFilePath(e.target.value); if (newFileErr) setNewFileErr(null); }}
-                  placeholder="docs/usage.md"
+                  placeholder="scripts/main.py"
                   autoFocus
                   disabled={newFileBusy}
                   style={{ width: '100%', fontFamily: "'JetBrains Mono', monospace" }}
                 />
+                {newFileContent && (
+                  <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
+                    已选模板 · 创建后将写入 {newFileContent.length} 字符的起始内容
+                    <button
+                      type="button"
+                      onClick={() => setNewFileContent('')}
+                      style={{ marginLeft: 8, border: 'none', background: 'transparent', color: 'var(--primary)', cursor: 'pointer', fontSize: 11, padding: 0 }}
+                    >清除</button>
+                  </div>
+                )}
               </label>
 
               <div>
-                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 6 }}>常用模板</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {['README.md', 'docs/usage.md', 'examples/basic.md', 'tests/fixtures.md'].map((s) => {
-                    const taken = (files.data ?? []).some((f) => f.path === s);
-                    return (
-                      <button
-                        key={s}
-                        type="button"
-                        className="btn sm ghost"
-                        disabled={taken || newFileBusy}
-                        onClick={() => { setNewFilePath(s); setNewFileErr(null); }}
-                        style={{ fontSize: 11, padding: '3px 8px', fontFamily: "'JetBrains Mono', monospace" }}
-                        title={taken ? '该文件已存在' : '填入路径'}
-                      >{s}</button>
-                    );
-                  })}
+                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 6 }}>模板（点击选择）</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {TEMPLATE_GROUPS.map((group) => (
+                    <div key={group.title}>
+                      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                        {group.title}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {group.items.map((tpl) => {
+                          const taken = (files.data ?? []).some((f) => f.path === tpl.path);
+                          const selected = newFilePath === tpl.path;
+                          return (
+                            <button
+                              key={tpl.path}
+                              type="button"
+                              className={`btn sm ${selected ? 'primary' : 'ghost'}`}
+                              disabled={taken || newFileBusy}
+                              onClick={() => {
+                                setNewFilePath(tpl.path);
+                                setNewFileContent(tpl.content ?? '');
+                                setNewFileErr(null);
+                              }}
+                              style={{ fontSize: 11, padding: '3px 8px', fontFamily: "'JetBrains Mono', monospace" }}
+                              title={taken ? '该文件已存在' : (tpl.desc ?? tpl.path)}
+                            >{tpl.path}</button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -1339,10 +1884,36 @@ export function Editor() {
               canEdit={canEdit}
             />
           )}
+          {/* Placeholder rows for recommended dirs that don't exist yet.
+              Clicking "+" seeds the dir with a README so it shows up in the
+              tree (the backend has no concept of empty dirs). */}
+          {canEdit && files.data && bundleStatus.missingStdDirs.length > 0 && (
+            <div style={{ margin: '6px 4px 0', paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
+              <div style={{ fontSize: 10.5, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '2px 8px 4px' }}>
+                推荐目录
+              </div>
+              {bundleStatus.missingStdDirs.map((key) => {
+                const d = STD_DIRS.find((x) => x.key === key)!;
+                return (
+                  <div
+                    key={key}
+                    className="file-row dir"
+                    style={{ paddingLeft: 8, opacity: 0.55, fontStyle: 'italic' }}
+                    title={d.desc}
+                    onClick={() => createStdDir(key)}
+                  >
+                    <IconPlus size={12} />
+                    <span style={{ marginRight: 2 }}>{d.icon}</span>
+                    {d.label}/
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {canEdit && (
             <button
               className="file-tree-new"
-              onClick={openNewFileDialog}
+              onClick={() => openNewFileDialog()}
               title="新建文件"
             >
               <IconPlus size={12} /> 新建文件
@@ -1408,59 +1979,276 @@ export function Editor() {
               >丢弃</button>
             </div>
           )}
-          <div className="editor-code" style={{ display: 'block', padding: 0, flex: 1, minHeight: 0, background: '#1e1e1e', position: 'relative' }}>
-            {/* The Monaco instance is mounted exactly once and stays alive
-                for the lifetime of this page. Tab switches just call
-                editor.setModel(); see the model-management effect above. */}
-            <MonacoEditor
-              height="100%"
-              theme="vs-dark"
-              defaultLanguage="plaintext"
-              onMount={(ed, m) => {
-                editorRef.current = ed;
-                monacoNsRef.current = m;
-                // The wrapper auto-creates a default model; we own the
-                // lifecycle ourselves, so detach + dispose it.
-                const def = ed.getModel();
-                ed.setModel(null);
-                def?.dispose();
-                // Both shortcuts go through handlersRef so they always pick
-                // up the latest closures (state-dependent saves work).
-                ed.addCommand(
-                  m.KeyMod.CtrlCmd | m.KeyCode.KeyS,
-                  () => { handlersRef.current.saveActive(); },
-                );
-                ed.addCommand(
-                  m.KeyMod.CtrlCmd | m.KeyMod.Shift | m.KeyCode.KeyS,
-                  () => { handlersRef.current.saveAll(); },
-                );
-                // Kick the model-sync effect now that we have refs.
-                setEditorMountTick((n) => n + 1);
+          {/* Frontmatter form — SKILL.md only. Lets the user edit the
+              YAML metadata without hand-writing YAML. Commits to the buffer
+              on field blur so per-keystroke typing doesn't thrash Monaco. */}
+          {isSkillMd && skillMdFm && (
+            <div style={{
+              borderBottom: '1px solid var(--border)',
+              background: 'var(--bg-soft)',
+              fontSize: 12,
+            }}>
+              <div
+                onClick={() => setFmCollapsed((v) => !v)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px', cursor: 'pointer',
+                  color: 'var(--text-muted)', fontWeight: 500,
+                }}
+                title={fmCollapsed ? '展开 Frontmatter 表单' : '折叠 Frontmatter 表单'}
+              >
+                {fmCollapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
+                <span>Frontmatter</span>
+                {!skillMdFm.hasFrontmatter && (
+                  <span style={{
+                    fontSize: 10.5, padding: '1px 6px', borderRadius: 4,
+                    background: 'var(--amber-bg)', color: 'var(--amber-text)',
+                  }}>缺失</span>
+                )}
+                {skillMdFm.hasFrontmatter && skillMdFm.fields.name && (
+                  <span style={{ color: 'var(--text-faint)', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                    · {skillMdFm.fields.name}
+                  </span>
+                )}
+              </div>
+              {!fmCollapsed && (
+                <div style={{ padding: '4px 12px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <FrontmatterField
+                    label="name"
+                    fieldKey="name"
+                    upstream={skillMdFm.fields.name ?? ''}
+                    placeholder="my-skill"
+                    readOnly={!canEdit}
+                    onCommit={writeFrontmatter}
+                  />
+                  <FrontmatterField
+                    label="description"
+                    fieldKey="description"
+                    upstream={skillMdFm.fields.description ?? ''}
+                    placeholder="一句话描述这个 skill"
+                    multiline
+                    readOnly={!canEdit}
+                    onCommit={writeFrontmatter}
+                  />
+                  <FrontmatterField
+                    label="license"
+                    fieldKey="license"
+                    upstream={skillMdFm.fields.license ?? ''}
+                    placeholder="Apache-2.0"
+                    readOnly={!canEdit}
+                    onCommit={writeFrontmatter}
+                  />
+                  {/* Surface any extra keys the doc already has so users
+                      know they're preserved even though we don't expose
+                      them as named inputs. */}
+                  {Object.keys(skillMdFm.fields)
+                    .filter((k) => !['name', 'description', 'license'].includes(k))
+                    .length > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--text-faint)', paddingLeft: 84 }}>
+                      其他字段（在 Monaco 中编辑）:{' '}
+                      {Object.keys(skillMdFm.fields)
+                        .filter((k) => !['name', 'description', 'license'].includes(k))
+                        .map((k) => <span key={k} className="mono" style={{ marginRight: 6 }}>{k}</span>)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {/* Markdown view toggle — only relevant for .md files. We never
+              unmount Monaco; preview mode just hides it via display:none so
+              the editor's state (cursor, scroll, undo) survives a toggle. */}
+          {isMdFile && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+              gap: 4, padding: '4px 10px',
+              borderBottom: '1px solid var(--border)',
+              background: 'var(--bg-soft)',
+              fontSize: 11.5,
+            }}>
+              <span style={{ color: 'var(--text-faint)', marginRight: 4 }}>视图</span>
+              {([
+                { key: 'code',    label: '编辑',  title: '仅编辑器' },
+                { key: 'split',   label: '并排',  title: '左编辑右预览' },
+                { key: 'preview', label: '预览',  title: '仅预览' },
+              ] as const).map((m) => (
+                <button
+                  key={m.key}
+                  type="button"
+                  className={`btn sm ${editorMode === m.key ? 'primary' : 'ghost'}`}
+                  style={{ padding: '2px 8px', fontSize: 11 }}
+                  onClick={() => setEditorMode(m.key)}
+                  title={m.title}
+                >{m.label}</button>
+              ))}
+            </div>
+          )}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' }}>
+            <div
+              className="editor-code"
+              style={{
+                display: effectiveMode === 'preview' ? 'none' : 'block',
+                flex: effectiveMode === 'split' ? '1 1 50%' : 1,
+                minWidth: 0,
+                padding: 0,
+                background: '#1e1e1e',
+                position: 'relative',
               }}
-              options={{
-                readOnly: !canEdit,
-                minimap: { enabled: false },
-                fontSize: 12.5,
-                tabSize: 2,
-                scrollBeyondLastLine: false,
-                wordWrap: 'on',
-                automaticLayout: true,
-                renderWhitespace: 'selection',
-              }}
-            />
-            {(!activePath || !activeBuf) && (
-              <div style={{
-                position: 'absolute', inset: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: 'var(--text-faint)', background: '#1e1e1e',
-              }}>
-                {activePath ? '加载文件中...' : '请从左侧文件树选择一个文件'}
+            >
+              {/* The Monaco instance is mounted exactly once and stays alive
+                  for the lifetime of this page. Tab switches just call
+                  editor.setModel(); see the model-management effect above. */}
+              <MonacoEditor
+                height="100%"
+                theme="vs-dark"
+                defaultLanguage="plaintext"
+                onMount={(ed, m) => {
+                  editorRef.current = ed;
+                  monacoNsRef.current = m;
+                  // The wrapper auto-creates a default model; we own the
+                  // lifecycle ourselves, so detach + dispose it.
+                  const def = ed.getModel();
+                  ed.setModel(null);
+                  def?.dispose();
+                  // Both shortcuts go through handlersRef so they always pick
+                  // up the latest closures (state-dependent saves work).
+                  ed.addCommand(
+                    m.KeyMod.CtrlCmd | m.KeyCode.KeyS,
+                    () => { handlersRef.current.saveActive(); },
+                  );
+                  ed.addCommand(
+                    m.KeyMod.CtrlCmd | m.KeyMod.Shift | m.KeyCode.KeyS,
+                    () => { handlersRef.current.saveAll(); },
+                  );
+                  // Kick the model-sync effect now that we have refs.
+                  setEditorMountTick((n) => n + 1);
+                }}
+                options={{
+                  readOnly: !canEdit,
+                  minimap: { enabled: false },
+                  fontSize: 12.5,
+                  tabSize: 2,
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  automaticLayout: true,
+                  renderWhitespace: 'selection',
+                }}
+              />
+              {(!activePath || !activeBuf) && (
+                <div style={{
+                  position: 'absolute', inset: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: 'var(--text-faint)', background: '#1e1e1e',
+                }}>
+                  {activePath ? '加载文件中...' : '请从左侧文件树选择一个文件'}
+                </div>
+              )}
+            </div>
+            {(effectiveMode === 'preview' || effectiveMode === 'split') && (
+              <div
+                className="md-preview"
+                style={{
+                  flex: 1, minWidth: 0, overflow: 'auto',
+                  padding: '20px 24px',
+                  background: 'var(--bg)',
+                  borderLeft: effectiveMode === 'split' ? '1px solid var(--border)' : undefined,
+                }}
+              >
+                {activeBuf ? (
+                  <div className="readme" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                ) : (
+                  <div style={{ color: 'var(--text-faint)', fontSize: 13 }}>加载中...</div>
+                )}
               </div>
             )}
           </div>
         </div>
 
         <div className="editor-side">
+          <div className="editor-side-section">
+            <div className="editor-side-title">Bundle 结构</div>
+            <div style={{ fontSize: 12, lineHeight: 1.55 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
+                {bundleStatus.hasSkillMD
+                  ? <IconCheckCircle size={14} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                  : <IconXCircle size={14} style={{ color: 'var(--red)', flexShrink: 0 }} />}
+                <span className="mono" style={{ flex: 1 }}>SKILL.md</span>
+                {bundleStatus.hasSkillMD ? (
+                  <button
+                    type="button"
+                    className="btn sm ghost"
+                    style={{ padding: '0 6px', height: 20, fontSize: 11 }}
+                    onClick={() => openFile('SKILL.md')}
+                  >打开</button>
+                ) : canEdit && (
+                  <button
+                    type="button"
+                    className="btn sm primary"
+                    style={{ padding: '0 6px', height: 20, fontSize: 11 }}
+                    onClick={() => {
+                      const tpl = TEMPLATE_GROUPS[0].items.find((t) => t.path === 'SKILL.md');
+                      openNewFileDialog({ path: 'SKILL.md', content: tpl?.content });
+                    }}
+                  >创建</button>
+                )}
+              </div>
+              {STD_DIRS.map((d) => {
+                const present = bundleStatus.dirsPresent.has(d.key);
+                return (
+                  <div key={d.key} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }} title={d.desc}>
+                    {present
+                      ? <IconCheckCircle size={14} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                      : <IconAlertTriangle size={14} style={{ color: 'var(--amber)', flexShrink: 0 }} />}
+                    <span style={{ flex: 1 }}>
+                      <span style={{ marginRight: 4 }}>{d.icon}</span>
+                      <span className="mono">{d.label}/</span>
+                    </span>
+                    {!present && canEdit && (
+                      <button
+                        type="button"
+                        className="btn sm ghost"
+                        style={{ padding: '0 6px', height: 20, fontSize: 11 }}
+                        onClick={() => createStdDir(d.key)}
+                        title={`一键创建 ${d.label}/ 目录（写入 README.md 占位）`}
+                      >+ 创建</button>
+                    )}
+                  </div>
+                );
+              })}
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 6, lineHeight: 1.4 }}>
+                推荐结构：SKILL.md 元数据 + scripts/ 脚本 + references/ 参考 + assets/ 资源。
+              </div>
+            </div>
+          </div>
+
+          {outline.length > 0 && (
+            <div className="editor-side-section">
+              <div className="editor-side-title">大纲 · {activePath}</div>
+              <div style={{ fontSize: 12, lineHeight: 1.5, maxHeight: 240, overflow: 'auto' }}>
+                {outline.map((h, idx) => (
+                  <div
+                    key={`${h.line}-${idx}`}
+                    onClick={() => jumpToLine(h.line)}
+                    style={{
+                      padding: '3px 0',
+                      paddingLeft: (h.level - 1) * 10,
+                      cursor: 'pointer',
+                      color: h.level === 1 ? 'var(--text)' : 'var(--text-muted)',
+                      fontWeight: h.level === 1 ? 600 : 400,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={`L${h.line} · ${h.text}`}
+                  >
+                    <span style={{ color: 'var(--text-faint)', marginRight: 4, fontSize: 10 }}>{'#'.repeat(h.level)}</span>
+                    {h.text}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="editor-side-section">
             <div className="editor-side-title">审批策略</div>
             {policy.loading && <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
