@@ -375,6 +375,74 @@ export interface UpdateAIProviderRequest {
   isDefault?: boolean;
 }
 
+// ---- PAT (Personal Access Tokens) ----------------------------------------
+
+export interface APIToken {
+  id: number;
+  name: string;
+  username: string;
+  createdAt: string;
+  expiresAt: string | null;
+  lastUsed: string | null;
+}
+
+export interface CreateAPITokenRequest {
+  name: string;
+  /** "30d" | "90d" | "365d" | "" (never) */
+  expiresIn: string;
+}
+
+export interface CreateAPITokenResponse {
+  /** Raw token value — shown once, never retrievable again. */
+  token: string;
+  apiToken: APIToken;
+}
+
+// ---- Webhooks -------------------------------------------------------------
+
+export interface Webhook {
+  id: number;
+  /** "" = fires for all namespaces */
+  ns: string;
+  url: string;
+  hasSecret: boolean;
+  events: string[];
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface CreateWebhookRequest {
+  ns: string;
+  url: string;
+  secret?: string;
+  events?: string[];
+  enabled?: boolean;
+}
+
+export interface UpdateWebhookRequest {
+  url?: string;
+  secret?: string;
+  events?: string[];
+  enabled?: boolean;
+}
+
+export interface WebhookDelivery {
+  id: number;
+  webhookId: number;
+  event: string;
+  statusCode: number;
+  error?: string;
+  durationMs: number;
+  deliveredAt: string;
+}
+
+export interface PingResult {
+  statusCode: number;
+  error: string;
+  durationMs: number;
+}
+
 export type AIAssistAction =
   | 'outline' | 'expand' | 'polish' | 'examples'
   | 'summary' | 'translate' | 'review'

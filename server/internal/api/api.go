@@ -120,6 +120,21 @@ func (s *Server) Routes() *gin.Engine {
 		// run an assist call against a skill they can edit.
 		auth.GET("/ai/providers", s.listAIProviderRefs)
 		auth.POST("/ai/skills/:ns/:name/assist", s.aiAssist)
+
+		// PAT (Personal Access Tokens) — machine-to-machine auth for external systems.
+		auth.GET("/me/tokens", s.listAPITokens)
+		auth.POST("/me/tokens", s.createAPIToken)
+		auth.DELETE("/me/tokens/:id", s.deleteAPIToken)
+
+		// Webhooks — lifecycle event callbacks for external systems.
+		// Non-admins can manage hooks scoped to their own namespace.
+		auth.GET("/webhooks", s.listWebhooks)
+		auth.POST("/webhooks", s.createWebhook)
+		auth.GET("/webhooks/:id", s.getWebhook)
+		auth.PATCH("/webhooks/:id", s.updateWebhook)
+		auth.DELETE("/webhooks/:id", s.deleteWebhook)
+		auth.GET("/webhooks/:id/deliveries", s.listWebhookDeliveries)
+		auth.POST("/webhooks/:id/ping", s.pingWebhook)
 	}
 
 	// Admin-only configuration. requireAdmin checks users.is_admin = 1.
@@ -175,6 +190,20 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 			return
 		}
 		tok := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+
+		// PAT: token issued by /me/tokens starts with "skillhub_".
+		if strings.HasPrefix(tok, "skillhub_") {
+			username, err := s.store.LookupTokenUser(tok)
+			if err != nil || username == "" {
+				c.AbortWithStatusJSON(401, gin.H{"error": "invalid or expired api token"})
+				return
+			}
+			c.Set("user", username)
+			c.Next()
+			return
+		}
+
+		// JWT: normal browser session.
 		sub, err := auth.ParseJWT(tok, s.cfg.JWTSecret)
 		if err != nil {
 			c.AbortWithStatusJSON(401, gin.H{"error": err.Error()})
@@ -462,6 +491,14 @@ func (s *Server) lifecycleAction(c *gin.Context, status string) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	// Fire lifecycle webhooks asynchronously.
+	event := "skill.yanked"
+	if status == "deprecated" {
+		event = "skill.deprecated"
+	}
+	if skill, err := s.store.GetSkill(ns, name); err == nil && skill != nil {
+		go s.FireLifecycleWebhook(*skill, user, event, req.Reason)
+	}
 	c.JSON(200, gin.H{"ok": true, "status": status})
 }
 
@@ -696,6 +733,13 @@ func (s *Server) decideReview(c *gin.Context) {
 		return
 	}
 	r, _ = s.store.GetReview(id)
+	// Fire webhooks asynchronously after the DB transaction is committed so
+	// external systems always see the skill in its final "published" state.
+	if req.Decision == "approve" {
+		if skill, err := s.store.GetSkill(r.Namespace, r.SkillName); err == nil && skill != nil {
+			go s.FireWebhooks(*skill, r.ID, user, req.Decision, req.Note)
+		}
+	}
 	c.JSON(200, r)
 }
 

@@ -11,6 +11,7 @@ import type { AuditLog, Me } from '../api/types';
 import { AvatarUploadModal } from '../components/AvatarUploadModal';
 import { CoverPicker } from '../components/CoverPicker';
 import { coverBackground, avatarFallbackGradient } from '../lib/profile';
+import { TokensPanel } from '../components/TokensPanel';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -187,7 +188,7 @@ function Achievement({ icon, name, desc, earned, rare, progress, hint }: {
 
 export function Profile() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<'overview' | 'skills' | 'subscriptions' | 'activity' | 'achievements' | 'settings'>('overview');
+  const [tab, setTab] = useState<'overview' | 'skills' | 'subscriptions' | 'activity' | 'achievements' | 'settings' | 'tokens'>('overview');
   const subs = useAsync(() => api.listMySubscriptions(), []);
   const [editing, setEditing] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
@@ -384,6 +385,7 @@ export function Profile() {
           { id: 'activity', label: '动态', count: activity.data?.length ?? 0 },
           { id: 'achievements', label: '成就', count: achievements.data?.length ?? 0 },
           { id: 'settings', label: '设置' },
+          { id: 'tokens', label: 'API Token' },
         ] as const).map((it) => (
           <div key={it.id} onClick={() => setTab(it.id)} style={{
             padding: '10px 0', cursor: 'pointer', fontSize: 13.5,
@@ -654,6 +656,17 @@ export function Profile() {
           onClose={() => setCoverOpen(false)}
           onUpdated={(next: Me) => me.set(next)}
         />
+      )}
+
+      {/* tokens tab --------------------------------------------------- */}
+      {tab === 'tokens' && (
+        <div style={{ maxWidth: 640 }}>
+          <div className="card">
+            <div className="card-body">
+              <TokensPanel />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

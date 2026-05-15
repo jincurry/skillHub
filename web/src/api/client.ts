@@ -1,4 +1,4 @@
-import type { Achievement, AIProvider, AIProviderRef, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, DistTag, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, Subscription, SubscriptionState, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpsertPolicyRequest, ValidationReport } from './types';
+import type { Achievement, AIProvider, AIProviderRef, APIToken, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, CreateAPITokenRequest, CreateAPITokenResponse, CreateWebhookRequest, DistTag, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PingResult, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, Subscription, SubscriptionState, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpdateWebhookRequest, UpsertPolicyRequest, ValidationReport, Webhook, WebhookDelivery } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -301,4 +301,26 @@ export const api = {
 
   // ---- AI providers (any logged-in user) --------------------------------
   listAIProviderRefs: () => request<AIProviderRef[]>('/ai/providers'),
+
+  // ---- PAT (Personal Access Tokens) ------------------------------------
+  listAPITokens: () => request<APIToken[]>('/me/tokens'),
+  createAPIToken: (body: CreateAPITokenRequest) =>
+    request<CreateAPITokenResponse>('/me/tokens', { method: 'POST', body: JSON.stringify(body) }),
+  deleteAPIToken: (id: number) =>
+    request<void>(`/me/tokens/${id}`, { method: 'DELETE' }),
+
+  // ---- Webhooks --------------------------------------------------------
+  listWebhooks: (ns?: string) =>
+    request<Webhook[]>('/webhooks' + (ns ? `?ns=${encodeURIComponent(ns)}` : '')),
+  createWebhook: (body: CreateWebhookRequest) =>
+    request<Webhook>('/webhooks', { method: 'POST', body: JSON.stringify(body) }),
+  getWebhook: (id: number) => request<Webhook>(`/webhooks/${id}`),
+  updateWebhook: (id: number, body: UpdateWebhookRequest) =>
+    request<Webhook>(`/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteWebhook: (id: number) =>
+    request<void>(`/webhooks/${id}`, { method: 'DELETE' }),
+  listWebhookDeliveries: (id: number, limit = 50) =>
+    request<WebhookDelivery[]>(`/webhooks/${id}/deliveries?limit=${limit}`),
+  pingWebhook: (id: number) =>
+    request<PingResult>(`/webhooks/${id}/ping`, { method: 'POST' }),
 };
