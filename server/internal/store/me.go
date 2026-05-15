@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/jincurry/skillhub/server/internal/auth"
 	"github.com/jincurry/skillhub/server/internal/model"
 )
 
@@ -114,6 +115,31 @@ func (s *Store) MeStats(username string) (*model.MeStats, error) {
 	return out, nil
 }
 
+// ChangePassword validates oldPassword against the stored hash, then replaces
+// it with the hash of newPassword. Returns an error if oldPassword is wrong.
+func (s *Store) ChangePassword(username, oldPassword, newPassword string) error {
+	var hash string
+	if err := s.DB.QueryRow(`SELECT password_hash FROM users WHERE username=?`, username).Scan(&hash); err != nil {
+		if err == sql.ErrNoRows {
+			return errors.New("user not found")
+		}
+		return err
+	}
+	if !auth.VerifyPassword(hash, oldPassword) {
+		return errors.New("旧密码不正确")
+	}
+	newHash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	if _, err := s.DB.Exec(`UPDATE users SET password_hash=? WHERE username=?`, newHash, username); err != nil {
+		return err
+	}
+	_, _ = s.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
+		username, "change_password", "@"+username, "127.0.0.1")
+	return nil
+}
+
 // ReviewStats summarises the entire approval queue. Decision-time stats only
 // count rows that have a decided_at value, so legacy rows don't pollute the
 // average.
@@ -205,6 +231,58 @@ func (s *Store) CreateNamespace(id, owner string) (*model.Namespace, error) {
 		return nil, err
 	}
 	return &model.Namespace{ID: id, Owner: owner, Count: 0}, nil
+}
+
+// UpdateSkillMeta applies a partial update to a skill's metadata fields.
+// Only non-nil fields in req are written. Returns the refreshed skill row.
+func (s *Store) UpdateSkillMeta(ns, name string, req model.UpdateSkillMetaRequest) (*model.Skill, error) {
+	sets := []string{}
+	args := []any{}
+	if req.Description != nil {
+		sets = append(sets, "description = ?")
+		args = append(args, strings.TrimSpace(*req.Description))
+	}
+	if req.LongDesc != nil {
+		sets = append(sets, "long_desc = ?")
+		args = append(args, *req.LongDesc)
+	}
+	if req.Icon != nil {
+		sets = append(sets, "icon = ?")
+		args = append(args, *req.Icon)
+	}
+	if req.IconClass != nil {
+		sets = append(sets, "icon_class = ?")
+		args = append(args, *req.IconClass)
+	}
+	if req.Classification != nil {
+		c := *req.Classification
+		if c != "L1" && c != "L2" && c != "L3" {
+			return nil, errors.New("classification must be L1, L2, or L3")
+		}
+		sets = append(sets, "classification = ?")
+		args = append(args, c)
+	}
+	if req.Version != nil {
+		sets = append(sets, "version = ?")
+		args = append(args, strings.TrimSpace(*req.Version))
+	}
+	if req.Tags != nil {
+		sets = append(sets, "tags_csv = ?")
+		args = append(args, strings.Join(req.Tags, ","))
+	}
+	if len(sets) == 0 {
+		return s.GetSkill(ns, name)
+	}
+	sets = append(sets, "updated_at = CURRENT_TIMESTAMP")
+	args = append(args, ns, name)
+	res, err := s.DB.Exec("UPDATE skills SET "+strings.Join(sets, ", ")+" WHERE ns = ? AND name = ?", args...)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, errors.New("skill not found")
+	}
+	return s.GetSkill(ns, name)
 }
 
 // SetSkillLongDesc updates the markdown README body of a skill. Author or a

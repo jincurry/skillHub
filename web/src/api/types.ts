@@ -455,6 +455,48 @@ export interface AIAssistTurn {
   content: string;
 }
 
+// AdminUser is the admin-facing view returned by GET /admin/users.
+export interface AdminUser {
+  username: string;
+  display: string;
+  role: string;
+  team: string;
+  email: string;
+  isAdmin: boolean;
+  isDisabled: boolean;
+  joinedAt: string;
+}
+
+export interface CreateUserRequest {
+  username: string;
+  display?: string;
+  password: string;
+  role?: string;
+  team?: string;
+  email?: string;
+  isAdmin?: boolean;
+}
+
+export interface AdminUpdateUserRequest {
+  display?: string;
+  role?: string;
+  team?: string;
+  email?: string;
+  isAdmin?: boolean;
+  isDisabled?: boolean;
+  password?: string;
+}
+
+export interface UpdateSkillMetaRequest {
+  desc?: string;
+  longDesc?: string;
+  icon?: string;
+  iconClass?: string;
+  classification?: 'L1' | 'L2' | 'L3';
+  version?: string;
+  tags?: string[];
+}
+
 export interface AIAssistRequest {
   providerId: number;
   action: AIAssistAction;

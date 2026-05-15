@@ -45,6 +45,8 @@ type SkillFilter struct {
 	Classification string
 	Status         string
 	Q              string
+	Limit          int // 0 = no limit
+	Offset         int
 }
 
 func (s *Store) ListSkills(f SkillFilter) ([]model.Skill, error) {
@@ -70,6 +72,10 @@ func (s *Store) ListSkills(f SkillFilter) ([]model.Skill, error) {
 		args = append(args, like, like, like)
 	}
 	q += ` ORDER BY hot DESC, activations DESC, updated_at DESC`
+	if f.Limit > 0 {
+		q += ` LIMIT ? OFFSET ?`
+		args = append(args, f.Limit, f.Offset)
+	}
 
 	rows, err := s.DB.Query(q, args...)
 	if err != nil {
@@ -271,7 +277,7 @@ func scanReviewRow(scan func(...any) error) (model.Review, error) {
 	return r, nil
 }
 
-func (s *Store) ListReviews(status string) ([]model.Review, error) {
+func (s *Store) ListReviews(status string, limit, offset int) ([]model.Review, error) {
 	q := `SELECT ` + reviewSelectCols + ` FROM reviews`
 	args := []any{}
 	if status != "" {
@@ -279,6 +285,10 @@ func (s *Store) ListReviews(status string) ([]model.Review, error) {
 		args = append(args, status)
 	}
 	q += ` ORDER BY submitted_at DESC`
+	if limit > 0 {
+		q += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, offset)
+	}
 	rows, err := s.DB.Query(q, args...)
 	if err != nil {
 		return nil, err

@@ -10,10 +10,11 @@ import { MembersPanel } from '../components/MembersPanel';
 import { AdminOverview } from '../components/AdminOverview';
 import { CleanNamespaceModal } from '../components/CleanNamespaceModal';
 import { WebhookPanel } from '../components/WebhookPanel';
+import { UsersPanel } from '../components/UsersPanel';
 import type { AIProvider } from '../api/types';
 
 export function Admin() {
-  const [tab, setTab] = useState<'namespaces' | 'members' | 'overview' | 'policies' | 'ai' | 'webhooks'>('namespaces');
+  const [tab, setTab] = useState<'namespaces' | 'members' | 'overview' | 'policies' | 'ai' | 'webhooks' | 'users'>('namespaces');
   const aiProviders = useAsync(() => api.listAIProviders(), []);
   const [aiModalOpen, setAIModalOpen] = useState(false);
   const [aiEditing, setAIEditing] = useState<AIProvider | null>(null);
@@ -55,9 +56,12 @@ export function Admin() {
           )}
         </div>
         <div className={`tab ${tab === 'webhooks' ? 'active' : ''}`} onClick={() => setTab('webhooks')}>Webhooks</div>
+        <div className={`tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>用户</div>
       </div>
 
       {tab === 'overview' && <AdminOverview />}
+
+      {tab === 'users' && <UsersPanel />}
 
       {tab === 'webhooks' && (
         <div className="card">

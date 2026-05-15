@@ -500,3 +500,56 @@ type WebhookReview struct {
 	Note        string    `json:"note,omitempty"`
 	DecidedAt   time.Time `json:"decidedAt"`
 }
+
+// ChangePasswordRequest body for PATCH /me/password.
+type ChangePasswordRequest struct {
+	OldPassword string `json:"oldPassword" binding:"required"`
+	NewPassword string `json:"newPassword" binding:"required,min=6"`
+}
+
+// AdminUser is the admin-facing view of a user row.
+type AdminUser struct {
+	Username   string    `json:"username"`
+	Display    string    `json:"display"`
+	Role       string    `json:"role"`
+	Team       string    `json:"team"`
+	Email      string    `json:"email"`
+	IsAdmin    bool      `json:"isAdmin"`
+	IsDisabled bool      `json:"isDisabled"`
+	JoinedAt   time.Time `json:"joinedAt"`
+}
+
+// CreateUserRequest is the body for POST /admin/users.
+type CreateUserRequest struct {
+	Username string `json:"username" binding:"required,min=2,max=32"`
+	Display  string `json:"display"`
+	Password string `json:"password" binding:"required,min=6"`
+	Role     string `json:"role"`
+	Team     string `json:"team"`
+	Email    string `json:"email"`
+	IsAdmin  bool   `json:"isAdmin"`
+}
+
+// AdminUpdateUserRequest is the body for PATCH /admin/users/:username.
+// All fields optional — only non-nil values are applied.
+type AdminUpdateUserRequest struct {
+	Display    *string `json:"display"`
+	Role       *string `json:"role"`
+	Team       *string `json:"team"`
+	Email      *string `json:"email"`
+	IsAdmin    *bool   `json:"isAdmin"`
+	IsDisabled *bool   `json:"isDisabled"`
+	Password   *string `json:"password"` // admin force-reset
+}
+
+// UpdateSkillMetaRequest is the body for PATCH /skills/:ns/:name.
+// All fields optional — only non-nil values are applied.
+type UpdateSkillMetaRequest struct {
+	Description    *string  `json:"desc"`
+	LongDesc       *string  `json:"longDesc"`
+	Icon           *string  `json:"icon"`
+	IconClass      *string  `json:"iconClass"`
+	Classification *string  `json:"classification"`
+	Version        *string  `json:"version"`
+	Tags           []string `json:"tags"` // nil = unchanged; [] = clear
+}

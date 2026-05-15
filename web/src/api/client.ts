@@ -1,4 +1,4 @@
-import type { Achievement, AIProvider, AIProviderRef, APIToken, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, CreateAPITokenRequest, CreateAPITokenResponse, CreateWebhookRequest, DistTag, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PingResult, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, Subscription, SubscriptionState, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpdateWebhookRequest, UpsertPolicyRequest, ValidationReport, Webhook, WebhookDelivery } from './types';
+import type { Achievement, AdminUpdateUserRequest, AdminUser, AIProvider, AIProviderRef, APIToken, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, CreateAPITokenRequest, CreateAPITokenResponse, CreateUserRequest, CreateWebhookRequest, DistTag, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PingResult, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, Subscription, SubscriptionState, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpdateSkillMetaRequest, UpdateWebhookRequest, UpsertPolicyRequest, ValidationReport, Webhook, WebhookDelivery } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -47,6 +47,8 @@ export const api = {
   me: () => request<Me>('/me'),
   updateMe: (body: UpdateMeRequest) =>
     request<Me>('/me', { method: 'PATCH', body: JSON.stringify(body) }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request<{ ok: boolean }>('/me/password', { method: 'PATCH', body: JSON.stringify({ oldPassword, newPassword }) }),
   /** Upload a new avatar image (multipart). Returns the refreshed Me row. */
   uploadAvatar: async (file: File): Promise<Me> => {
     const fd = new FormData();
@@ -155,9 +157,11 @@ export const api = {
   namespacePolicy: (ns: string, classification: 'L1' | 'L2' | 'L3') =>
     request<PolicyPreview>(`/namespaces/${ns}/policy?classification=${classification}`),
 
-  listSkills: (filter: { ns?: string; classification?: string; status?: string; q?: string } = {}) =>
+  listSkills: (filter: { ns?: string; classification?: string; status?: string; q?: string; limit?: number; offset?: number } = {}) =>
     request<Skill[]>('/skills' + qs(filter)),
   getSkill: (ns: string, name: string) => request<Skill>(`/skills/${ns}/${name}`),
+  patchSkillMeta: (ns: string, name: string, body: UpdateSkillMetaRequest) =>
+    request<Skill>(`/skills/${ns}/${name}`, { method: 'PATCH', body: JSON.stringify(body) }),
   createSkill: (body: { ns: string; name: string; desc?: string; classification: 'L1' | 'L2' | 'L3'; tags?: string[] }) =>
     request<Skill>('/skills', { method: 'POST', body: JSON.stringify(body) }),
   submitForReview: (
@@ -228,8 +232,8 @@ export const api = {
       method: 'POST', body: JSON.stringify({ stars, comment }),
     }),
 
-  listReviews: (status?: 'pending' | 'approved' | 'rejected') =>
-    request<Review[]>('/reviews' + qs({ status })),
+  listReviews: (status?: 'pending' | 'approved' | 'rejected', limit?: number, offset?: number) =>
+    request<Review[]>('/reviews' + qs({ status, limit, offset })),
   reviewStats: () => request<ReviewStats>('/reviews/stats'),
   getReview: (id: number | string) => request<Review>(`/reviews/${id}`),
   decideReview: (id: number | string, decision: 'approve' | 'reject' | 'request_changes', note?: string) =>
@@ -298,6 +302,13 @@ export const api = {
 
   // ---- Platform metrics (admin overview) --------------------------------
   adminMetrics: () => request<PlatformMetrics>('/admin/metrics'),
+
+  // ---- Admin user management -------------------------------------------
+  listAdminUsers: () => request<AdminUser[]>('/admin/users'),
+  createAdminUser: (body: CreateUserRequest) =>
+    request<AdminUser>('/admin/users', { method: 'POST', body: JSON.stringify(body) }),
+  adminUpdateUser: (username: string, body: AdminUpdateUserRequest) =>
+    request<AdminUser>(`/admin/users/${username}`, { method: 'PATCH', body: JSON.stringify(body) }),
 
   // ---- AI providers (any logged-in user) --------------------------------
   listAIProviderRefs: () => request<AIProviderRef[]>('/ai/providers'),

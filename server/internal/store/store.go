@@ -62,6 +62,8 @@ func Open(path string) (*Store, error) {
 		// the AI provider config UI is reachable on a fresh install.
 		_, _ = db.Exec(`UPDATE users SET is_admin = 1 WHERE username = 'alice'`)
 	}
+	// Backfill: soft-disable flag; disabled users cannot log in.
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0`)
 	// api_tokens and webhooks tables are created via schemaSQL (CREATE TABLE IF NOT EXISTS).
 	// No ALTER TABLE backfills needed for new tables.
 	s := &Store{DB: db}
