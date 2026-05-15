@@ -79,6 +79,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/skills/:ns/:name/ratings", s.rateSkill)
 		auth.POST("/skills/:ns/:name/yank", s.yankSkill)
 		auth.POST("/skills/:ns/:name/deprecate", s.deprecateSkill)
+		auth.POST("/skills/:ns/:name/activate", s.activateSkill)
 		// Author-facing hard delete. Only works while the skill is still a
 		// draft and only the original author can call it — anything else
 		// (published / yanked / deprecated) routes through the admin path.
@@ -1587,4 +1588,28 @@ func (s *Server) adminUpdateUser(c *gin.Context) {
 	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
 		s.currentUser(c), "admin_update_user", "@"+username, "127.0.0.1")
 	c.JSON(200, u)
+}
+
+// activateSkill handles POST /skills/:ns/:name/activate.
+// Any authenticated caller (user or PAT) can record one or more activations.
+func (s *Server) activateSkill(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	var req struct {
+		Count int `json:"count"`
+	}
+	// Body is optional; ignore parse errors so a call with no body works fine.
+	_ = c.ShouldBindJSON(&req)
+	if req.Count <= 0 {
+		req.Count = 1
+	}
+	total, err := s.store.RecordActivation(ns, name, req.Count)
+	if err != nil {
+		if err.Error() == "skill not found" {
+			c.JSON(404, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"activations": total})
 }

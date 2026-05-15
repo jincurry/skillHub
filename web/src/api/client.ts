@@ -90,6 +90,10 @@ export const api = {
     request<{ ok: true; status: string }>(`/skills/${ns}/${name}/deprecate`, {
       method: 'POST', body: JSON.stringify({ reason: reason ?? '' }),
     }),
+  activateSkill: (ns: string, name: string, count?: number) =>
+    request<{ activations: number }>(`/skills/${ns}/${name}/activate`, {
+      method: 'POST', body: JSON.stringify({ count: count ?? 1 }),
+    }),
   // deleteDraftSkill is the author-facing hard delete. Server enforces
   // status='draft' and actor==author; anything else returns 4xx.
   deleteDraftSkill: (ns: string, name: string) =>
