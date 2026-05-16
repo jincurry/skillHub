@@ -66,6 +66,14 @@ func Open(path string) (*Store, error) {
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0`)
 	// api_tokens and webhooks tables are created via schemaSQL (CREATE TABLE IF NOT EXISTS).
 	// No ALTER TABLE backfills needed for new tables.
+
+	// Run versioned migrations after the baseline + legacy backfills. New
+	// schema changes should be added as files under store/migrations/
+	// rather than expanding the inline backfills above.
+	if err := runMigrations(db); err != nil {
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+
 	s := &Store{DB: db}
 	if err := s.seedIfEmpty(); err != nil {
 		return nil, fmt.Errorf("seed: %w", err)
