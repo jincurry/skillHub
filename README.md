@@ -231,12 +231,45 @@ healthz                             GET   健康检查
 
 ---
 
+## CLI
+
+源码：`server/cmd/cli/`（cobra + `golang.org/x/term`，纯 HTTP 客户端复用 REST API）。
+
+```bash
+cd server
+go build -o skillhub ./cmd/cli
+./skillhub auth login                       # 输入用户名密码，写 ~/.config/skillhub/config.json
+./skillhub auth token create ci --save      # 创建 PAT 并写回 config（适合 CI）
+./skillhub skill list --json
+./skillhub skill pull platform-team/k8s-debug ./bundle    # 拉取文件到本地
+./skillhub skill push platform-team/k8s-debug ./bundle    # 同步本地修改
+./skillhub skill validate platform-team/k8s-debug
+./skillhub skill submit platform-team/k8s-debug -v 1.5.1 --hotfix --hotfix-reason "patch CVE"
+./skillhub skill activate platform-team/k8s-debug --count 3
+./skillhub review list
+./skillhub review approve 12 -n "LGTM"
+./skillhub ns list
+```
+
+命令组：
+
+| 组 | 子命令 |
+|---|---|
+| `auth` | `login` / `logout` / `whoami` / `token create|list|delete` |
+| `skill` | `list` / `get` / `pull` / `push` / `validate` / `submit` / `activate` |
+| `review` | `list` / `show` / `approve` / `reject` |
+| `ns` | `list` / `members` |
+
+所有列表命令支持 `--json` 输出，便于管道处理。配置路径可用 `SKILLHUB_CONFIG` 环境变量覆盖。
+
+---
+
 ## 一些细节
 
 - **首次启动**：`server/skillhub.db` 不存在 → 自动建表 + 注入 6 用户 / 7 namespace / 9 skill / 5 review / 4 通知 / 5 audit。
 - **重置数据**：`rm server/skillhub.db*` 然后重启即可。
 - **生产前必做**：换 `SKILLHUB_JWT_SECRET`、加 HTTPS（Nginx / 网关）、规划 SQLite 备份或迁移到 Postgres（schema 风格已尽量 Postgres 友好）。
-- **没实现的（按设计文档 P1-P4）**：CLI、IM 集成、沙箱 Playground、灰度 / Federation 等扩展能力。MVP 聚焦「Web 唯一入口 + 完整审批流 + 审计治理 + AI 辅助」。
+- **没实现的（按设计文档 P1-P4）**：IM 集成、沙箱 Playground、灰度 / Federation 等扩展能力。MVP 聚焦「Web 唯一入口 + 完整审批流 + 审计治理 + AI 辅助 + CLI」。
 
 ---
 

@@ -43,7 +43,9 @@ design/   Full design doc (domain model, approval flow, DB schema, API spec)
 
 ### Backend (`server/`)
 
-Entry point: `cmd/api/main.go`
+Entry points:
+- `cmd/api/main.go` — HTTP API server
+- `cmd/cli/main.go` — `skillhub` CLI (cobra-based; thin HTTP client over the REST API). Subcommands: `auth`, `skill`, `review`, `ns`. Config at `~/.config/skillhub/config.json` (override via `SKILLHUB_CONFIG`).
 
 Internal packages:
 - `internal/api` — Gin route registration and all HTTP handlers (`api.go` is the main file; `ai.go`, `dist_tags_subs.go`, `policies.go` handle their respective feature sets)
