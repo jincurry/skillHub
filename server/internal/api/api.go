@@ -15,18 +15,28 @@ import (
 	"github.com/jincurry/skillhub/server/internal/auth"
 	"github.com/jincurry/skillhub/server/internal/config"
 	"github.com/jincurry/skillhub/server/internal/model"
+	"github.com/jincurry/skillhub/server/internal/notifier"
 	"github.com/jincurry/skillhub/server/internal/store"
 	"github.com/jincurry/skillhub/server/internal/templates"
 	"github.com/jincurry/skillhub/server/internal/validate"
 )
 
 type Server struct {
-	cfg   config.Config
-	store *store.Store
+	cfg      config.Config
+	store    *store.Store
+	notifier *notifier.Dispatcher
 }
 
 func New(cfg config.Config, st *store.Store) *Server {
-	return &Server{cfg: cfg, store: st}
+	// Build notifier dispatcher from config.
+	d := notifier.New()
+	if s := notifier.NewSlack(cfg.SlackWebhookURL); s != nil {
+		d.Register(s)
+	}
+	if f := notifier.NewFeishu(cfg.FeishuWebhookURL); f != nil {
+		d.Register(f)
+	}
+	return &Server{cfg: cfg, store: st, notifier: d}
 }
 
 func (s *Server) Routes() *gin.Engine {
@@ -472,6 +482,13 @@ func (s *Server) submitForReview(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
+	s.notifier.DispatchAsync(notifier.Event{
+		Kind:   "review_submitted",
+		Title:  ns + "/" + name + " v" + req.Version + " 提交审批",
+		Body:   req.Note,
+		Actor:  user,
+		Target: ns + "/" + name,
+	})
 	c.JSON(201, r)
 }
 
@@ -800,6 +817,13 @@ func (s *Server) decideReview(c *gin.Context) {
 			go s.FireWebhooks(*skill, r.ID, user, req.Decision, req.Note)
 		}
 	}
+	s.notifier.DispatchAsync(notifier.Event{
+		Kind:   "review_decided",
+		Title:  r.Namespace + "/" + r.SkillName + " 审批结果: " + req.Decision,
+		Body:   req.Note,
+		Actor:  user,
+		Target: r.Namespace + "/" + r.SkillName,
+	})
 	c.JSON(200, r)
 }
 
@@ -842,7 +866,8 @@ func (s *Server) addComment(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	cm, err := s.store.AddComment(id, s.currentUser(c), req.Body, store.CommentAnchor{
+	user := s.currentUser(c)
+	cm, err := s.store.AddComment(id, user, req.Body, store.CommentAnchor{
 		FilePath: req.FilePath,
 		LineNo:   req.LineNo,
 		Side:     req.Side,
@@ -851,6 +876,13 @@ func (s *Server) addComment(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	s.notifier.DispatchAsync(notifier.Event{
+		Kind:   "comment_added",
+		Title:  "新评论 on review #" + strconv.FormatInt(id, 10),
+		Body:   req.Body,
+		Actor:  user,
+		Target: "review/" + strconv.FormatInt(id, 10),
+	})
 	c.JSON(201, cm)
 }
 
