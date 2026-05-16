@@ -58,7 +58,20 @@ Internal packages:
 
 **Seeding**: On first run, `store/seed.go` inserts 6 users, 7 namespaces, 9 skills, 5 reviews, and sample data. All seed passwords are `password`. `alice` is the bootstrap admin (`is_admin=1`).
 
-**Auth model**: `POST /api/v1/auth/login` returns a 24h HS256 JWT. All other routes under `/api/v1` require `Authorization: Bearer <token>`. Admin-only routes additionally check `users.is_admin = 1`.
+**Auth model**: Two token types are accepted via `Authorization: Bearer <token>`:
+- **JWT**: Issued by `POST /api/v1/auth/login`. HS256, 24h TTL. `is_disabled` checked at login time only.
+- **PAT**: Issued by `POST /api/v1/me/tokens`. Format `skillhub_<random>`. `is_disabled` checked on **every request** — disabled users are blocked immediately.
+
+Admin-only routes additionally require `users.is_admin = 1` (`requireAdmin` middleware).
+
+**Store methods** — key operations on the `Store` struct:
+- `RecordActivation(ns, name, count)` — atomically increments `skills.activations`, upserts today's `skill_daily_metrics`, recomputes `delta_pct` (7-day vs prior-7-day) and `hot` flag (delta > 20%)
+- `ChangePassword(username, oldPass, newPass)` — bcrypt-verifies old password before updating
+- `UpdateSkillMeta(ns, name, req)` — partial update of description/classification/tags/icon/longDesc
+- `CreateAdminUser(req)` — create user with optional `is_admin` flag; validates non-empty username and password min-length
+- `AdminUpdateUser(username, req)` — patch display/role/team/email/isAdmin/isDisabled/password
+- `IsUserDisabled(username)` — returns `(bool, error)`; unknown users return `false, nil`
+- `LookupTokenUser(token)` — resolves PAT to username; returns `""` if expired or invalid
 
 **Approval / review flow**: When a skill is submitted for review, `SubmitDraftForReview` in `store/queries.go` snapshots the current policy as JSON into the `reviews.policy_snapshot` column. This freeze means admin policy edits never affect in-flight reviews. `DecideReview("approve")` in the same transaction upserts the `latest` dist tag and fan-outs notifications to all subscribers (excluding the author and the approver).
 
@@ -67,16 +80,33 @@ Internal packages:
 ### Frontend (`web/src/`)
 
 - `api/client.ts` — Single `api` object containing every API call. All types in `api/types.ts`. On 401, calls `clearAuth()` and invokes the handler registered by `setUnauthorizedHandler` (wired in `main.tsx` to redirect to `/login`).
-- `api/auth.ts` — Token storage (localStorage)
+- `api/auth.ts` — Token storage (localStorage). `getTokenExpiry()` parses the JWT `exp` claim from the base64 payload.
 - `api/useAsync.ts` — Minimal async hook used across pages
 - `pages/` — One file per route. Routes are declared in `App.tsx` and wrapped in `RequireAuth` → `Layout`.
-- `components/` — Shared UI pieces. `Layout.tsx` is the sidebar shell; `RequireAuth.tsx` guards all authenticated routes.
+- `components/` — Shared UI pieces:
+  - `Layout.tsx` — sidebar shell; also renders `SessionExpiryBanner`
+  - `RequireAuth.tsx` — guards all authenticated routes (redirects to `/login` on missing token)
+  - `RequireAdmin.tsx` — guards `/admin` route; reads `getStoredUser().isAdmin` from localStorage; redirects non-admins to `/workspace`
+  - `SessionExpiryBanner.tsx` — shows bottom banner 5 minutes before JWT expiry with live countdown; uses `setTimeout` to wake up at the right moment, then `setInterval` for 1s ticks
 - `lib/aiAssist.ts` — SSE streaming client for AI assist. Uses `fetch()` with `Accept: text/event-stream` instead of `EventSource` because `EventSource` doesn't support `Authorization` headers.
-- `lib/tokens.ts` — Client-side token count estimator (no WASM; heuristic only).
+- `lib/tokens.ts` — Client-side token count estimator (no WASM; heuristic: CJK ~0.67 tok/char, ASCII ~0.25 tok/char).
 
-**Routing**: All routes are under a single `RequireAuth` + `Layout` wrapper. There is no code splitting; all pages are bundled together.
+**Routing**: All routes are under a single `RequireAuth` + `Layout` wrapper. The `/admin` route is additionally wrapped in `RequireAdmin`. There is no code splitting; all pages are bundled together.
 
 **Dev proxy**: `vite.config.ts` proxies `/api/*` to `localhost:8080`, so the frontend always uses relative URLs.
+
+### Editor page (`web/src/pages/Editor.tsx`)
+
+Key features beyond basic Monaco editing:
+
+- **Multi-model**: One Monaco model per file path. Tab switches call `editor.setModel()` and preserve view state (scroll + cursor) per path in a `Map`.
+- **Cmd/Ctrl+P file picker**: Custom `FilePicker` overlay replaces Monaco's built-in command palette. Fuzzy-scored results, keyboard navigation.
+- **Token budget**: `estimateTokens()` across all files; unloaded files fall back to `file.size * 0.25`. Displayed in Bundle Structure sidebar with color thresholds.
+- **Frontmatter form**: Parses/writes YAML frontmatter in SKILL.md. Includes `version` field and `TagsField` chip input (Enter/comma to add, Backspace removes last).
+- **File upload**: New-file dialog has template/upload mode switcher. Upload reads `File` objects as text and calls `api.putFile`.
+- **Discard all**: Confirms, clears all dirty buffers and localStorage drafts, reactivates the current file from server.
+- **Submit diff preview**: `computeDiff(before, after, ctx=3)` — LCS-based unified diff capped at 400 lines. Each dirty file in the submit modal has a "查看变更" toggle showing colored +/- rows with context collapsing.
+- **Server snapshots**: `serverSnapshots: Record<string, string>` stores content as fetched from server; used as the "before" side of the diff.
 
 ## Key Domain Concepts
 
@@ -90,11 +120,21 @@ Internal packages:
 
 **Dist tags**: `latest` is automatically upserted to point at the newest approved version on every `approve` decision. `stable` / `beta` / custom tags are managed manually by owners/maintainers. `latest` cannot be manually deleted.
 
+**Activation tracking**: `POST /skills/:ns/:name/activate` atomically increments `skills.activations` and upserts today's row in `skill_daily_metrics`, then recomputes `delta_pct` (7-day vs prior 7-day) and the `hot` flag (delta > 20%) from the last 14 days of daily data. No cron job needed.
+
 ## Tests
 
-The only tests are in `server/internal/store/platform_features_test.go`. They use a real on-disk SQLite (not `:memory:`) under `t.TempDir()`. To run a single test:
+Tests live in `server/internal/store/`:
+- `platform_features_test.go` — original store tests (policy snapshot freeze, activation, etc.)
+- `new_features_test.go` — tests added for `RecordActivation`, `ChangePassword`, `UpdateSkillMeta`, and admin user management
+
+All tests use a real on-disk SQLite under `t.TempDir()`. Helper `seedBasicWorld()` creates a namespace + users + skill; `seedUserWithPassword()` creates a user with a real bcrypt hash for auth tests.
+
+To run a specific test:
 ```bash
-cd server && go test ./internal/store/ -run TestSubmitDraftFreezesPolicySnapshot -v
+cd server && go test ./internal/store/ -run TestRecordActivation -v
+cd server && go test ./internal/store/ -run TestChangePassword -v
+cd server && go test ./internal/store/ -run TestAdminUpdateUser -v
 ```
 
 There are no frontend tests.
