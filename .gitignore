@@ -1,4 +1,6 @@
 # Go
+server/skillhub
+server/cli
 server/skillhub.db
 server/skillhub.db-wal
 server/skillhub.db-shm
