@@ -16,6 +16,7 @@ import (
 	"github.com/jincurry/skillhub/server/internal/config"
 	"github.com/jincurry/skillhub/server/internal/model"
 	"github.com/jincurry/skillhub/server/internal/store"
+	"github.com/jincurry/skillhub/server/internal/templates"
 	"github.com/jincurry/skillhub/server/internal/validate"
 )
 
@@ -66,6 +67,8 @@ func (s *Server) Routes() *gin.Engine {
 		auth.PATCH("/namespaces/:ns/members/:username", s.updateNamespaceMemberRole)
 		auth.DELETE("/namespaces/:ns/members/:username", s.removeNamespaceMember)
 		auth.GET("/namespaces/:ns/policy", s.getNamespacePolicy)
+
+		auth.GET("/templates", s.listTemplates)
 
 		auth.GET("/skills", s.listSkills)
 		auth.POST("/skills", s.createSkill)
@@ -308,6 +311,13 @@ func (s *Server) getSkill(c *gin.Context) {
 		return
 	}
 	c.JSON(200, k)
+}
+
+// listTemplates returns the built-in skill scaffolds the new-skill flow
+// can pick from. Templates ship in the binary (see internal/templates) so
+// this endpoint always responds with the same set on a given build.
+func (s *Server) listTemplates(c *gin.Context) {
+	c.JSON(200, templates.All())
 }
 
 func (s *Server) createSkill(c *gin.Context) {

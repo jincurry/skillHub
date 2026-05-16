@@ -10,6 +10,7 @@ import (
 
 	"github.com/jincurry/skillhub/server/internal/model"
 	"github.com/jincurry/skillhub/server/internal/policy"
+	"github.com/jincurry/skillhub/server/internal/templates"
 )
 
 // scanReviewSnapshot decodes the policy_snapshot JSON column into a
@@ -127,10 +128,24 @@ func (s *Store) CreateSkill(req model.CreateSkillRequest, author string) (*model
 	}
 	_, _ = s.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
 		author, "create_draft", req.Namespace+"/"+req.Name, "v0.1.0", "127.0.0.1")
-	// Seed the bundle with skill.yaml + README.md so the editor opens to real
-	// files instead of synthesised content. Best-effort: if the seed fails, the
-	// skill row is already in place and the user can still create files later.
-	_ = s.SeedDefaultFiles(req.Namespace, req.Name, req.Description, author)
+	// Seed the bundle. With a templateId, render the named template; otherwise
+	// fall back to the default SKILL.md / skill.yaml / README.md trio. Both
+	// paths are best-effort: a seeding error doesn't block skill creation
+	// since the row is already committed.
+	if req.TemplateID != "" {
+		if tpl := templates.Get(req.TemplateID); tpl != nil {
+			rendered := tpl.Render(templates.Vars{Name: req.Name, Description: req.Description})
+			for path, body := range rendered {
+				if _, err := s.PutSkillFile(req.Namespace, req.Name, path, body, author); err != nil {
+					break
+				}
+			}
+		} else {
+			_ = s.SeedDefaultFiles(req.Namespace, req.Name, req.Description, author)
+		}
+	} else {
+		_ = s.SeedDefaultFiles(req.Namespace, req.Name, req.Description, author)
+	}
 	return s.GetSkill(req.Namespace, req.Name)
 }
 

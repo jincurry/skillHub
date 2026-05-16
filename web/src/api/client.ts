@@ -1,4 +1,4 @@
-import type { Achievement, AdminUpdateUserRequest, AdminUser, AIProvider, AIProviderRef, APIToken, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, CreateAPITokenRequest, CreateAPITokenResponse, CreateUserRequest, CreateWebhookRequest, DistTag, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PingResult, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, Subscription, SubscriptionState, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpdateSkillMetaRequest, UpdateWebhookRequest, UpsertPolicyRequest, ValidationReport, Webhook, WebhookDelivery } from './types';
+import type { Achievement, AdminUpdateUserRequest, AdminUser, AIProvider, AIProviderRef, APIToken, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, CreateAPITokenRequest, CreateAPITokenResponse, CreateUserRequest, CreateWebhookRequest, DistTag, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PingResult, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillTemplate, SkillVersion, Subscription, SubscriptionState, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpdateSkillMetaRequest, UpdateWebhookRequest, UpsertPolicyRequest, ValidationReport, Webhook, WebhookDelivery } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -166,7 +166,8 @@ export const api = {
   getSkill: (ns: string, name: string) => request<Skill>(`/skills/${ns}/${name}`),
   patchSkillMeta: (ns: string, name: string, body: UpdateSkillMetaRequest) =>
     request<Skill>(`/skills/${ns}/${name}`, { method: 'PATCH', body: JSON.stringify(body) }),
-  createSkill: (body: { ns: string; name: string; desc?: string; classification: 'L1' | 'L2' | 'L3'; tags?: string[] }) =>
+  listTemplates: () => request<SkillTemplate[]>('/templates'),
+  createSkill: (body: { ns: string; name: string; desc?: string; classification: 'L1' | 'L2' | 'L3'; tags?: string[]; templateId?: string }) =>
     request<Skill>('/skills', { method: 'POST', body: JSON.stringify(body) }),
   submitForReview: (
     ns: string,

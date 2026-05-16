@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import type { Namespace } from '../api/types';
+import type { Namespace, SkillTemplate } from '../api/types';
 import { IconXCircle, IconRocket } from './Icons';
 
 const EVENT = 'skillhub:create-skill';
@@ -19,6 +19,8 @@ export function CreateSkillModal() {
   const [classification, setClassification] = useState<'L1' | 'L2' | 'L3'>('L2');
   const [tags, setTags] = useState('');
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
+  const [templates, setTemplates] = useState<SkillTemplate[]>([]);
+  const [templateId, setTemplateId] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -35,12 +37,15 @@ export function CreateSkillModal() {
         if (list.length && !ns) setNs(list[0].id);
       }).catch(() => { /* ignore */ });
     }
-  }, [open, namespaces.length, ns]);
+    if (open && templates.length === 0) {
+      api.listTemplates().then(setTemplates).catch(() => { /* ignore */ });
+    }
+  }, [open, namespaces.length, templates.length, ns]);
 
   if (!open) return null;
 
   const close = () => {
-    setOpen(false); setErr(null); setName(''); setDesc(''); setTags('');
+    setOpen(false); setErr(null); setName(''); setDesc(''); setTags(''); setTemplateId('');
   };
 
   const submit = async () => {
@@ -52,6 +57,7 @@ export function CreateSkillModal() {
         ns, name, desc,
         classification,
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
+        templateId: templateId || undefined,
       });
       close();
       navigate(`/skills/${s.ns}/${s.name}/edit`);
@@ -102,6 +108,27 @@ export function CreateSkillModal() {
           <Field label="标签 (逗号分隔)">
             <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="data, sql, review" style={{ width: '100%' }} />
           </Field>
+          <Field label="模板 (可选)">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+              <TemplateChip
+                id=""
+                title="空白"
+                desc="SKILL.md + skill.yaml + README.md"
+                selected={templateId === ''}
+                onSelect={() => setTemplateId('')}
+              />
+              {templates.map((t) => (
+                <TemplateChip
+                  key={t.id}
+                  id={t.id}
+                  title={t.name}
+                  desc={t.description}
+                  selected={templateId === t.id}
+                  onSelect={() => setTemplateId(t.id)}
+                />
+              ))}
+            </div>
+          </Field>
           {err && <div style={{ color: 'var(--red-text)', fontSize: 12.5 }}>{err}</div>}
         </div>
 
@@ -122,5 +149,36 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
       {children}
     </label>
+  );
+}
+
+function TemplateChip({
+  id, title, desc, selected, onSelect,
+}: {
+  id: string;
+  title: string;
+  desc: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-template-id={id || 'blank'}
+      onClick={onSelect}
+      style={{
+        textAlign: 'left',
+        padding: '8px 10px',
+        borderRadius: 6,
+        border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+        background: selected ? 'var(--accent-soft, var(--bg))' : 'transparent',
+        cursor: 'pointer',
+        fontSize: 12,
+        color: 'var(--text)',
+      }}
+    >
+      <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 2 }}>{title}</div>
+      <div style={{ color: 'var(--text-muted)', lineHeight: 1.35 }}>{desc}</div>
+    </button>
   );
 }

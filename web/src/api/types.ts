@@ -279,6 +279,14 @@ export interface NamespacePoliciesResponse {
   policies: NamespacePolicy[];
 }
 
+// SkillTemplate is one of the built-in scaffolds returned by GET /templates.
+// Used to pre-populate a new skill's bundle on creation.
+export interface SkillTemplate {
+  id: string;
+  name: string;
+  description: string;
+}
+
 // UpsertPolicyRequest is the body for PUT /admin/namespaces/:ns/policies/:cls.
 export interface UpsertPolicyRequest {
   mode: 'parallel' | 'serial';
