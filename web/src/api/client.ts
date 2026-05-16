@@ -30,10 +30,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-function qs(params: Record<string, string | undefined>): string {
+function qs(params: Record<string, string | number | boolean | undefined>): string {
   const usp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
-    if (v) usp.append(k, v);
+    if (v !== undefined && v !== null && v !== '') usp.append(k, String(v));
   }
   const s = usp.toString();
   return s ? `?${s}` : '';

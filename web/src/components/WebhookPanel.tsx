@@ -78,7 +78,7 @@ export function WebhookPanel({ ns = '' }: Props) {
   }
 
   if (loading) return <div className="text-sm text-gray-500">加载中…</div>;
-  if (error) return <div className="text-sm text-red-500">{error}</div>;
+  if (error) return <div className="text-sm text-red-500">{String(error.message ?? error)}</div>;
 
   return (
     <div className="space-y-4">
