@@ -1,4 +1,4 @@
-import type { Achievement, AIProvider, AIProviderRef, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, DistTag, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, Subscription, SubscriptionState, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpsertPolicyRequest, ValidationReport } from './types';
+import type { Achievement, AdminUpdateUserRequest, AdminUser, AIProvider, AIProviderRef, APIToken, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, CreateAPITokenRequest, CreateAPITokenResponse, CreateUserRequest, CreateWebhookRequest, DistTag, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PingResult, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillVersion, Subscription, SubscriptionState, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpdateSkillMetaRequest, UpdateWebhookRequest, UpsertPolicyRequest, ValidationReport, Webhook, WebhookDelivery } from './types';
 import { clearAuth, getToken } from './auth';
 
 const BASE = '/api/v1';
@@ -47,6 +47,8 @@ export const api = {
   me: () => request<Me>('/me'),
   updateMe: (body: UpdateMeRequest) =>
     request<Me>('/me', { method: 'PATCH', body: JSON.stringify(body) }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request<{ ok: boolean }>('/me/password', { method: 'PATCH', body: JSON.stringify({ oldPassword, newPassword }) }),
   /** Upload a new avatar image (multipart). Returns the refreshed Me row. */
   uploadAvatar: async (file: File): Promise<Me> => {
     const fd = new FormData();
@@ -87,6 +89,10 @@ export const api = {
   deprecateSkill: (ns: string, name: string, reason?: string) =>
     request<{ ok: true; status: string }>(`/skills/${ns}/${name}/deprecate`, {
       method: 'POST', body: JSON.stringify({ reason: reason ?? '' }),
+    }),
+  activateSkill: (ns: string, name: string, count?: number) =>
+    request<{ activations: number }>(`/skills/${ns}/${name}/activate`, {
+      method: 'POST', body: JSON.stringify({ count: count ?? 1 }),
     }),
   // deleteDraftSkill is the author-facing hard delete. Server enforces
   // status='draft' and actor==author; anything else returns 4xx.
@@ -155,9 +161,11 @@ export const api = {
   namespacePolicy: (ns: string, classification: 'L1' | 'L2' | 'L3') =>
     request<PolicyPreview>(`/namespaces/${ns}/policy?classification=${classification}`),
 
-  listSkills: (filter: { ns?: string; classification?: string; status?: string; q?: string } = {}) =>
+  listSkills: (filter: { ns?: string; classification?: string; status?: string; q?: string; limit?: number; offset?: number } = {}) =>
     request<Skill[]>('/skills' + qs(filter)),
   getSkill: (ns: string, name: string) => request<Skill>(`/skills/${ns}/${name}`),
+  patchSkillMeta: (ns: string, name: string, body: UpdateSkillMetaRequest) =>
+    request<Skill>(`/skills/${ns}/${name}`, { method: 'PATCH', body: JSON.stringify(body) }),
   createSkill: (body: { ns: string; name: string; desc?: string; classification: 'L1' | 'L2' | 'L3'; tags?: string[] }) =>
     request<Skill>('/skills', { method: 'POST', body: JSON.stringify(body) }),
   submitForReview: (
@@ -228,8 +236,8 @@ export const api = {
       method: 'POST', body: JSON.stringify({ stars, comment }),
     }),
 
-  listReviews: (status?: 'pending' | 'approved' | 'rejected') =>
-    request<Review[]>('/reviews' + qs({ status })),
+  listReviews: (status?: 'pending' | 'approved' | 'rejected', limit?: number, offset?: number) =>
+    request<Review[]>('/reviews' + qs({ status, limit, offset })),
   reviewStats: () => request<ReviewStats>('/reviews/stats'),
   getReview: (id: number | string) => request<Review>(`/reviews/${id}`),
   decideReview: (id: number | string, decision: 'approve' | 'reject' | 'request_changes', note?: string) =>
@@ -299,6 +307,35 @@ export const api = {
   // ---- Platform metrics (admin overview) --------------------------------
   adminMetrics: () => request<PlatformMetrics>('/admin/metrics'),
 
+  // ---- Admin user management -------------------------------------------
+  listAdminUsers: () => request<AdminUser[]>('/admin/users'),
+  createAdminUser: (body: CreateUserRequest) =>
+    request<AdminUser>('/admin/users', { method: 'POST', body: JSON.stringify(body) }),
+  adminUpdateUser: (username: string, body: AdminUpdateUserRequest) =>
+    request<AdminUser>(`/admin/users/${username}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
   // ---- AI providers (any logged-in user) --------------------------------
   listAIProviderRefs: () => request<AIProviderRef[]>('/ai/providers'),
+
+  // ---- PAT (Personal Access Tokens) ------------------------------------
+  listAPITokens: () => request<APIToken[]>('/me/tokens'),
+  createAPIToken: (body: CreateAPITokenRequest) =>
+    request<CreateAPITokenResponse>('/me/tokens', { method: 'POST', body: JSON.stringify(body) }),
+  deleteAPIToken: (id: number) =>
+    request<void>(`/me/tokens/${id}`, { method: 'DELETE' }),
+
+  // ---- Webhooks --------------------------------------------------------
+  listWebhooks: (ns?: string) =>
+    request<Webhook[]>('/webhooks' + (ns ? `?ns=${encodeURIComponent(ns)}` : '')),
+  createWebhook: (body: CreateWebhookRequest) =>
+    request<Webhook>('/webhooks', { method: 'POST', body: JSON.stringify(body) }),
+  getWebhook: (id: number) => request<Webhook>(`/webhooks/${id}`),
+  updateWebhook: (id: number, body: UpdateWebhookRequest) =>
+    request<Webhook>(`/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteWebhook: (id: number) =>
+    request<void>(`/webhooks/${id}`, { method: 'DELETE' }),
+  listWebhookDeliveries: (id: number, limit = 50) =>
+    request<WebhookDelivery[]>(`/webhooks/${id}/deliveries?limit=${limit}`),
+  pingWebhook: (id: number) =>
+    request<PingResult>(`/webhooks/${id}/ping`, { method: 'POST' }),
 };

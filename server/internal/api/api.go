@@ -48,6 +48,7 @@ func (s *Server) Routes() *gin.Engine {
 	{
 		auth.GET("/me", s.getMe)
 		auth.PATCH("/me", s.patchMe)
+		auth.PATCH("/me/password", s.changePassword)
 		auth.GET("/me/stats", s.getMeStats)
 		auth.GET("/me/achievements", s.getMeAchievements)
 		auth.GET("/me/notifications", s.listNotifications)
@@ -69,6 +70,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.GET("/skills", s.listSkills)
 		auth.POST("/skills", s.createSkill)
 		auth.GET("/skills/:ns/:name", s.getSkill)
+		auth.PATCH("/skills/:ns/:name", s.patchSkillMeta)
 		auth.GET("/skills/:ns/:name/validate", s.validateSkill)
 		auth.POST("/skills/:ns/:name/submit", s.submitForReview)
 		auth.GET("/skills/:ns/:name/versions", s.listVersions)
@@ -77,6 +79,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/skills/:ns/:name/ratings", s.rateSkill)
 		auth.POST("/skills/:ns/:name/yank", s.yankSkill)
 		auth.POST("/skills/:ns/:name/deprecate", s.deprecateSkill)
+		auth.POST("/skills/:ns/:name/activate", s.activateSkill)
 		// Author-facing hard delete. Only works while the skill is still a
 		// draft and only the original author can call it — anything else
 		// (published / yanked / deprecated) routes through the admin path.
@@ -120,6 +123,21 @@ func (s *Server) Routes() *gin.Engine {
 		// run an assist call against a skill they can edit.
 		auth.GET("/ai/providers", s.listAIProviderRefs)
 		auth.POST("/ai/skills/:ns/:name/assist", s.aiAssist)
+
+		// PAT (Personal Access Tokens) — machine-to-machine auth for external systems.
+		auth.GET("/me/tokens", s.listAPITokens)
+		auth.POST("/me/tokens", s.createAPIToken)
+		auth.DELETE("/me/tokens/:id", s.deleteAPIToken)
+
+		// Webhooks — lifecycle event callbacks for external systems.
+		// Non-admins can manage hooks scoped to their own namespace.
+		auth.GET("/webhooks", s.listWebhooks)
+		auth.POST("/webhooks", s.createWebhook)
+		auth.GET("/webhooks/:id", s.getWebhook)
+		auth.PATCH("/webhooks/:id", s.updateWebhook)
+		auth.DELETE("/webhooks/:id", s.deleteWebhook)
+		auth.GET("/webhooks/:id/deliveries", s.listWebhookDeliveries)
+		auth.POST("/webhooks/:id/ping", s.pingWebhook)
 	}
 
 	// Admin-only configuration. requireAdmin checks users.is_admin = 1.
@@ -150,6 +168,11 @@ func (s *Server) Routes() *gin.Engine {
 
 		// Platform-wide metrics for the Admin overview dashboard.
 		adminAI.GET("/metrics", s.adminMetrics)
+
+		// User management (create, list, update, disable).
+		adminAI.GET("/users", s.listAdminUsers)
+		adminAI.POST("/users", s.createAdminUser)
+		adminAI.PATCH("/users/:username", s.adminUpdateUser)
 	}
 	return r
 }
@@ -175,6 +198,24 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 			return
 		}
 		tok := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+
+		// PAT: token issued by /me/tokens starts with "skillhub_".
+		if strings.HasPrefix(tok, "skillhub_") {
+			username, err := s.store.LookupTokenUser(tok)
+			if err != nil || username == "" {
+				c.AbortWithStatusJSON(401, gin.H{"error": "invalid or expired api token"})
+				return
+			}
+			if disabled, _ := s.store.IsUserDisabled(username); disabled {
+				c.AbortWithStatusJSON(403, gin.H{"error": "account is disabled"})
+				return
+			}
+			c.Set("user", username)
+			c.Next()
+			return
+		}
+
+		// JWT: normal browser session.
 		sub, err := auth.ParseJWT(tok, s.cfg.JWTSecret)
 		if err != nil {
 			c.AbortWithStatusJSON(401, gin.H{"error": err.Error()})
@@ -201,6 +242,10 @@ func (s *Server) login(c *gin.Context) {
 	}
 	if !ok {
 		c.JSON(401, gin.H{"error": "invalid credentials"})
+		return
+	}
+	if disabled, _ := s.store.IsUserDisabled(req.Username); disabled {
+		c.JSON(403, gin.H{"error": "账户已被禁用，请联系管理员"})
 		return
 	}
 	tok, err := auth.SignJWT(req.Username, s.cfg.JWTSecret, s.cfg.JWTTTL)
@@ -235,11 +280,15 @@ func (s *Server) getMe(c *gin.Context) {
 }
 
 func (s *Server) listSkills(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	offset, _ := strconv.Atoi(c.Query("offset"))
 	out, err := s.store.ListSkills(store.SkillFilter{
 		Namespace:      c.Query("ns"),
 		Classification: c.Query("classification"),
 		Status:         c.Query("status"),
 		Q:              c.Query("q"),
+		Limit:          limit,
+		Offset:         offset,
 	})
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -283,6 +332,34 @@ func (s *Server) createSkill(c *gin.Context) {
 		return
 	}
 	c.JSON(201, k)
+}
+
+// patchSkillMeta handles PATCH /skills/:ns/:name and updates only the supplied
+// metadata fields. Only the skill author and namespace owners/maintainers may
+// call this endpoint.
+func (s *Server) patchSkillMeta(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	user := s.currentUser(c)
+	ok, err := s.canEditSkill(user, ns, name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if !ok {
+		c.JSON(403, gin.H{"error": "需要 skill 作者或 namespace owner/maintainer 身份"})
+		return
+	}
+	var req model.UpdateSkillMetaRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	k, err := s.store.UpdateSkillMeta(ns, name, req)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, k)
 }
 
 func (s *Server) submitForReview(c *gin.Context) {
@@ -462,6 +539,14 @@ func (s *Server) lifecycleAction(c *gin.Context, status string) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	// Fire lifecycle webhooks asynchronously.
+	event := "skill.yanked"
+	if status == "deprecated" {
+		event = "skill.deprecated"
+	}
+	if skill, err := s.store.GetSkill(ns, name); err == nil && skill != nil {
+		go s.FireLifecycleWebhook(*skill, user, event, req.Reason)
+	}
 	c.JSON(200, gin.H{"ok": true, "status": status})
 }
 
@@ -618,7 +703,9 @@ func (s *Server) getNamespacePolicy(c *gin.Context) {
 }
 
 func (s *Server) listReviews(c *gin.Context) {
-	out, err := s.store.ListReviews(c.Query("status"))
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	offset, _ := strconv.Atoi(c.Query("offset"))
+	out, err := s.store.ListReviews(c.Query("status"), limit, offset)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -696,6 +783,13 @@ func (s *Server) decideReview(c *gin.Context) {
 		return
 	}
 	r, _ = s.store.GetReview(id)
+	// Fire webhooks asynchronously after the DB transaction is committed so
+	// external systems always see the skill in its final "published" state.
+	if req.Decision == "approve" {
+		if skill, err := s.store.GetSkill(r.Namespace, r.SkillName); err == nil && skill != nil {
+			go s.FireWebhooks(*skill, r.ID, user, req.Decision, req.Note)
+		}
+	}
 	c.JSON(200, r)
 }
 
@@ -860,6 +954,20 @@ func (s *Server) listAuditLogs(c *gin.Context) {
 		return
 	}
 	c.JSON(200, out)
+}
+
+// changePassword handles PATCH /me/password.
+func (s *Server) changePassword(c *gin.Context) {
+	var req model.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if err := s.store.ChangePassword(s.currentUser(c), req.OldPassword, req.NewPassword); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true})
 }
 
 // patchMe updates the current user's profile fields.
@@ -1434,4 +1542,78 @@ func (s *Server) downloadSkillBundle(c *gin.Context) {
 	}
 	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
 		s.currentUser(c), "download_bundle", target, "v"+version, "127.0.0.1")
+}
+
+// ---------------------------------------------------------------------------
+// Admin user management handlers
+// ---------------------------------------------------------------------------
+
+func (s *Server) listAdminUsers(c *gin.Context) {
+	users, err := s.store.ListAdminUsers()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, users)
+}
+
+func (s *Server) createAdminUser(c *gin.Context) {
+	var req model.CreateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if err := s.store.CreateAdminUser(req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	u, err := s.store.GetAdminUser(req.Username)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
+		s.currentUser(c), "create_user", "@"+req.Username, "127.0.0.1")
+	c.JSON(201, u)
+}
+
+func (s *Server) adminUpdateUser(c *gin.Context) {
+	username := c.Param("username")
+	var req model.AdminUpdateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	u, err := s.store.AdminUpdateUser(username, req)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
+		s.currentUser(c), "admin_update_user", "@"+username, "127.0.0.1")
+	c.JSON(200, u)
+}
+
+// activateSkill handles POST /skills/:ns/:name/activate.
+// Any authenticated caller (user or PAT) can record one or more activations.
+func (s *Server) activateSkill(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	var req struct {
+		Count int `json:"count"`
+	}
+	// Body is optional; ignore parse errors so a call with no body works fine.
+	_ = c.ShouldBindJSON(&req)
+	if req.Count <= 0 {
+		req.Count = 1
+	}
+	total, err := s.store.RecordActivation(ns, name, req.Count)
+	if err != nil {
+		if err.Error() == "skill not found" {
+			c.JSON(404, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"activations": total})
 }

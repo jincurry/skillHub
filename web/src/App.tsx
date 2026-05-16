@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { RequireAuth } from './components/RequireAuth';
+import { RequireAdmin } from './components/RequireAdmin';
 import { Workspace } from './pages/Workspace';
 import { Browse } from './pages/Browse';
 import { SkillDetail } from './pages/SkillDetail';
@@ -25,7 +26,7 @@ export default function App() {
         <Route path="reviews" element={<Reviews />} />
         <Route path="reviews/:id" element={<ReviewDetail />} />
         <Route path="audit" element={<Audit />} />
-        <Route path="admin" element={<Admin />} />
+        <Route path="admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
         <Route path="profile" element={<Profile />} />
         <Route path="*" element={<Navigate to="/workspace" replace />} />
       </Route>

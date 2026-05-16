@@ -84,6 +84,7 @@ export function SkillDetail() {
   const subState = useAsync(() => api.getSubscriptionState(ns, name), [ns, name]);
   const [subBusy, setSubBusy] = useState(false);
   const [distModalOpen, setDistModalOpen] = useState(false);
+  const [editMetaOpen, setEditMetaOpen] = useState(false);
   async function toggleSubscribe() {
     if (subBusy) return;
     setSubBusy(true);
@@ -285,6 +286,13 @@ export function SkillDetail() {
               title="你不是该 skill 的作者，也不是该命名空间的 owner/maintainer"
               style={{ background: 'var(--bg-soft)', color: 'var(--text-faint)', fontWeight: 400 }}
             >只读</span>
+          )}
+          {canEdit && (
+            <button
+              className="btn sm"
+              onClick={() => setEditMetaOpen(true)}
+              title="修改描述、标签、密级等元数据"
+            >编辑信息</button>
           )}
           {showLifecycleButtons && (
             <>
@@ -635,6 +643,14 @@ export function SkillDetail() {
           onChange={() => distTags.reload()}
         />
       )}
+
+      {editMetaOpen && (
+        <EditMetaModal
+          skill={p}
+          onClose={() => setEditMetaOpen(false)}
+          onSaved={() => { setEditMetaOpen(false); skill.reload(); }}
+        />
+      )}
     </div>
   );
 }
@@ -761,6 +777,104 @@ function DistTagsModal({
             )}
             {err && <div style={{ fontSize: 11.5, color: 'var(--red-text)', marginTop: 6 }}>{err}</div>}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// EditMetaModal — edit skill metadata (desc, tags, classification, etc.)
+// ---------------------------------------------------------------------------
+function EditMetaModal({
+  skill,
+  onClose,
+  onSaved,
+}: {
+  skill: import('../api/types').Skill;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [desc, setDesc] = useState(skill.desc);
+  const [classification, setClassification] = useState<'L1' | 'L2' | 'L3'>(skill.classification);
+  const [version, setVersion] = useState(skill.version);
+  const [tagsRaw, setTagsRaw] = useState(skill.tags.join(', '));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setBusy(true); setErr(null);
+    try {
+      const tags = tagsRaw.split(',').map((t) => t.trim()).filter(Boolean);
+      await api.patchSkillMeta(skill.ns, skill.name, { desc, classification, version, tags });
+      onSaved();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: 10, width: 500, maxWidth: '94vw', boxShadow: '0 20px 50px rgba(15,23,42,0.3)', border: '1px solid var(--border)' }}>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>编辑 Skill 信息</h3>
+          <button className="btn sm ghost" onClick={onClose} disabled={busy}>✕</button>
+        </div>
+        <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <label style={{ display: 'block' }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>描述</div>
+            <textarea
+              className="input"
+              rows={3}
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
+            />
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <label style={{ display: 'block' }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>密级</div>
+              <select
+                className="input"
+                value={classification}
+                onChange={(e) => setClassification(e.target.value as 'L1' | 'L2' | 'L3')}
+                style={{ width: '100%' }}
+              >
+                <option value="L1">L1 · 公开</option>
+                <option value="L2">L2 · 内部</option>
+                <option value="L3">L3 · 敏感</option>
+              </select>
+            </label>
+            <label style={{ display: 'block' }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>版本号</div>
+              <input
+                className="input"
+                value={version}
+                onChange={(e) => setVersion(e.target.value)}
+                placeholder="1.0.0"
+                style={{ width: '100%', fontFamily: 'monospace' }}
+              />
+            </label>
+          </div>
+          <label style={{ display: 'block' }}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>标签（逗号分隔）</div>
+            <input
+              className="input"
+              value={tagsRaw}
+              onChange={(e) => setTagsRaw(e.target.value)}
+              placeholder="sql, review, backend"
+              style={{ width: '100%' }}
+            />
+          </label>
+          {err && <div style={{ color: 'var(--red-text)', fontSize: 12.5 }}>{err}</div>}
+        </div>
+        <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn" onClick={onClose} disabled={busy}>取消</button>
+          <button className="btn primary" onClick={save} disabled={busy}>
+            {busy ? '保存中...' : '保存'}
+          </button>
         </div>
       </div>
     </div>

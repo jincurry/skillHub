@@ -175,6 +175,13 @@ export function Browse() {
     return out;
   }, [skills.data, selectedNs, selectedClass, selectedStatus, selectedTags, authorFilter, search, sort]);
 
+  const PAGE_SIZE = 24;
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [selectedNs, selectedClass, selectedStatus, selectedTags, authorFilter, search, sort]);
+
+  const paginated = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+
   const openSkill = (s: Skill) => navigate(`/skills/${s.ns}/${s.name}`);
   const toggle = (set: Set<string>, setter: (n: Set<string>) => void, id: string) => {
     const next = new Set(set);
@@ -315,6 +322,11 @@ export function Browse() {
 
           <div className="browse-meta">
             <span>共 <strong style={{ color: 'var(--text)' }} className="num">{filtered.length}</strong> 个 skill</span>
+            {totalPages > 1 && (
+              <span style={{ marginLeft: 8, color: 'var(--text-subtle)', fontSize: 12 }}>
+                第 {page + 1} / {totalPages} 页
+              </span>
+            )}
           </div>
 
           {skills.loading && <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>加载中...</div></div>}
@@ -322,7 +334,7 @@ export function Browse() {
 
           {!skills.loading && view === 'grid' && (
             <div className="skills-grid">
-              {filtered.map((s) => <SkillCard key={s.id} s={s} onOpen={openSkill} />)}
+              {paginated.map((s) => <SkillCard key={s.id} s={s} onOpen={openSkill} />)}
             </div>
           )}
           {!skills.loading && view === 'list' && (
@@ -339,7 +351,7 @@ export function Browse() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((s) => (
+                    {paginated.map((s) => (
                       <tr key={s.id} onClick={() => openSkill(s)}>
                         <td>
                           <div className="tbl-name">
@@ -361,6 +373,17 @@ export function Browse() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+          {!skills.loading && totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <button className="btn sm" disabled={page === 0} onClick={() => setPage(0)}>«</button>
+              <button className="btn sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>‹ 上一页</button>
+              <span style={{ fontSize: 12.5, color: 'var(--text-subtle)', minWidth: 80, textAlign: 'center' }}>
+                {page + 1} / {totalPages}
+              </span>
+              <button className="btn sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>下一页 ›</button>
+              <button className="btn sm" disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>»</button>
             </div>
           )}
         </div>

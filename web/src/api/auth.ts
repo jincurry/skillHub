@@ -29,3 +29,16 @@ export function getStoredUser(): Me | null {
 export function setStoredUser(user: Me): void {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
+
+// Returns the JWT expiry as a Date, or null if no token / unparseable.
+export function getTokenExpiry(): Date | null {
+  const tok = getToken();
+  if (!tok) return null;
+  try {
+    const payload = JSON.parse(atob(tok.split('.')[1]));
+    if (typeof payload.exp !== 'number') return null;
+    return new Date(payload.exp * 1000);
+  } catch {
+    return null;
+  }
+}

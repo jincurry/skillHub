@@ -409,3 +409,147 @@ type AIAssistTurn struct {
 	Role    string `json:"role"    binding:"required,oneof=user assistant"`
 	Content string `json:"content" binding:"required"`
 }
+
+// APIToken is the client-visible representation of a PAT. The raw token value
+// is only present in CreateAPITokenResponse (returned once at creation time).
+type APIToken struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Username  string    `json:"username"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt *time.Time `json:"expiresAt"` // nil = never
+	LastUsed  *time.Time `json:"lastUsed"`
+}
+
+type CreateAPITokenRequest struct {
+	Name      string `json:"name" binding:"required,min=1,max=80"`
+	ExpiresIn string `json:"expiresIn"` // "30d"|"90d"|"365d"|"" (never)
+}
+
+type CreateAPITokenResponse struct {
+	Token    string   `json:"token"` // raw token, shown once
+	APIToken APIToken `json:"apiToken"`
+}
+
+// Webhook is one registered HTTP callback endpoint.
+type Webhook struct {
+	ID        int64     `json:"id"`
+	Namespace string    `json:"ns"`      // "" = all namespaces
+	URL       string    `json:"url"`
+	HasSecret bool      `json:"hasSecret"`
+	Events    []string  `json:"events"`
+	Enabled   bool      `json:"enabled"`
+	CreatedBy string    `json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type CreateWebhookRequest struct {
+	Namespace string   `json:"ns"`
+	URL       string   `json:"url"    binding:"required,min=8,max=500"`
+	Secret    string   `json:"secret" binding:"max=256"`
+	Events    []string `json:"events"`
+	Enabled   *bool    `json:"enabled"`
+}
+
+type UpdateWebhookRequest struct {
+	URL     *string  `json:"url"     binding:"omitempty,min=8,max=500"`
+	Secret  *string  `json:"secret"  binding:"omitempty,max=256"`
+	Events  []string `json:"events"`
+	Enabled *bool    `json:"enabled"`
+}
+
+// WebhookDelivery is one delivery attempt recorded in webhook_deliveries.
+type WebhookDelivery struct {
+	ID          int64     `json:"id"`
+	WebhookID   int64     `json:"webhookId"`
+	Event       string    `json:"event"`
+	StatusCode  int       `json:"statusCode"`
+	Error       string    `json:"error,omitempty"`
+	DurationMs  int       `json:"durationMs"`
+	DeliveredAt time.Time `json:"deliveredAt"`
+}
+
+// WebhookPayload is the JSON body posted to each registered endpoint.
+type WebhookPayload struct {
+	ID        string          `json:"id"`        // unique delivery id
+	Event     string          `json:"event"`     // e.g. skill.published
+	Timestamp time.Time       `json:"timestamp"`
+	Data      WebhookSkillData `json:"data"`
+}
+
+type WebhookSkillData struct {
+	Skill  WebhookSkill  `json:"skill"`
+	Review WebhookReview `json:"review"`
+}
+
+type WebhookSkill struct {
+	Namespace      string   `json:"ns"`
+	Name           string   `json:"name"`
+	Version        string   `json:"version"`
+	Classification string   `json:"classification"`
+	Description    string   `json:"description"`
+	Tags           []string `json:"tags"`
+	// DownloadURL is the bundle endpoint callers can use to pull the files.
+	DownloadURL string `json:"downloadUrl"`
+}
+
+type WebhookReview struct {
+	ID          int64     `json:"id"`
+	DecidedBy   string    `json:"decidedBy"`
+	Decision    string    `json:"decision"`
+	Note        string    `json:"note,omitempty"`
+	DecidedAt   time.Time `json:"decidedAt"`
+}
+
+// ChangePasswordRequest body for PATCH /me/password.
+type ChangePasswordRequest struct {
+	OldPassword string `json:"oldPassword" binding:"required"`
+	NewPassword string `json:"newPassword" binding:"required,min=6"`
+}
+
+// AdminUser is the admin-facing view of a user row.
+type AdminUser struct {
+	Username   string    `json:"username"`
+	Display    string    `json:"display"`
+	Role       string    `json:"role"`
+	Team       string    `json:"team"`
+	Email      string    `json:"email"`
+	IsAdmin    bool      `json:"isAdmin"`
+	IsDisabled bool      `json:"isDisabled"`
+	JoinedAt   time.Time `json:"joinedAt"`
+}
+
+// CreateUserRequest is the body for POST /admin/users.
+type CreateUserRequest struct {
+	Username string `json:"username" binding:"required,min=2,max=32"`
+	Display  string `json:"display"`
+	Password string `json:"password" binding:"required,min=6"`
+	Role     string `json:"role"`
+	Team     string `json:"team"`
+	Email    string `json:"email"`
+	IsAdmin  bool   `json:"isAdmin"`
+}
+
+// AdminUpdateUserRequest is the body for PATCH /admin/users/:username.
+// All fields optional — only non-nil values are applied.
+type AdminUpdateUserRequest struct {
+	Display    *string `json:"display"`
+	Role       *string `json:"role"`
+	Team       *string `json:"team"`
+	Email      *string `json:"email"`
+	IsAdmin    *bool   `json:"isAdmin"`
+	IsDisabled *bool   `json:"isDisabled"`
+	Password   *string `json:"password"` // admin force-reset
+}
+
+// UpdateSkillMetaRequest is the body for PATCH /skills/:ns/:name.
+// All fields optional — only non-nil values are applied.
+type UpdateSkillMetaRequest struct {
+	Description    *string  `json:"desc"`
+	LongDesc       *string  `json:"longDesc"`
+	Icon           *string  `json:"icon"`
+	IconClass      *string  `json:"iconClass"`
+	Classification *string  `json:"classification"`
+	Version        *string  `json:"version"`
+	Tags           []string `json:"tags"` // nil = unchanged; [] = clear
+}

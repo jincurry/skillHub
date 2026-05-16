@@ -11,6 +11,7 @@ import type { AuditLog, Me } from '../api/types';
 import { AvatarUploadModal } from '../components/AvatarUploadModal';
 import { CoverPicker } from '../components/CoverPicker';
 import { coverBackground, avatarFallbackGradient } from '../lib/profile';
+import { TokensPanel } from '../components/TokensPanel';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -187,7 +188,7 @@ function Achievement({ icon, name, desc, earned, rare, progress, hint }: {
 
 export function Profile() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<'overview' | 'skills' | 'subscriptions' | 'activity' | 'achievements' | 'settings'>('overview');
+  const [tab, setTab] = useState<'overview' | 'skills' | 'subscriptions' | 'activity' | 'achievements' | 'settings' | 'tokens'>('overview');
   const subs = useAsync(() => api.listMySubscriptions(), []);
   const [editing, setEditing] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
@@ -384,6 +385,7 @@ export function Profile() {
           { id: 'activity', label: '动态', count: activity.data?.length ?? 0 },
           { id: 'achievements', label: '成就', count: achievements.data?.length ?? 0 },
           { id: 'settings', label: '设置' },
+          { id: 'tokens', label: 'API Token' },
         ] as const).map((it) => (
           <div key={it.id} onClick={() => setTab(it.id)} style={{
             padding: '10px 0', cursor: 'pointer', fontSize: 13.5,
@@ -603,7 +605,7 @@ export function Profile() {
 
       {/* settings tab --------------------------------------------------- */}
       {tab === 'settings' && (
-        <div style={{ maxWidth: 560 }}>
+        <div style={{ maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card">
             <div className="card-header">
               <h3 className="card-title">基本信息</h3>
@@ -654,6 +656,19 @@ export function Profile() {
           onClose={() => setCoverOpen(false)}
           onUpdated={(next: Me) => me.set(next)}
         />
+      )}
+
+      {tab === 'settings' && <ChangePasswordCard />}
+
+      {/* tokens tab --------------------------------------------------- */}
+      {tab === 'tokens' && (
+        <div style={{ maxWidth: 640 }}>
+          <div className="card">
+            <div className="card-body">
+              <TokensPanel />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -754,6 +769,67 @@ function EditProfileModal({
           <button className="btn" onClick={onClose} disabled={busy}>取消</button>
           <button className="btn primary" onClick={save} disabled={busy}>
             {busy ? '保存中...' : '保存修改'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Password change card (shown in settings tab, max-width 560)
+// ---------------------------------------------------------------------------
+function ChangePasswordCard() {
+  const [oldPwd, setOldPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+
+  async function submit() {
+    if (newPwd.length < 6) { setErr('新密码至少 6 位'); return; }
+    if (newPwd !== confirm) { setErr('两次输入的新密码不一致'); return; }
+    setBusy(true); setErr(null); setOk(false);
+    try {
+      await api.changePassword(oldPwd, newPwd);
+      setOk(true);
+      setOldPwd(''); setNewPwd(''); setConfirm('');
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card" style={{ maxWidth: 560 }}>
+      <div className="card-header">
+        <h3 className="card-title">修改密码</h3>
+      </div>
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {[
+          { label: '当前密码', value: oldPwd, set: setOldPwd },
+          { label: '新密码（至少 6 位）', value: newPwd, set: setNewPwd },
+          { label: '确认新密码', value: confirm, set: setConfirm },
+        ].map((f) => (
+          <div key={f.label}>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>{f.label}</div>
+            <input
+              className="input"
+              type="password"
+              value={f.value}
+              onChange={(e) => f.set(e.target.value)}
+              style={{ width: '100%' }}
+              autoComplete="off"
+            />
+          </div>
+        ))}
+        {err && <div style={{ color: 'var(--red-text)', fontSize: 12.5 }}>{err}</div>}
+        {ok && <div style={{ color: 'var(--green-text)', fontSize: 12.5 }}>密码已修改成功</div>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn primary" onClick={submit} disabled={busy || !oldPwd || !newPwd || !confirm}>
+            {busy ? '保存中...' : '保存新密码'}
           </button>
         </div>
       </div>
