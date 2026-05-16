@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jincurry/skillhub/server/internal/auth"
 	"github.com/jincurry/skillhub/server/internal/config"
+	"github.com/jincurry/skillhub/server/internal/middleware"
 	"github.com/jincurry/skillhub/server/internal/model"
 	"github.com/jincurry/skillhub/server/internal/notifier"
 	"github.com/jincurry/skillhub/server/internal/store"
@@ -41,7 +42,7 @@ func New(cfg config.Config, st *store.Store) *Server {
 
 func (s *Server) Routes() *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery(), corsMiddleware())
+	r.Use(middleware.StructuredLogger(), gin.Recovery(), corsMiddleware(), middleware.RateLimit(middleware.DefaultRateLimitConfig()))
 
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
 
