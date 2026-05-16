@@ -206,6 +206,10 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 				c.AbortWithStatusJSON(401, gin.H{"error": "invalid or expired api token"})
 				return
 			}
+			if disabled, _ := s.store.IsUserDisabled(username); disabled {
+				c.AbortWithStatusJSON(403, gin.H{"error": "account is disabled"})
+				return
+			}
 			c.Set("user", username)
 			c.Next()
 			return

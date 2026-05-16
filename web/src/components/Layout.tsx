@@ -8,6 +8,7 @@ import { CreateSkillModal } from './CreateSkillModal';
 import { NotificationBell } from './NotificationBell';
 import { ThemeToggle } from './ThemeToggle';
 import { CommandPalette, openCommandPalette } from './CommandPalette';
+import { SessionExpiryBanner } from './SessionExpiryBanner';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { useUnreadCount } from '../lib/notifStore';
@@ -190,6 +191,7 @@ export function Layout() {
       </div>
       <CreateSkillModal />
       <CommandPalette />
+      <SessionExpiryBanner />
     </div>
   );
 }
