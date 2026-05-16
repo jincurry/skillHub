@@ -112,6 +112,12 @@ export function Reviews() {
     return filter === 'all' ? visibleAll : visibleAll.filter((r) => r.status === filter);
   }, [visibleAll, filter]);
 
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [filter, mineOnly]);
+  const paginated = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+
   return (
     <div className="content-inner">
       <div className="page-header">
@@ -208,7 +214,7 @@ export function Reviews() {
             <tbody>
               {all.loading && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-subtle)' }}>加载中...</td></tr>}
               {all.error && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--red-text)' }}>{all.error.message}</td></tr>}
-              {filtered.map((r) => (
+              {paginated.map((r) => (
                 <tr key={r.id} onClick={() => navigate(`/reviews/${r.id}`)}>
                   <td>
                     <div className="tbl-name">
@@ -243,6 +249,17 @@ export function Reviews() {
             </tbody>
           </table>
         </div>
+        {!all.loading && totalPages > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: '12px 0' }}>
+            <button className="btn sm" disabled={page === 0} onClick={() => setPage(0)}>«</button>
+            <button className="btn sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>‹</button>
+            <span style={{ fontSize: 12.5, color: 'var(--text-subtle)', minWidth: 80, textAlign: 'center' }}>
+              {page + 1} / {totalPages}（共 {filtered.length} 条）
+            </span>
+            <button className="btn sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>›</button>
+            <button className="btn sm" disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>»</button>
+          </div>
+        )}
       </div>
     </div>
   );

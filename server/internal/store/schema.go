@@ -232,4 +232,48 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 CREATE INDEX IF NOT EXISTS idx_subs_skill ON subscriptions(ns, skill_name);
 CREATE INDEX IF NOT EXISTS idx_subs_user  ON subscriptions(username);
+
+-- api_tokens: long-lived machine tokens for external systems (PAT).
+-- The raw token is never stored; only its SHA-256 hex is kept so a leaked DB
+-- doesn't expose usable credentials. Token format: "skillhub_<32-hex-chars>".
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT    NOT NULL,                -- human label e.g. "my-ext-system"
+  token_hash TEXT    NOT NULL UNIQUE,         -- SHA-256(raw_token) hex
+  username   TEXT    NOT NULL,                -- token owner
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME,                        -- NULL = never expires
+  last_used  DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_tokens_user ON api_tokens(username);
+
+-- webhooks: HTTP callbacks fired when skill lifecycle events occur.
+-- ns='' means "fire for every namespace"; otherwise only events in that ns.
+-- events is a comma-separated list of event names (skill.published, skill.yanked,
+-- skill.deprecated).  secret is used for HMAC-SHA256 request signing.
+CREATE TABLE IF NOT EXISTS webhooks (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  ns         TEXT    NOT NULL DEFAULT '',
+  url        TEXT    NOT NULL,
+  secret     TEXT    NOT NULL DEFAULT '',
+  events     TEXT    NOT NULL DEFAULT 'skill.published',
+  enabled    INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT    NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_webhooks_ns ON webhooks(ns);
+
+-- webhook_deliveries: delivery log for auditing and retry decisions.
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  webhook_id  INTEGER NOT NULL,
+  event       TEXT    NOT NULL,
+  payload     TEXT    NOT NULL,
+  status_code INTEGER NOT NULL DEFAULT 0,
+  error       TEXT    NOT NULL DEFAULT '',
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  delivered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_wh_del_webhook ON webhook_deliveries(webhook_id);
 `
