@@ -436,7 +436,12 @@ func (s *Store) DecideReview(id int64, decision, note, actor string) error {
 }
 
 func (s *Store) ListComments(reviewID int64) ([]model.Comment, error) {
-	rows, err := s.DB.Query(`SELECT id,review_id,author,body,created_at FROM comments WHERE review_id=? ORDER BY created_at ASC`, reviewID)
+	rows, err := s.DB.Query(
+		`SELECT id,review_id,author,body,created_at,file_path,line_no,side
+		   FROM comments WHERE review_id=?
+		  ORDER BY file_path ASC, line_no ASC, created_at ASC`,
+		reviewID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -444,7 +449,7 @@ func (s *Store) ListComments(reviewID int64) ([]model.Comment, error) {
 	var out []model.Comment
 	for rows.Next() {
 		var c model.Comment
-		if err := rows.Scan(&c.ID, &c.ReviewID, &c.Author, &c.Body, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.ReviewID, &c.Author, &c.Body, &c.CreatedAt, &c.FilePath, &c.LineNo, &c.Side); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -452,14 +457,38 @@ func (s *Store) ListComments(reviewID int64) ([]model.Comment, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) AddComment(reviewID int64, author, body string) (*model.Comment, error) {
+// CommentAnchor identifies an optional file/line anchor for an inline
+// review comment. Empty FilePath ⇒ general (non-inline) comment.
+type CommentAnchor struct {
+	FilePath string
+	LineNo   int
+	Side     string // "base" or "head"
+}
+
+func (s *Store) AddComment(reviewID int64, author, body string, anchor CommentAnchor) (*model.Comment, error) {
+	// Normalise: an inline anchor needs all three fields. If any is
+	// missing or invalid, store a general comment — gives the API caller
+	// a forgiving "best-effort inline" semantic.
+	side := anchor.Side
+	if side != "base" && side != "head" {
+		side = ""
+	}
+	if anchor.FilePath == "" || anchor.LineNo <= 0 || side == "" {
+		anchor = CommentAnchor{}
+	} else {
+		anchor.Side = side
+	}
+
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	res, err := tx.Exec(`INSERT INTO comments(review_id,author,body) VALUES(?,?,?)`, reviewID, author, body)
+	res, err := tx.Exec(
+		`INSERT INTO comments(review_id,author,body,file_path,line_no,side) VALUES(?,?,?,?,?,?)`,
+		reviewID, author, body, anchor.FilePath, anchor.LineNo, anchor.Side,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -486,9 +515,11 @@ func (s *Store) AddComment(reviewID int64, author, body string) (*model.Comment,
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	row := s.DB.QueryRow(`SELECT id,review_id,author,body,created_at FROM comments WHERE id=?`, id)
+	row := s.DB.QueryRow(
+		`SELECT id,review_id,author,body,created_at,file_path,line_no,side FROM comments WHERE id=?`, id,
+	)
 	var c model.Comment
-	if err := row.Scan(&c.ID, &c.ReviewID, &c.Author, &c.Body, &c.CreatedAt); err != nil {
+	if err := row.Scan(&c.ID, &c.ReviewID, &c.Author, &c.Body, &c.CreatedAt, &c.FilePath, &c.LineNo, &c.Side); err != nil {
 		return nil, err
 	}
 	return &c, nil

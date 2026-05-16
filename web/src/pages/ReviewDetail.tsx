@@ -7,7 +7,7 @@ import {
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { languageFor } from '../lib/files';
-import type { ReviewFile } from '../api/types';
+import type { ReviewFile, Comment, Me } from '../api/types';
 
 // Visual mapping for the change-kind sidebar badge. Kept tight so the
 // sidebar can be narrow without truncating.
@@ -286,6 +286,11 @@ export function ReviewDetail() {
                       <div style={{ fontSize: 12.5, marginBottom: 2 }}>
                         <span className="mono" style={{ fontWeight: 600 }}>@{c.author}</span>
                         <span style={{ color: 'var(--text-faint)', marginLeft: 6 }}>· {new Date(c.createdAt).toLocaleString()}</span>
+                        {c.filePath && (
+                          <span className="mono" style={{ marginLeft: 8, fontSize: 11, padding: '1px 5px', borderRadius: 3, background: 'var(--bg-muted)', color: 'var(--text-subtle)' }}>
+                            {c.filePath}:{c.lineNo} ({c.side})
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>{c.body}</div>
                     </div>
@@ -458,7 +463,7 @@ export function ReviewDetail() {
       )}
 
       {tab === 'changes' && (
-        <ChangesView files={files} />
+        <ChangesView files={files} comments={comments} reviewId={id} me={me} />
       )}
     </div>
   );
@@ -466,9 +471,16 @@ export function ReviewDetail() {
 
 // ChangesView is the diff browser. Left rail lists every snapshot row with a
 // status letter; right pane shows a Monaco diff editor for the selected file.
-// We take an `useAsync` result instead of raw data so we can surface load /
-// error states inline.
-function ChangesView({ files }: { files: ReturnType<typeof useAsync<ReviewFile[]>> }) {
+// Inline comments for the active file are shown below the editor with an input
+// to add new ones.
+interface ChangesViewProps {
+  files: ReturnType<typeof useAsync<ReviewFile[]>>;
+  comments: ReturnType<typeof useAsync<Comment[]>>;
+  reviewId: string;
+  me: ReturnType<typeof useAsync<Me>>;
+}
+
+function ChangesView({ files, comments, reviewId, me }: ChangesViewProps) {
   const list = files.data ?? [];
   // Auto-pick the first non-unchanged file once data lands. Falls back to the
   // first file overall if everything is unchanged (rare but possible).
@@ -482,6 +494,43 @@ function ChangesView({ files }: { files: ReturnType<typeof useAsync<ReviewFile[]
   }, [defaultPath, activePath]);
 
   const active = list.find((f) => f.path === activePath) ?? null;
+
+  // Inline comments for the active file, sorted by line number.
+  const fileComments = useMemo(() => {
+    if (!activePath || !comments.data) return [];
+    return comments.data
+      .filter((c) => c.filePath === activePath)
+      .sort((a, b) => (a.lineNo ?? 0) - (b.lineNo ?? 0));
+  }, [activePath, comments.data]);
+
+  // Comment count per file for the sidebar badge.
+  const commentCountByFile = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const c of comments.data ?? []) {
+      if (c.filePath) map[c.filePath] = (map[c.filePath] ?? 0) + 1;
+    }
+    return map;
+  }, [comments.data]);
+
+  // Inline comment form state.
+  const [inlineBody, setInlineBody] = useState('');
+  const [inlineLine, setInlineLine] = useState('');
+  const [inlineSide, setInlineSide] = useState<'base' | 'head'>('head');
+  const [inlinePosting, setInlinePosting] = useState(false);
+
+  const submitInline = async () => {
+    const lineNo = parseInt(inlineLine, 10);
+    if (!inlineBody.trim() || !activePath || isNaN(lineNo) || lineNo <= 0) return;
+    setInlinePosting(true);
+    try {
+      await api.addComment(reviewId, inlineBody.trim(), { filePath: activePath, lineNo, side: inlineSide });
+      setInlineBody('');
+      setInlineLine('');
+      comments.reload();
+    } finally {
+      setInlinePosting(false);
+    }
+  };
 
   if (files.loading) {
     return <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>加载变更...</div></div>;
@@ -519,6 +568,7 @@ function ChangesView({ files }: { files: ReturnType<typeof useAsync<ReviewFile[]
           {list.map((f) => {
             const tag = KIND_TAG[f.changeKind];
             const isActive = f.path === activePath;
+            const cc = commentCountByFile[f.path] ?? 0;
             return (
               <div
                 key={f.path}
@@ -544,12 +594,18 @@ function ChangesView({ files }: { files: ReturnType<typeof useAsync<ReviewFile[]
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   textDecoration: f.changeKind === 'deleted' ? 'line-through' : 'none',
                 }}>{f.path}</span>
+                {cc > 0 && (
+                  <span style={{
+                    fontSize: 10, background: 'var(--primary)', color: '#fff',
+                    borderRadius: 8, padding: '1px 5px', fontWeight: 600, flexShrink: 0,
+                  }}>{cc}</span>
+                )}
               </div>
             );
           })}
         </div>
 
-        {/* Diff editor pane */}
+        {/* Diff editor pane + inline comments */}
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           {active ? (
             <>
@@ -565,7 +621,7 @@ function ChangesView({ files }: { files: ReturnType<typeof useAsync<ReviewFile[]
                 <div style={{ flex: 1 }} />
                 <DiffStat base={active.baseContent} next={active.newContent} />
               </div>
-              <div style={{ flex: 1, minHeight: 480, background: '#1e1e1e' }}>
+              <div style={{ flex: 1, minHeight: 400, background: '#1e1e1e' }}>
                 <DiffEditor
                   key={active.path}
                   height="100%"
@@ -583,6 +639,78 @@ function ChangesView({ files }: { files: ReturnType<typeof useAsync<ReviewFile[]
                     scrollBeyondLastLine: false,
                   }}
                 />
+              </div>
+
+              {/* Inline comments section */}
+              <div style={{ borderTop: '1px solid var(--border)', padding: '12px 14px', background: 'var(--bg)' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
+                  行内评论 {fileComments.length > 0 && <span className="count-pill" style={{ marginLeft: 4 }}>{fileComments.length}</span>}
+                </div>
+
+                {fileComments.length === 0 && (
+                  <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 10 }}>该文件暂无行内评论</div>
+                )}
+
+                {fileComments.map((c) => (
+                  <div key={c.id} style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                    <div className="avatar sm bg-2" style={{ width: 24, height: 24, fontSize: 11, flexShrink: 0 }}>
+                      {c.author[0]?.toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11.5 }}>
+                        <span className="mono" style={{ fontWeight: 600 }}>@{c.author}</span>
+                        <span style={{ color: 'var(--text-faint)', marginLeft: 6 }}>L{c.lineNo} · {c.side}</span>
+                        <span style={{ color: 'var(--text-faint)', marginLeft: 6 }}>· {new Date(c.createdAt).toLocaleString()}</span>
+                      </div>
+                      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 2 }}>{c.body}</div>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Add inline comment form */}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: fileComments.length > 0 ? 6 : 0, paddingTop: fileComments.length > 0 ? 10 : 0, borderTop: fileComments.length > 0 ? '1px solid var(--border)' : 'none' }}>
+                  <div className="avatar sm bg-1" style={{ width: 24, height: 24, fontSize: 11, flexShrink: 0 }}>
+                    {(me.data?.display ?? me.data?.username ?? '?').slice(0, 1).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        className="input"
+                        type="number"
+                        min={1}
+                        placeholder="行号"
+                        value={inlineLine}
+                        onChange={(e) => setInlineLine(e.target.value)}
+                        style={{ width: 70, fontSize: 12 }}
+                      />
+                      <select
+                        className="input"
+                        value={inlineSide}
+                        onChange={(e) => setInlineSide(e.target.value as 'base' | 'head')}
+                        style={{ width: 80, fontSize: 12 }}
+                      >
+                        <option value="head">head</option>
+                        <option value="base">base</option>
+                      </select>
+                    </div>
+                    <textarea
+                      className="input"
+                      placeholder="添加行内评论..."
+                      value={inlineBody}
+                      onChange={(e) => setInlineBody(e.target.value)}
+                      style={{ padding: '6px 10px', height: 48, resize: 'vertical', width: '100%', fontSize: 12 }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        className="btn sm primary"
+                        disabled={inlinePosting || !inlineBody.trim() || !inlineLine || parseInt(inlineLine) <= 0}
+                        onClick={submitInline}
+                      >
+                        <IconChat size={11} /> {inlinePosting ? '发表中...' : '发表'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </>
           ) : (

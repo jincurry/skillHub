@@ -133,6 +133,10 @@ export interface Comment {
   author: string;
   body: string;
   createdAt: string;
+  // Inline anchor (empty filePath = general comment).
+  filePath?: string;
+  lineNo?: number;
+  side?: 'base' | 'head' | '';
 }
 
 export interface AuditLog {

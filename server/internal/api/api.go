@@ -842,7 +842,11 @@ func (s *Server) addComment(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	cm, err := s.store.AddComment(id, s.currentUser(c), req.Body)
+	cm, err := s.store.AddComment(id, s.currentUser(c), req.Body, store.CommentAnchor{
+		FilePath: req.FilePath,
+		LineNo:   req.LineNo,
+		Side:     req.Side,
+	})
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return

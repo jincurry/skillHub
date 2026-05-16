@@ -31,6 +31,16 @@ func TestMigrationsApplyAndAreIdempotent(t *testing.T) {
 		t.Fatalf("expected idx_audit_actor_created to exist after migrate: %v", err)
 	}
 
+	// Snapshot count before closing, then reopen and verify it's stable —
+	// that's the actual "idempotent" property we care about, regardless
+	// of how many built-in migrations ship.
+	var first int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&first); err != nil {
+		t.Fatalf("count after first open: %v", err)
+	}
+	if first == 0 {
+		t.Fatalf("expected at least one recorded migration after first open, got 0")
+	}
 	s.Close()
 
 	// Reopen — should be a no-op for migrations.
@@ -39,12 +49,12 @@ func TestMigrationsApplyAndAreIdempotent(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer s2.Close()
-	var count int
-	if err := s2.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
-		t.Fatalf("count: %v", err)
+	var second int
+	if err := s2.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&second); err != nil {
+		t.Fatalf("count after second open: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("expected exactly 1 recorded migration, got %d", count)
+	if first != second {
+		t.Fatalf("migration count changed across reopens: first=%d second=%d", first, second)
 	}
 }
 

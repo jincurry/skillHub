@@ -247,8 +247,8 @@ export const api = {
       body: JSON.stringify({ decision, note: note ?? '' }),
     }),
   listComments: (id: number | string) => request<Comment[]>(`/reviews/${id}/comments`),
-  addComment: (id: number | string, body: string) =>
-    request<Comment>(`/reviews/${id}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
+  addComment: (id: number | string, body: string, anchor?: { filePath: string; lineNo: number; side: 'base' | 'head' }) =>
+    request<Comment>(`/reviews/${id}/comments`, { method: 'POST', body: JSON.stringify({ body, ...anchor }) }),
   addReviewer: (id: number | string, username: string) =>
     request<Review>(`/reviews/${id}/reviewers`, {
       method: 'POST', body: JSON.stringify({ username }),

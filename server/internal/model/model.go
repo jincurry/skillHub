@@ -95,6 +95,13 @@ type Comment struct {
 	Author    string    `json:"author"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"createdAt"`
+	// FilePath, LineNo, Side together anchor an inline review comment to
+	// a specific spot in the diff snapshot. FilePath="" means a general
+	// comment. Side ∈ {"", "base", "head"} ("base" = old/left, "head" =
+	// new/right of the diff).
+	FilePath string `json:"filePath,omitempty"`
+	LineNo   int    `json:"lineNo,omitempty"`
+	Side     string `json:"side,omitempty"`
 }
 
 type AuditLog struct {
@@ -286,6 +293,11 @@ type DecisionRequest struct {
 
 type CommentRequest struct {
 	Body string `json:"body" binding:"required,min=1,max=4000"`
+	// Optional: anchor this comment to a file + line in the diff snapshot.
+	// All three must be supplied together; otherwise the comment is general.
+	FilePath string `json:"filePath"`
+	LineNo   int    `json:"lineNo"`
+	Side     string `json:"side"` // "base" or "head"
 }
 
 type CreateSkillRequest struct {
