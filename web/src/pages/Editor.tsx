@@ -12,6 +12,7 @@ import { AIAssistDrawer, type EditorBridge } from '../components/AIAssistDrawer'
 import { runAssist, type AssistHandle } from '../lib/aiAssist';
 import { languageFor } from '../lib/files';
 import { renderMarkdown } from '../lib/markdown';
+import { estimateTokens, fmtTokens } from '../lib/tokens';
 
 // --------- helpers --------------------------------------------------------
 
@@ -337,6 +338,212 @@ function FrontmatterField({
       )}
     </label>
   );
+}
+
+// --------- tags chip field -----------------------------------------------
+
+function TagsField({
+  upstream,
+  readOnly,
+  onCommit,
+}: {
+  upstream: string;
+  readOnly: boolean;
+  onCommit: (key: string, val: string) => void;
+}) {
+  const [input, setInput] = useState('');
+  const tags = upstream ? upstream.split(',').map((t) => t.trim()).filter(Boolean) : [];
+
+  function addTag(raw: string) {
+    const t = raw.trim();
+    if (!t || tags.includes(t)) { setInput(''); return; }
+    onCommit('tags', [...tags, t].join(','));
+    setInput('');
+  }
+  function removeTag(tag: string) {
+    onCommit('tags', tags.filter((t) => t !== tag).join(','));
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12 }}>
+      <span style={{ width: 76, flexShrink: 0, color: 'var(--text-muted)', textAlign: 'right', paddingTop: 4 }}>tags</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: tags.length ? 4 : 0 }}>
+          {tags.map((t) => (
+            <span key={t} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              padding: '1px 6px', borderRadius: 4,
+              background: 'rgba(79,70,229,0.08)', color: 'var(--primary)',
+              fontSize: 11, fontWeight: 500,
+            }}>
+              {t}
+              {!readOnly && (
+                <button type="button" onClick={() => removeTag(t)} style={{
+                  border: 'none', background: 'transparent', cursor: 'pointer',
+                  padding: 0, lineHeight: 1, color: 'inherit', opacity: 0.7, fontSize: 13,
+                }}>×</button>
+              )}
+            </span>
+          ))}
+        </div>
+        {!readOnly && (
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(input); }
+              if (e.key === 'Backspace' && !input && tags.length > 0) removeTag(tags[tags.length - 1]);
+            }}
+            onBlur={() => { if (input.trim()) addTag(input); }}
+            placeholder={tags.length ? '继续添加…' : '输入后按 Enter 或逗号添加标签'}
+            style={{
+              fontSize: 12, padding: '3px 8px', width: '100%',
+              background: 'var(--bg)', border: '1px solid var(--border)',
+              borderRadius: 4, color: 'var(--text)',
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --------- quick-open file picker ----------------------------------------
+
+function FilePicker({
+  files,
+  onPick,
+  onClose,
+}: {
+  files: SkillFile[];
+  onPick: (path: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [sel, setSel] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const filtered = useMemo(() => {
+    if (!query) return files.slice(0, 20);
+    const q = query.toLowerCase();
+    return files
+      .map((f) => ({ f, score: f.path.toLowerCase().indexOf(q) }))
+      .filter((x) => x.score >= 0)
+      .sort((a, b) => a.score - b.score)
+      .map((x) => x.f)
+      .slice(0, 20);
+  }, [files, query]);
+
+  useEffect(() => { setSel(0); }, [query]);
+
+  function pick(path: string) { onPick(path); onClose(); }
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(s + 1, filtered.length - 1)); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(s - 1, 0)); return; }
+      if (e.key === 'Enter') { e.preventDefault(); if (filtered[sel]) pick(filtered[sel].path); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, sel]);
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)',
+      display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+      zIndex: 200, paddingTop: '12vh',
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: 'var(--bg)', borderRadius: 10, width: 480, maxWidth: '92vw',
+        boxShadow: '0 20px 50px rgba(15,23,42,0.28)', border: '1px solid var(--border)', overflow: 'hidden',
+      }}>
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="输入文件名快速跳转…"
+          style={{
+            width: '100%', padding: '12px 16px', fontSize: 14, border: 'none',
+            borderBottom: '1px solid var(--border)', background: 'var(--bg)',
+            color: 'var(--text)', outline: 'none', boxSizing: 'border-box',
+          }}
+        />
+        <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-faint)' }}>没有匹配文件</div>
+          )}
+          {filtered.map((f, i) => (
+            <div
+              key={f.path}
+              onClick={() => pick(f.path)}
+              onMouseEnter={() => setSel(i)}
+              style={{
+                padding: '8px 16px', fontSize: 13, cursor: 'pointer',
+                background: i === sel ? 'var(--bg-hover)' : 'transparent',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}
+            >
+              <span>{iconFor(f.path)}</span>
+              <span style={{ flex: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5 }}>{f.path}</span>
+              {f.size != null && (
+                <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{f.size}B</span>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{
+          padding: '7px 16px', borderTop: '1px solid var(--border)',
+          fontSize: 11, color: 'var(--text-faint)', display: 'flex', gap: 14,
+        }}>
+          <span>↑↓ 移动</span><span>↵ 打开</span><span>Esc 关闭</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --------- line diff ---------------------------------------------------------
+
+type DiffLine = { t: ' ' | '+' | '-' | '…'; s: string };
+
+function computeDiff(before: string, after: string, ctx = 3): DiffLine[] {
+  const A = before ? before.split('\n') : [];
+  const B = after ? after.split('\n') : [];
+  // Cap for perf; skill files are tiny so this never triggers in practice.
+  const m = Math.min(A.length, 400), n = Math.min(B.length, 400);
+  const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+  for (let i = m - 1; i >= 0; i--)
+    for (let j = n - 1; j >= 0; j--)
+      dp[i][j] = A[i] === B[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+
+  const raw: DiffLine[] = [];
+  let i = 0, j = 0;
+  while (i < m || j < n) {
+    if (i < m && j < n && A[i] === B[j]) { raw.push({ t: ' ', s: A[i] }); i++; j++; }
+    else if (j < n && (i >= m || dp[i + 1][j] <= dp[i][j + 1])) { raw.push({ t: '+', s: B[j] }); j++; }
+    else { raw.push({ t: '-', s: A[i] }); i++; }
+  }
+
+  // Show only lines within ctx-range of a change.
+  const out: DiffLine[] = [];
+  let skip = 0;
+  for (let k = 0; k < raw.length; k++) {
+    const nearChange = raw
+      .slice(Math.max(0, k - ctx), Math.min(raw.length, k + ctx + 1))
+      .some((l) => l.t !== ' ');
+    if (!nearChange) { skip++; continue; }
+    if (skip > 0) { out.push({ t: '…', s: `⋯ ${skip} 行未更改` }); skip = 0; }
+    out.push(raw[k]);
+  }
+  if (skip > 0) out.push({ t: '…', s: `⋯ ${skip} 行未更改` });
+  return out;
 }
 
 // --------- file tree ------------------------------------------------------
@@ -683,6 +890,21 @@ export function Editor() {
   // banner instead of silently overwriting either side.
   const [pendingRestore, setPendingRestore] = useState<Record<string, { content: string; ts: number }>>({});
 
+  // Quick-open file picker (Cmd+P).
+  const [showFilePicker, setShowFilePicker] = useState(false);
+
+  // Per-path content as last fetched from server. Used for diff preview in
+  // the submit modal so the user can see exactly what changed.
+  const [serverSnapshots, setServerSnapshots] = useState<Record<string, string>>({});
+  // Path currently expanded in the submit-modal diff preview. null = all collapsed.
+  const [showDiffFor, setShowDiffFor] = useState<string | null>(null);
+
+  // New-file dialog mode: 'template' (text editor) vs 'upload' (local file).
+  const [newFileMode, setNewFileMode] = useState<'template' | 'upload'>('template');
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
+
   // AI 起草提交说明：直接流式写入 submitNote，不走抽屉。
   const [draftingNote, setDraftingNote] = useState(false);
   const [draftErr, setDraftErr] = useState<string | null>(null);
@@ -717,6 +939,7 @@ export function Editor() {
       .then((f) => {
         const server = f.content ?? '';
         setBuffers((b) => ({ ...b, [activePath]: { content: server, dirty: false } }));
+        setServerSnapshots((s) => ({ ...s, [activePath]: server }));
         // Check for a local draft backup the user might want to restore.
         try {
           const raw = localStorage.getItem(draftKeyFor(ns, name, activePath));
@@ -769,6 +992,21 @@ export function Editor() {
     const myRole = (members.data ?? []).find((m) => m.username === me.data!.username)?.role;
     return myRole === 'owner' || myRole === 'maintainer';
   }, [skill.data, me.data, members.data]);
+
+  // Total estimated token count for the whole bundle. Loaded buffers are
+  // measured directly; unloaded files fall back to a byte-based estimate.
+  const totalTokens = useMemo(() => {
+    const counted = new Set<string>();
+    let total = 0;
+    for (const [p, b] of Object.entries(buffers)) {
+      total += estimateTokens(b.content);
+      counted.add(p);
+    }
+    for (const f of (files.data ?? [])) {
+      if (!counted.has(f.path)) total += Math.ceil((f.size ?? 0) * 0.25);
+    }
+    return total;
+  }, [buffers, files.data]);
 
   const tree = useMemo(() => buildTree(files.data ?? []), [files.data]);
   const activeBuf = activePath ? buffers[activePath] : undefined;
@@ -1322,6 +1560,65 @@ export function Editor() {
     }
   }
 
+  async function discardAll() {
+    if (dirtyPaths.size === 0) return;
+    if (!window.confirm(`放弃 ${dirtyPaths.size} 个文件的未保存修改？将恢复为上次保存状态。`)) return;
+    const paths = Array.from(dirtyPaths);
+    paths.forEach((p) => {
+      try { localStorage.removeItem(draftKeyFor(ns, name, p)); } catch { /* ignore */ }
+    });
+    setBuffers((b) => {
+      const next: typeof b = {};
+      for (const [p, buf] of Object.entries(b)) {
+        if (!buf.dirty) next[p] = buf;
+        // dirty paths are dropped; they re-load from server on next activation
+      }
+      return next;
+    });
+    // Re-activate the current file so Monaco syncs to the freshly-cleared buffer.
+    if (activePath && dirtyPaths.has(activePath)) {
+      const cur = activePath;
+      setActivePath(null);
+      setTimeout(() => setActivePath(cur), 0);
+    }
+    setMsg(`已放弃 ${paths.length} 个文件的修改`);
+  }
+
+  async function uploadLocalFiles() {
+    if (uploadFiles.length === 0) { setUploadErr('请选择文件'); return; }
+    setUploadBusy(true);
+    setUploadErr(null);
+    let created = 0;
+    const errors: string[] = [];
+    for (const file of uploadFiles) {
+      const path = file.name;
+      if ((files.data ?? []).some((f) => f.path === path)) {
+        errors.push(`${path} 已存在`);
+        continue;
+      }
+      try {
+        const text = await file.text();
+        const f = await api.putFile(ns, name, path, text);
+        setBuffers((b) => ({ ...b, [path]: { content: f.content ?? text, dirty: false } }));
+        created++;
+      } catch (e) {
+        errors.push(`${path}: ${(e as Error).message}`);
+      }
+    }
+    await files.reload();
+    if (errors.length > 0) setUploadErr(errors.join('\n'));
+    else {
+      setShowNewFile(false);
+      setUploadFiles([]);
+      setNewFileMode('template');
+    }
+    if (created > 0) {
+      setMsg(`已上传 ${created} 个文件`);
+      if (uploadFiles.length === 1) openFile(uploadFiles[0].name);
+    }
+    setUploadBusy(false);
+  }
+
   /**
    * Rename / move a file in the bundle. We keep the in-memory buffer (with
    * dirty state preserved) and rekey tabs so the user doesn't lose work.
@@ -1510,6 +1807,16 @@ export function Editor() {
           >
             <IconSparkles size={14} /> AI 助手
           </button>
+          {anyDirty && (
+            <button
+              className="btn ghost"
+              onClick={discardAll}
+              title="放弃所有未保存修改，恢复到上次保存状态"
+              style={{ color: 'var(--red-text)', borderColor: 'var(--red-border, rgba(239,68,68,0.3))' }}
+            >
+              放弃修改 ({dirtyPaths.size})
+            </button>
+          )}
           {/* Split save: the primary half saves the active file, the right
               half flushes every dirty buffer. Only shows the count badge
               when there is more than one dirty file so it doesn't shout. */}
@@ -1740,14 +2047,56 @@ export function Editor() {
                   from "what's in this submission again?" anxiety. */}
               {dirtyPaths.size > 0 && (
                 <div style={{ fontSize: 12, color: 'var(--text-subtle)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                  <div style={{ marginBottom: 4 }}>
+                  <div style={{ marginBottom: 6 }}>
                     <span style={{ color: 'var(--amber-text)', fontWeight: 600 }}>{dirtyPaths.size}</span>{' '}
-                    个未保存文件,提交前会先保存:
+                    个未保存文件，提交前会先保存：
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {Array.from(dirtyPaths).map((p) => (
-                      <span key={p} className="tag" style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>{p}</span>
-                    ))}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {Array.from(dirtyPaths).map((p) => {
+                      const hasDiff = serverSnapshots[p] !== undefined;
+                      const expanded = showDiffFor === p;
+                      const diffLines = expanded && hasDiff
+                        ? computeDiff(serverSnapshots[p], buffers[p]?.content ?? '')
+                        : [];
+                      return (
+                        <div key={p}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span className="tag" style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", flex: 1 }}>{p}</span>
+                            {hasDiff && (
+                              <button
+                                type="button"
+                                className="btn sm ghost"
+                                style={{ fontSize: 10.5, padding: '1px 7px' }}
+                                onClick={() => setShowDiffFor(expanded ? null : p)}
+                              >{expanded ? '收起' : '查看变更'}</button>
+                            )}
+                          </div>
+                          {expanded && (
+                            <div style={{
+                              marginTop: 4, borderRadius: 6, overflow: 'auto', maxHeight: 200,
+                              border: '1px solid var(--border)', background: '#1e1e1e',
+                              fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5, lineHeight: 1.5,
+                            }}>
+                              {diffLines.length === 0
+                                ? <div style={{ padding: '6px 10px', color: 'var(--text-faint)' }}>无差异</div>
+                                : diffLines.map((l, i) => (
+                                  <div key={i} style={{
+                                    padding: '0 10px', whiteSpace: 'pre',
+                                    background: l.t === '+' ? 'rgba(16,185,129,0.15)' : l.t === '-' ? 'rgba(239,68,68,0.15)' : l.t === '…' ? 'transparent' : 'transparent',
+                                    color: l.t === '+' ? '#6ee7b7' : l.t === '-' ? '#fca5a5' : l.t === '…' ? '#6b7280' : '#d4d4d4',
+                                  }}>
+                                    <span style={{ userSelect: 'none', opacity: 0.5, marginRight: 8 }}>
+                                      {l.t === '…' ? ' ' : l.t}
+                                    </span>
+                                    {l.s}
+                                  </div>
+                                ))
+                              }
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1779,11 +2128,49 @@ export function Editor() {
           >
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
               <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>新建文件</h3>
-              <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>
-                选择模板可自动填入起始内容；或直接输入路径创建空文件。
+              <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                {(['template', 'upload'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`btn sm ${newFileMode === m ? 'primary' : 'ghost'}`}
+                    onClick={() => { setNewFileMode(m); setNewFileErr(null); setUploadErr(null); setUploadFiles([]); }}
+                  >{m === 'template' ? '从模板创建' : '上传本地文件'}</button>
+                ))}
               </div>
             </div>
             <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
+              {newFileMode === 'upload' ? (
+                <>
+                  <label>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 6 }}>
+                      选择文件（支持多选；文件名即路径）
+                    </div>
+                    <input
+                      type="file"
+                      multiple
+                      disabled={uploadBusy}
+                      onChange={(e) => {
+                        const chosen = Array.from(e.target.files ?? []);
+                        setUploadFiles(chosen);
+                        setUploadErr(null);
+                      }}
+                      style={{ fontSize: 13, color: 'var(--text)' }}
+                    />
+                  </label>
+                  {uploadFiles.length > 0 && (
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      已选 {uploadFiles.length} 个文件：{uploadFiles.map((f) => f.name).join('、')}
+                    </div>
+                  )}
+                  {uploadErr && (
+                    <div style={{ fontSize: 12.5, color: 'var(--red-text)', background: 'var(--red-bg)', padding: '6px 10px', borderRadius: 6, whiteSpace: 'pre-wrap' }}>
+                      {uploadErr}
+                    </div>
+                  )}
+                </>
+              ) : (
+              <>
               <label>
                 <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>路径</div>
                 <input
@@ -1846,12 +2233,25 @@ export function Editor() {
                   {newFileErr}
                 </div>
               )}
+              </>
+              )}
             </div>
             <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button type="button" className="btn" onClick={closeNewFileDialog} disabled={newFileBusy}>取消</button>
-              <button type="submit" className="btn primary" disabled={newFileBusy || !newFilePath.trim()}>
-                <IconPlus size={13} /> {newFileBusy ? '创建中...' : '创建'}
-              </button>
+              <button type="button" className="btn" onClick={closeNewFileDialog} disabled={newFileBusy || uploadBusy}>取消</button>
+              {newFileMode === 'upload' ? (
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={uploadBusy || uploadFiles.length === 0}
+                  onClick={uploadLocalFiles}
+                >
+                  <IconPlus size={13} /> {uploadBusy ? '上传中...' : `上传 ${uploadFiles.length || ''} 个文件`}
+                </button>
+              ) : (
+                <button type="submit" className="btn primary" disabled={newFileBusy || !newFilePath.trim()}>
+                  <IconPlus size={13} /> {newFileBusy ? '创建中...' : '创建'}
+                </button>
+              )}
             </div>
           </form>
         </div>
@@ -2038,16 +2438,29 @@ export function Editor() {
                     readOnly={!canEdit}
                     onCommit={writeFrontmatter}
                   />
+                  <FrontmatterField
+                    label="version"
+                    fieldKey="version"
+                    upstream={skillMdFm.fields.version ?? ''}
+                    placeholder="0.1.0"
+                    readOnly={!canEdit}
+                    onCommit={writeFrontmatter}
+                  />
+                  <TagsField
+                    upstream={skillMdFm.fields.tags ?? ''}
+                    readOnly={!canEdit}
+                    onCommit={writeFrontmatter}
+                  />
                   {/* Surface any extra keys the doc already has so users
                       know they're preserved even though we don't expose
                       them as named inputs. */}
                   {Object.keys(skillMdFm.fields)
-                    .filter((k) => !['name', 'description', 'license'].includes(k))
+                    .filter((k) => !['name', 'description', 'license', 'version', 'tags'].includes(k))
                     .length > 0 && (
                     <div style={{ fontSize: 11, color: 'var(--text-faint)', paddingLeft: 84 }}>
                       其他字段（在 Monaco 中编辑）:{' '}
                       {Object.keys(skillMdFm.fields)
-                        .filter((k) => !['name', 'description', 'license'].includes(k))
+                        .filter((k) => !['name', 'description', 'license', 'version', 'tags'].includes(k))
                         .map((k) => <span key={k} className="mono" style={{ marginRight: 6 }}>{k}</span>)}
                     </div>
                   )}
@@ -2119,6 +2532,12 @@ export function Editor() {
                   ed.addCommand(
                     m.KeyMod.CtrlCmd | m.KeyMod.Shift | m.KeyCode.KeyS,
                     () => { handlersRef.current.saveAll(); },
+                  );
+                  // Cmd+P: open the quick-file-picker instead of Monaco's
+                  // built-in command palette (which isn't useful here anyway).
+                  ed.addCommand(
+                    m.KeyMod.CtrlCmd | m.KeyCode.KeyP,
+                    () => { setShowFilePicker(true); },
                   );
                   // Kick the model-sync effect now that we have refs.
                   setEditorMountTick((n) => n + 1);
@@ -2218,6 +2637,19 @@ export function Editor() {
               <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 6, lineHeight: 1.4 }}>
                 推荐结构：SKILL.md 元数据 + scripts/ 脚本 + references/ 参考 + assets/ 资源。
               </div>
+              {files.data && files.data.length > 0 && (
+                <div style={{
+                  marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  fontSize: 11,
+                }}>
+                  <span style={{ color: 'var(--text-faint)' }}>Token 预估</span>
+                  <span style={{
+                    fontFamily: "'JetBrains Mono', monospace", fontWeight: 600,
+                    color: totalTokens > 80000 ? 'var(--red-text)' : totalTokens > 32000 ? 'var(--amber-text)' : 'var(--green-text)',
+                  }}>~{fmtTokens(totalTokens)}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2349,6 +2781,14 @@ export function Editor() {
         triggerAction={aiTrigger}
         onTriggerConsumed={() => setAiTrigger(null)}
       />
+
+      {showFilePicker && files.data && (
+        <FilePicker
+          files={files.data}
+          onPick={openFile}
+          onClose={() => setShowFilePicker(false)}
+        />
+      )}
     </div>
   );
 }
