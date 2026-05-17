@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS skills (
 );
 CREATE INDEX IF NOT EXISTS idx_skills_status ON skills(status);
 CREATE INDEX IF NOT EXISTS idx_skills_ns     ON skills(ns);
+CREATE INDEX IF NOT EXISTS idx_skills_author ON skills(author);
 
 CREATE TABLE IF NOT EXISTS reviews (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,6 +77,8 @@ CREATE TABLE IF NOT EXISTS reviews (
   decided_at      DATETIME
 );
 CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status);
+CREATE INDEX IF NOT EXISTS idx_reviews_author ON reviews(author, submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reviews_skill  ON reviews(ns, skill_name);
 
 CREATE TABLE IF NOT EXISTS comments (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,6 +112,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user);
+CREATE INDEX IF NOT EXISTS idx_notif_user_unread ON notifications(user, unread, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS skill_ratings (
   skill_id    INTEGER NOT NULL,
@@ -120,6 +124,7 @@ CREATE TABLE IF NOT EXISTS skill_ratings (
   FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_ratings_skill ON skill_ratings(skill_id);
+CREATE INDEX IF NOT EXISTS idx_ratings_skill_created ON skill_ratings(skill_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS namespace_members (
   ns        TEXT NOT NULL,

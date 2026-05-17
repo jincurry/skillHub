@@ -284,7 +284,7 @@ func (s *Server) login(c *gin.Context) {
 	}
 	ok, err := s.store.AuthenticateUser(req.Username, req.Password)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !ok {
@@ -297,7 +297,7 @@ func (s *Server) login(c *gin.Context) {
 	}
 	tok, err := auth.SignJWT(req.Username, s.cfg.JWTSecret, s.cfg.JWTTTL)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	user, _ := s.store.GetUser(req.Username)
@@ -316,7 +316,7 @@ func (s *Server) currentUser(c *gin.Context) string {
 func (s *Server) getMe(c *gin.Context) {
 	u, err := s.store.GetUser(s.currentUser(c))
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if u == nil {
@@ -327,8 +327,7 @@ func (s *Server) getMe(c *gin.Context) {
 }
 
 func (s *Server) listSkills(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.Query("limit"))
-	offset, _ := strconv.Atoi(c.Query("offset"))
+	limit, offset := parsePagination(c)
 	out, err := s.store.ListSkills(store.SkillFilter{
 		Namespace:      c.Query("ns"),
 		Classification: c.Query("classification"),
@@ -338,7 +337,7 @@ func (s *Server) listSkills(c *gin.Context) {
 		Offset:         offset,
 	})
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -347,7 +346,7 @@ func (s *Server) listSkills(c *gin.Context) {
 func (s *Server) getSkill(c *gin.Context) {
 	k, err := s.store.GetSkill(c.Param("ns"), c.Param("name"))
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if k == nil {
@@ -373,7 +372,7 @@ func (s *Server) createSkill(c *gin.Context) {
 	user := s.currentUser(c)
 	role, err := s.store.UserRoleInNamespace(req.Namespace, user)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if role == "" {
@@ -382,7 +381,7 @@ func (s *Server) createSkill(c *gin.Context) {
 	}
 	k, err := s.store.CreateSkill(req, user)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(201, k)
@@ -396,7 +395,7 @@ func (s *Server) patchSkillMeta(c *gin.Context) {
 	user := s.currentUser(c)
 	ok, err := s.canEditSkill(user, ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !ok {
@@ -425,7 +424,7 @@ func (s *Server) submitForReview(c *gin.Context) {
 	ns, name := c.Param("ns"), c.Param("name")
 	k, err := s.store.GetSkill(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if k == nil {
@@ -434,7 +433,7 @@ func (s *Server) submitForReview(c *gin.Context) {
 	}
 	files, err := s.store.ListSkillFiles(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	paths := make([]string, len(files))
@@ -451,7 +450,7 @@ func (s *Server) submitForReview(c *gin.Context) {
 	// (or a maintainer/owner) to submit. Submitter cannot be in the reviewer set.
 	role, err := s.store.UserRoleInNamespace(ns, user)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if role == "" {
@@ -480,14 +479,14 @@ func (s *Server) submitForReview(c *gin.Context) {
 		if req.IsHotfix {
 			picked, err := s.store.PickHotfixReviewers(ns, user, k.Classification)
 			if err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
+				serverError(c, err)
 				return
 			}
 			req.Reviewers = picked
 		} else {
 			picked, _, err := s.store.PickReviewersByPolicy(ns, user, k.Classification)
 			if err != nil {
-				c.JSON(500, gin.H{"error": err.Error()})
+				serverError(c, err)
 				return
 			}
 			req.Reviewers = picked
@@ -530,7 +529,7 @@ func (s *Server) validateSkill(c *gin.Context) {
 	ns, name := c.Param("ns"), c.Param("name")
 	k, err := s.store.GetSkill(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if k == nil {
@@ -539,7 +538,7 @@ func (s *Server) validateSkill(c *gin.Context) {
 	}
 	files, err := s.store.ListSkillFiles(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	paths := make([]string, len(files))
@@ -552,7 +551,7 @@ func (s *Server) validateSkill(c *gin.Context) {
 func (s *Server) listVersions(c *gin.Context) {
 	out, err := s.store.ListSkillVersions(c.Param("ns"), c.Param("name"))
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -571,7 +570,7 @@ func (s *Server) getSkillTrend(c *gin.Context) {
 	}
 	out, err := s.store.GetSkillTrend(c.Param("ns"), c.Param("name"), days)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -597,7 +596,7 @@ func (s *Server) lifecycleAction(c *gin.Context, status string) {
 		return
 	}
 	if err := s.store.SetSkillLifecycleStatus(ns, name, status, user, req.Reason); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	// Fire lifecycle webhooks asynchronously.
@@ -615,12 +614,12 @@ func (s *Server) listRatings(c *gin.Context) {
 	ns, name := c.Param("ns"), c.Param("name")
 	summary, err := s.store.RatingSummary(ns, name, s.currentUser(c))
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	items, err := s.store.ListRatings(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{"summary": summary, "items": items})
@@ -634,7 +633,7 @@ func (s *Server) rateSkill(c *gin.Context) {
 	}
 	summary, err := s.store.RateSkill(c.Param("ns"), c.Param("name"), s.currentUser(c), req.Stars, req.Comment)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(201, summary)
@@ -643,7 +642,7 @@ func (s *Server) rateSkill(c *gin.Context) {
 func (s *Server) listNamespaces(c *gin.Context) {
 	out, err := s.store.ListNamespaces()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -652,7 +651,7 @@ func (s *Server) listNamespaces(c *gin.Context) {
 func (s *Server) listNamespaceMembers(c *gin.Context) {
 	out, err := s.store.ListNamespaceMembers(c.Param("ns"))
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -675,7 +674,7 @@ func (s *Server) addNamespaceMember(c *gin.Context) {
 	ns := c.Param("ns")
 	allowed, err := s.canManageNamespace(s.currentUser(c), ns)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -703,7 +702,7 @@ func (s *Server) updateNamespaceMemberRole(c *gin.Context) {
 	username := c.Param("username")
 	allowed, err := s.canManageNamespace(s.currentUser(c), ns)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -730,7 +729,7 @@ func (s *Server) removeNamespaceMember(c *gin.Context) {
 	username := c.Param("username")
 	allowed, err := s.canManageNamespace(s.currentUser(c), ns)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -751,7 +750,7 @@ func (s *Server) getNamespacePolicy(c *gin.Context) {
 	user := s.currentUser(c)
 	picked, pol, err := s.store.PickReviewersByPolicy(ns, user, classification)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{
@@ -764,11 +763,10 @@ func (s *Server) getNamespacePolicy(c *gin.Context) {
 }
 
 func (s *Server) listReviews(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.Query("limit"))
-	offset, _ := strconv.Atoi(c.Query("offset"))
+	limit, offset := parsePagination(c)
 	out, err := s.store.ListReviews(c.Query("status"), limit, offset)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -790,7 +788,7 @@ func (s *Server) getReview(c *gin.Context) {
 	}
 	r, err := s.store.GetReview(id)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if r == nil {
@@ -813,7 +811,7 @@ func (s *Server) decideReview(c *gin.Context) {
 	user := s.currentUser(c)
 	r, err := s.store.GetReview(id)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if r == nil {
@@ -840,7 +838,7 @@ func (s *Server) decideReview(c *gin.Context) {
 		return
 	}
 	if err := s.store.DecideReview(id, req.Decision, req.Note, user); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	r, _ = s.store.GetReview(id)
@@ -868,7 +866,7 @@ func (s *Server) listComments(c *gin.Context) {
 	}
 	out, err := s.store.ListComments(id)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -884,7 +882,7 @@ func (s *Server) listReviewFiles(c *gin.Context) {
 	}
 	out, err := s.store.ListReviewFiles(id)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -907,7 +905,7 @@ func (s *Server) addComment(c *gin.Context) {
 		Side:     req.Side,
 	})
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	s.notifier.DispatchAsync(notifier.Event{
@@ -1038,7 +1036,7 @@ func (s *Server) addReviewer(c *gin.Context) {
 	}
 	r, err := s.store.GetReview(id)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if r == nil {
@@ -1047,7 +1045,7 @@ func (s *Server) addReviewer(c *gin.Context) {
 	}
 	allowed, err := s.canManageReviewers(s.currentUser(c), r)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -1077,7 +1075,7 @@ func (s *Server) removeReviewer(c *gin.Context) {
 	username := c.Param("username")
 	r, err := s.store.GetReview(id)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if r == nil {
@@ -1086,7 +1084,7 @@ func (s *Server) removeReviewer(c *gin.Context) {
 	}
 	allowed, err := s.canManageReviewers(s.currentUser(c), r)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -1111,7 +1109,7 @@ func (s *Server) listAuditLogs(c *gin.Context) {
 		Limit:  limit,
 	})
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -1140,7 +1138,7 @@ func (s *Server) patchMe(c *gin.Context) {
 	}
 	user, err := s.store.UpdateMe(s.currentUser(c), req)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, user)
@@ -1182,7 +1180,7 @@ func (s *Server) uploadAvatar(c *gin.Context) {
 	user := s.currentUser(c)
 	dir := "./data/avatars"
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		c.JSON(500, gin.H{"error": "mkdir: " + err.Error()})
+		serverError(c, err)
 		return
 	}
 
@@ -1195,14 +1193,14 @@ func (s *Server) uploadAvatar(c *gin.Context) {
 
 	dst := filepath.Join(dir, user+ext)
 	if err := c.SaveUploadedFile(file, dst); err != nil {
-		c.JSON(500, gin.H{"error": "save: " + err.Error()})
+		serverError(c, err)
 		return
 	}
 
 	url := "/api/v1/avatars/" + user + ext + "?v=" + strconv.FormatInt(time.Now().Unix(), 10)
 	me, err := s.store.SetAvatarURL(user, url)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, me)
@@ -1219,7 +1217,7 @@ func (s *Server) deleteAvatar(c *gin.Context) {
 	}
 	me, err := s.store.SetAvatarURL(user, "")
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, me)
@@ -1229,7 +1227,7 @@ func (s *Server) deleteAvatar(c *gin.Context) {
 func (s *Server) getMeStats(c *gin.Context) {
 	stats, err := s.store.MeStats(s.currentUser(c))
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, stats)
@@ -1239,7 +1237,7 @@ func (s *Server) getMeStats(c *gin.Context) {
 func (s *Server) getMeAchievements(c *gin.Context) {
 	out, err := s.store.Achievements(s.currentUser(c))
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -1250,7 +1248,7 @@ func (s *Server) getMeAchievements(c *gin.Context) {
 func (s *Server) search(c *gin.Context) {
 	out, err := s.store.Search(c.Query("q"))
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -1260,7 +1258,7 @@ func (s *Server) search(c *gin.Context) {
 func (s *Server) getReviewStats(c *gin.Context) {
 	stats, err := s.store.ReviewStats()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, stats)
@@ -1309,7 +1307,7 @@ func (s *Server) listSkillFiles(c *gin.Context) {
 	}
 	out, err := s.store.ListSkillFiles(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -1323,7 +1321,7 @@ func (s *Server) getSkillFile(c *gin.Context) {
 	}
 	f, err := s.store.GetSkillFile(ns, name, p)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if f == nil {
@@ -1342,7 +1340,7 @@ func (s *Server) putSkillFile(c *gin.Context) {
 	user := s.currentUser(c)
 	allowed, err := s.canEditSkill(user, ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -1373,7 +1371,7 @@ func (s *Server) deleteSkillFile(c *gin.Context) {
 	user := s.currentUser(c)
 	allowed, err := s.canEditSkill(user, ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -1389,7 +1387,7 @@ func (s *Server) deleteSkillFile(c *gin.Context) {
 	}
 	deleted, err := s.store.DeleteSkillFile(ns, name, p)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !deleted {
@@ -1410,7 +1408,7 @@ func (s *Server) renameSkillFile(c *gin.Context) {
 	user := s.currentUser(c)
 	allowed, err := s.canEditSkill(user, ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -1484,7 +1482,7 @@ func (s *Server) createNamespace(c *gin.Context) {
 func (s *Server) adminMetrics(c *gin.Context) {
 	out, err := s.store.GetPlatformMetrics()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -1499,7 +1497,7 @@ func (s *Server) deleteDraftSkill(c *gin.Context) {
 	ns, name := c.Param("ns"), c.Param("name")
 	k, err := s.store.GetSkill(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if k == nil {
@@ -1516,7 +1514,7 @@ func (s *Server) deleteDraftSkill(c *gin.Context) {
 		return
 	}
 	if err := s.store.HardDeleteSkill(ns, name); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	_, _ = s.store.DB.Exec(
@@ -1575,7 +1573,7 @@ func (s *Server) deleteNamespace(c *gin.Context) {
 func (s *Server) listNotifications(c *gin.Context) {
 	out, err := s.store.ListNotifications(s.currentUser(c))
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -1588,7 +1586,7 @@ func (s *Server) markNotificationsRead(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req)
 	if err := s.store.MarkNotificationsRead(s.currentUser(c), req.IDs, req.All); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{"ok": true})
@@ -1597,7 +1595,7 @@ func (s *Server) markNotificationsRead(c *gin.Context) {
 func (s *Server) listMyDrafts(c *gin.Context) {
 	out, err := s.store.ListMyDrafts(s.currentUser(c))
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -1611,7 +1609,7 @@ func (s *Server) createSkillDraft(c *gin.Context) {
 	user := s.currentUser(c)
 	allowed, err := s.canEditSkill(user, ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -1637,7 +1635,7 @@ func (s *Server) downloadSkillBundle(c *gin.Context) {
 	ns, name := c.Param("ns"), c.Param("name")
 	k, err := s.store.GetSkill(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if k == nil {
@@ -1712,7 +1710,7 @@ func (s *Server) downloadSkillBundle(c *gin.Context) {
 func (s *Server) listAdminUsers(c *gin.Context) {
 	users, err := s.store.ListAdminUsers()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, users)
@@ -1730,7 +1728,7 @@ func (s *Server) createAdminUser(c *gin.Context) {
 	}
 	u, err := s.store.GetAdminUser(req.Username)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
@@ -1773,7 +1771,7 @@ func (s *Server) activateSkill(c *gin.Context) {
 			c.JSON(404, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{"activations": total})

@@ -133,7 +133,12 @@ export function Browse() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNs]);
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  useEffect(() => {
+    const id = setTimeout(() => setSearch(searchInput), 300);
+    return () => clearTimeout(id);
+  }, [searchInput]);
   const [sort, setSort] = useState<SortKey>('updated');
   const [sortOpen, setSortOpen] = useState(false);
 
@@ -261,7 +266,7 @@ export function Browse() {
 
           <div style={{ paddingTop: 14, borderTop: '1px solid var(--border)' }}>
             <button className="btn" style={{ width: '100%' }} onClick={() => {
-              setSelectedNs(new Set()); setSelectedClass(new Set()); setSelectedStatus(new Set()); setSelectedTags(new Set()); setSearch('');
+              setSelectedNs(new Set()); setSelectedClass(new Set()); setSelectedStatus(new Set()); setSelectedTags(new Set()); setSearchInput(''); setSearch('');
               clearAuthor();
             }}>清空所有过滤</button>
           </div>
@@ -293,7 +298,7 @@ export function Browse() {
           <div className="browse-toolbar">
             <div className="input-wrap">
               <span className="icon-left"><IconSearch size={15} /></span>
-              <input className="input with-icon" placeholder="搜索 skill 名称、描述、标签..." value={search} onChange={(e) => setSearch(e.target.value)} />
+              <input className="input with-icon" placeholder="搜索 skill 名称、描述、标签..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
             </div>
             <div style={{ position: 'relative' }}>
               <button className="dropdown" style={{ height: 36 }} onClick={() => setSortOpen((v) => !v)}>
