@@ -343,7 +343,7 @@ export function ReviewDetail() {
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             <textarea
                               className="input"
-                              style={{ padding: '6px 10px', height: 60, resize: 'vertical', width: '100%', fontSize: 13 }}
+                              style={{ padding: '8px 12px', height: 60, resize: 'vertical', width: '100%' }}
                               value={editingBody}
                               onChange={(e) => setEditingBody(e.target.value)}
                             />
@@ -791,7 +791,7 @@ function ChangesView({ files, comments, reviewId, me, editingCommentId, editingB
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             <textarea
                               className="input"
-                              style={{ padding: '6px 10px', height: 60, resize: 'vertical', width: '100%', fontSize: 12 }}
+                              style={{ padding: '8px 12px', height: 60, resize: 'vertical', width: '100%' }}
                               value={editingBody}
                               onChange={(e) => setEditingBody(e.target.value)}
                             />
