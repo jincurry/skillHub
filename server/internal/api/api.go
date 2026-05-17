@@ -42,7 +42,11 @@ func New(cfg config.Config, st *store.Store) *Server {
 
 func (s *Server) Routes() *gin.Engine {
 	r := gin.New()
-	r.Use(middleware.StructuredLogger(), gin.Recovery(), corsMiddleware(), middleware.RateLimit(middleware.DefaultRateLimitConfig()))
+	logW := s.cfg.LogWriter
+	if logW == nil {
+		logW = os.Stdout
+	}
+	r.Use(middleware.StructuredLoggerTo(logW), gin.Recovery(), corsMiddleware(), middleware.RateLimit(middleware.DefaultRateLimitConfig()))
 
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
 

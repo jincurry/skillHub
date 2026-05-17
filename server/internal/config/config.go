@@ -1,6 +1,7 @@
 package config
 
 import (
+	"io"
 	"os"
 	"time"
 )
@@ -15,6 +16,10 @@ type Config struct {
 	// External notification webhooks (empty = disabled).
 	SlackWebhookURL  string
 	FeishuWebhookURL string
+
+	// LogWriter is where the structured request logger sends JSON lines.
+	// Defaults to os.Stdout when nil. Tests typically set this to io.Discard.
+	LogWriter io.Writer
 }
 
 func Load() Config {

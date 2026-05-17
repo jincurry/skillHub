@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -26,8 +27,20 @@ type LogEntry struct {
 
 // StructuredLogger replaces Gin's default text logger with JSON output,
 // suitable for ingestion by log aggregators (ELK, Loki, Datadog, etc.).
+// Writes to stdout. For a custom sink (e.g. tests want io.Discard, or
+// production wants a file) use StructuredLoggerTo.
 func StructuredLogger() gin.HandlerFunc {
-	logger := log.New(os.Stdout, "", 0)
+	return StructuredLoggerTo(os.Stdout)
+}
+
+// StructuredLoggerTo is like StructuredLogger but writes to w. A nil w
+// silently discards. Useful in tests so the log spam doesn't drown out
+// `go test -v` output.
+func StructuredLoggerTo(w io.Writer) gin.HandlerFunc {
+	if w == nil {
+		w = io.Discard
+	}
+	logger := log.New(w, "", 0)
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
