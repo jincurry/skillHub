@@ -26,6 +26,7 @@ type Server struct {
 	cfg      config.Config
 	store    *store.Store
 	notifier *notifier.Dispatcher
+	metrics  *middleware.Registry
 }
 
 func New(cfg config.Config, st *store.Store) *Server {
@@ -37,7 +38,7 @@ func New(cfg config.Config, st *store.Store) *Server {
 	if f := notifier.NewFeishu(cfg.FeishuWebhookURL); f != nil {
 		d.Register(f)
 	}
-	return &Server{cfg: cfg, store: st, notifier: d}
+	return &Server{cfg: cfg, store: st, notifier: d, metrics: middleware.NewRegistry()}
 }
 
 func (s *Server) Routes() *gin.Engine {
@@ -46,14 +47,39 @@ func (s *Server) Routes() *gin.Engine {
 	if logW == nil {
 		logW = os.Stdout
 	}
-	r.Use(middleware.StructuredLoggerTo(logW), gin.Recovery(), corsMiddleware(), middleware.RateLimit(middleware.DefaultRateLimitConfig()))
+	r.Use(
+		middleware.StructuredLoggerTo(logW),
+		gin.Recovery(),
+		corsMiddleware(),
+		middleware.RateLimit(middleware.DefaultRateLimitConfig()),
+		s.metrics.Instrument(),
+	)
 
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
+	// Readiness: confirms the DB is reachable. Liveness vs readiness split
+	// follows the Kubernetes convention so the process can be `Running` even
+	// while the DB recovers (e.g. failover).
+	r.GET("/readyz", func(c *gin.Context) {
+		if err := s.store.DB.Ping(); err != nil {
+			c.JSON(503, gin.H{"status": "db unavailable", "error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"status": "ready"})
+	})
+	// Prometheus scrape target. Unauthenticated by design — the surface is
+	// behind the internal network just like the rest of the API.
+	r.GET("/metrics", s.metrics.Handler())
 
 	v1 := r.Group("/api/v1")
 	{
 		// public
 		v1.POST("/auth/login", s.login)
+		// OpenAPI 3 spec. Public so external tooling (codegen, postman) can
+		// pull it without an auth dance.
+		v1.GET("/openapi.json", func(c *gin.Context) {
+			c.Header("Content-Type", "application/json")
+			c.String(200, openAPISpec)
+		})
 		// Avatars are served publicly so <img src=...> works without auth headers.
 		// gin.Static safely scopes file serving to the given directory.
 		v1.Static("/avatars", "./data/avatars")
