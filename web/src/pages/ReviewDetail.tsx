@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { DiffEditor } from '@monaco-editor/react';
+import type { editor } from 'monaco-editor';
 import {
   IconChevronRight, IconChat, IconXCircle, IconCheckCircle, IconAlertTriangle,
 } from '../components/Icons';
@@ -42,6 +43,42 @@ export function ReviewDetail() {
   const [reviewerPick, setReviewerPick] = useState('');
   const [reviewerFreeForm, setReviewerFreeForm] = useState('');
   const [reviewerBusy, setReviewerBusy] = useState(false);
+
+  // Comment edit/delete state (shared between overview and inline comments)
+  const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
+  const [editingBody, setEditingBody] = useState('');
+
+  const startEdit = (c: Comment) => {
+    setEditingCommentId(c.id);
+    setEditingBody(c.body);
+  };
+
+  const cancelEdit = () => {
+    setEditingCommentId(null);
+    setEditingBody('');
+  };
+
+  const saveEdit = async (id: number) => {
+    if (!editingBody.trim()) return;
+    try {
+      await api.patchComment(id, editingBody.trim());
+      setEditingCommentId(null);
+      setEditingBody('');
+      comments.reload();
+    } catch (e) {
+      setActionMsg(`编辑失败: ${(e as Error).message}`);
+    }
+  };
+
+  const deleteComment = async (id: number) => {
+    if (!window.confirm('确定删除此评论?')) return;
+    try {
+      await api.deleteComment(id);
+      comments.reload();
+    } catch (e) {
+      setActionMsg(`删除失败: ${(e as Error).message}`);
+    }
+  };
 
   const addReviewer = async (username: string) => {
     const u = username.trim();
@@ -279,23 +316,49 @@ export function ReviewDetail() {
               <div className="card-header"><h3 className="card-title">讨论 <span className="count-pill" style={{ marginLeft: 6 }}>{comments.data?.length ?? 0}</span></h3></div>
               <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {comments.data?.length === 0 && <div style={{ color: 'var(--text-subtle)', fontSize: 13 }}>暂无评论</div>}
-                {comments.data?.map((c, i) => (
-                  <div key={c.id} style={{ display: 'flex', gap: 10 }}>
-                    <div className={`avatar sm bg-${(i % 5) + 1}`} style={{ width: 30, height: 30, fontSize: 13, flexShrink: 0 }}>{c.author[0]?.toUpperCase()}</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, marginBottom: 2 }}>
-                        <span className="mono" style={{ fontWeight: 600 }}>@{c.author}</span>
-                        <span style={{ color: 'var(--text-faint)', marginLeft: 6 }}>· {new Date(c.createdAt).toLocaleString()}</span>
-                        {c.filePath && (
-                          <span className="mono" style={{ marginLeft: 8, fontSize: 11, padding: '1px 5px', borderRadius: 3, background: 'var(--bg-muted)', color: 'var(--text-subtle)' }}>
-                            {c.filePath}:{c.lineNo} ({c.side})
-                          </span>
+                {comments.data?.map((c, i) => {
+                  const isMyComment = c.author === myName;
+                  const canEdit = isMyComment || isAdmin;
+                  const isEditing = editingCommentId === c.id;
+                  return (
+                    <div key={c.id} style={{ display: 'flex', gap: 10 }}>
+                      <div className={`avatar sm bg-${(i % 5) + 1}`} style={{ width: 30, height: 30, fontSize: 13, flexShrink: 0 }}>{c.author[0]?.toUpperCase()}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span className="mono" style={{ fontWeight: 600 }}>@{c.author}</span>
+                          <span style={{ color: 'var(--text-faint)' }}>· {new Date(c.createdAt).toLocaleString()}</span>
+                          {c.filePath && (
+                            <span className="mono" style={{ fontSize: 11, padding: '1px 5px', borderRadius: 3, background: 'var(--bg-muted)', color: 'var(--text-subtle)' }}>
+                              {c.filePath}:{c.lineNo} ({c.side})
+                            </span>
+                          )}
+                          {canEdit && !isEditing && (
+                            <span style={{ marginLeft: 'auto' }}>
+                              <button className="btn sm" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => startEdit(c)}>编辑</button>
+                              <button className="btn sm" style={{ padding: '2px 8px', fontSize: 11, marginLeft: 4, color: 'var(--red-text)' }} onClick={() => deleteComment(c.id)}>删除</button>
+                            </span>
+                          )}
+                        </div>
+                        {isEditing ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <textarea
+                              className="input"
+                              style={{ padding: '6px 10px', height: 60, resize: 'vertical', width: '100%', fontSize: 13 }}
+                              value={editingBody}
+                              onChange={(e) => setEditingBody(e.target.value)}
+                            />
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                              <button className="btn sm" onClick={cancelEdit}>取消</button>
+                              <button className="btn sm primary" onClick={() => saveEdit(c.id)}>保存</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>{c.body}</div>
                         )}
                       </div>
-                      <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>{c.body}</div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, display: 'flex', gap: 10 }}>
                   <div className="avatar sm bg-1" style={{ width: 30, height: 30, fontSize: 13, flexShrink: 0 }}>
                     {(me.data?.display ?? me.data?.username ?? '?').slice(0, 1).toUpperCase()}
@@ -463,7 +526,21 @@ export function ReviewDetail() {
       )}
 
       {tab === 'changes' && (
-        <ChangesView files={files} comments={comments} reviewId={id} me={me} />
+        <ChangesView
+          files={files}
+          comments={comments}
+          reviewId={id}
+          me={me}
+          editingCommentId={editingCommentId}
+          editingBody={editingBody}
+          setEditingBody={setEditingBody}
+          startEdit={startEdit}
+          cancelEdit={cancelEdit}
+          saveEdit={saveEdit}
+          deleteComment={deleteComment}
+          myName={myName}
+          isAdmin={isAdmin}
+        />
       )}
     </div>
   );
@@ -478,9 +555,18 @@ interface ChangesViewProps {
   comments: ReturnType<typeof useAsync<Comment[]>>;
   reviewId: string;
   me: ReturnType<typeof useAsync<Me>>;
+  editingCommentId: number | null;
+  editingBody: string;
+  setEditingBody: (body: string) => void;
+  startEdit: (c: Comment) => void;
+  cancelEdit: () => void;
+  saveEdit: (id: number) => void;
+  deleteComment: (id: number) => void;
+  myName: string;
+  isAdmin: boolean;
 }
 
-function ChangesView({ files, comments, reviewId, me }: ChangesViewProps) {
+function ChangesView({ files, comments, reviewId, me, editingCommentId, editingBody, setEditingBody, startEdit, cancelEdit, saveEdit, deleteComment, myName, isAdmin }: ChangesViewProps) {
   const list = files.data ?? [];
   // Auto-pick the first non-unchanged file once data lands. Falls back to the
   // first file overall if everything is unchanged (rare but possible).
@@ -517,6 +603,34 @@ function ChangesView({ files, comments, reviewId, me }: ChangesViewProps) {
   const [inlineLine, setInlineLine] = useState('');
   const [inlineSide, setInlineSide] = useState<'base' | 'head'>('head');
   const [inlinePosting, setInlinePosting] = useState(false);
+
+  // Editor refs for click-to-comment
+  const originalEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
+  const modifiedEditorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+
+  const handleEditorMount = (editor: editor.IStandaloneDiffEditor) => {
+    originalEditorRef.current = editor;
+    const orig = editor.getOriginalEditor();
+    const mod = editor.getModifiedEditor();
+
+    // Click on original (base) side -> set side='base' and line number
+    orig.onMouseDown((e) => {
+      const viewLine = orig.getTargetAtClientPoint(e.event.posx, e.event.posy)?.position?.lineNumber ?? 0;
+      if (viewLine > 0) {
+        setInlineLine(String(viewLine));
+        setInlineSide('base');
+      }
+    });
+
+    // Click on modified (head) side -> set side='head' and line number
+    mod.onMouseDown((e) => {
+      const viewLine = mod.getTargetAtClientPoint(e.event.posx, e.event.posy)?.position?.lineNumber ?? 0;
+      if (viewLine > 0) {
+        setInlineLine(String(viewLine));
+        setInlineSide('head');
+      }
+    });
+  };
 
   const submitInline = async () => {
     const lineNo = parseInt(inlineLine, 10);
@@ -629,6 +743,7 @@ function ChangesView({ files, comments, reviewId, me }: ChangesViewProps) {
                   theme="vs-dark"
                   original={active.baseContent}
                   modified={active.newContent}
+                  onMount={handleEditorMount}
                   options={{
                     readOnly: true,
                     renderSideBySide: true,
@@ -651,21 +766,47 @@ function ChangesView({ files, comments, reviewId, me }: ChangesViewProps) {
                   <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 10 }}>该文件暂无行内评论</div>
                 )}
 
-                {fileComments.map((c) => (
-                  <div key={c.id} style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                    <div className="avatar sm bg-2" style={{ width: 24, height: 24, fontSize: 11, flexShrink: 0 }}>
-                      {c.author[0]?.toUpperCase()}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11.5 }}>
-                        <span className="mono" style={{ fontWeight: 600 }}>@{c.author}</span>
-                        <span style={{ color: 'var(--text-faint)', marginLeft: 6 }}>L{c.lineNo} · {c.side}</span>
-                        <span style={{ color: 'var(--text-faint)', marginLeft: 6 }}>· {new Date(c.createdAt).toLocaleString()}</span>
+                {fileComments.map((c) => {
+                  const isMyComment = c.author === myName;
+                  const canEdit = isMyComment || isAdmin;
+                  const isEditing = editingCommentId === c.id;
+                  return (
+                    <div key={c.id} style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                      <div className="avatar sm bg-2" style={{ width: 24, height: 24, fontSize: 11, flexShrink: 0 }}>
+                        {c.author[0]?.toUpperCase()}
                       </div>
-                      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 2 }}>{c.body}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span className="mono" style={{ fontWeight: 600 }}>@{c.author}</span>
+                          <span style={{ color: 'var(--text-faint)', marginLeft: 6 }}>L{c.lineNo} · {c.side}</span>
+                          <span style={{ color: 'var(--text-faint)', marginLeft: 6 }}>· {new Date(c.createdAt).toLocaleString()}</span>
+                          {canEdit && !isEditing && (
+                            <span style={{ marginLeft: 'auto' }}>
+                              <button className="btn sm" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => startEdit(c)}>编辑</button>
+                              <button className="btn sm" style={{ padding: '2px 8px', fontSize: 11, marginLeft: 4, color: 'var(--red-text)' }} onClick={() => deleteComment(c.id)}>删除</button>
+                            </span>
+                          )}
+                        </div>
+                        {isEditing ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <textarea
+                              className="input"
+                              style={{ padding: '6px 10px', height: 60, resize: 'vertical', width: '100%', fontSize: 12 }}
+                              value={editingBody}
+                              onChange={(e) => setEditingBody(e.target.value)}
+                            />
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                              <button className="btn sm" onClick={cancelEdit}>取消</button>
+                              <button className="btn sm primary" onClick={() => saveEdit(c.id)}>保存</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 2 }}>{c.body}</div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 {/* Add inline comment form */}
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: fileComments.length > 0 ? 6 : 0, paddingTop: fileComments.length > 0 ? 10 : 0, borderTop: fileComments.length > 0 ? '1px solid var(--border)' : 'none' }}>

@@ -249,6 +249,10 @@ export const api = {
   listComments: (id: number | string) => request<Comment[]>(`/reviews/${id}/comments`),
   addComment: (id: number | string, body: string, anchor?: { filePath: string; lineNo: number; side: 'base' | 'head' }) =>
     request<Comment>(`/reviews/${id}/comments`, { method: 'POST', body: JSON.stringify({ body, ...anchor }) }),
+  patchComment: (id: number, body: string) =>
+    request<Comment>(`/comments/${id}`, { method: 'PATCH', body: JSON.stringify({ body }) }),
+  deleteComment: (id: number) =>
+    request<{ ok: true }>(`/comments/${id}`, { method: 'DELETE' }),
   addReviewer: (id: number | string, username: string) =>
     request<Review>(`/reviews/${id}/reviewers`, {
       method: 'POST', body: JSON.stringify({ username }),

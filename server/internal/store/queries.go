@@ -525,6 +525,44 @@ func (s *Store) AddComment(reviewID int64, author, body string, anchor CommentAn
 	return &c, nil
 }
 
+// GetComment fetches a single comment by id. Returns (nil, nil) when not
+// found so callers can produce a clean 404 without inspecting sql.ErrNoRows.
+func (s *Store) GetComment(id int64) (*model.Comment, error) {
+	var c model.Comment
+	err := s.DB.QueryRow(
+		`SELECT id,review_id,author,body,created_at,file_path,line_no,side FROM comments WHERE id=?`, id,
+	).Scan(&c.ID, &c.ReviewID, &c.Author, &c.Body, &c.CreatedAt, &c.FilePath, &c.LineNo, &c.Side)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// UpdateCommentBody rewrites just the textual body of an existing comment.
+// The anchor (file_path, line_no, side) is intentionally immutable — once
+// you've replied to a specific line, moving the anchor would invalidate the
+// discussion thread.
+func (s *Store) UpdateCommentBody(id int64, body string) (*model.Comment, error) {
+	if _, err := s.DB.Exec(`UPDATE comments SET body=? WHERE id=?`, body, id); err != nil {
+		return nil, err
+	}
+	return s.GetComment(id)
+}
+
+// DeleteComment removes a comment by id. Returns (false, nil) when no row
+// matched so the API layer can distinguish 404 from 500.
+func (s *Store) DeleteComment(id int64) (bool, error) {
+	res, err := s.DB.Exec(`DELETE FROM comments WHERE id=?`, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // AuditFilter narrows down ListAuditLogs. All fields are optional.
 type AuditFilter struct {
 	Actor  string // exact match on actor username

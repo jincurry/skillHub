@@ -157,6 +157,9 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/reviews/:id/decision", s.decideReview)
 		auth.GET("/reviews/:id/comments", s.listComments)
 		auth.POST("/reviews/:id/comments", s.addComment)
+		// Edit / delete a comment. Author-only (or admin); anchor is immutable.
+		auth.PATCH("/comments/:id", s.patchComment)
+		auth.DELETE("/comments/:id", s.deleteComment)
 		auth.POST("/reviews/:id/reviewers", s.addReviewer)
 		auth.DELETE("/reviews/:id/reviewers/:username", s.removeReviewer)
 		auth.GET("/reviews/:id/files", s.listReviewFiles)
@@ -915,6 +918,87 @@ func (s *Server) addComment(c *gin.Context) {
 		Target: "review/" + strconv.FormatInt(id, 10),
 	})
 	c.JSON(201, cm)
+}
+
+// canEditComment returns true when the caller is the comment author or a
+// platform admin. We deliberately do NOT let reviewers edit each other's
+// comments — the audit trail relies on author identity staying authentic.
+func (s *Server) canEditComment(user string, c *model.Comment) bool {
+	if c == nil {
+		return false
+	}
+	if c.Author == user {
+		return true
+	}
+	if u, err := s.store.GetUser(user); err == nil && u != nil && u.IsAdmin {
+		return true
+	}
+	return false
+}
+
+// patchComment updates the body of a comment. Anchor fields (file/line/side)
+// are intentionally immutable — see UpdateCommentBody for rationale.
+func (s *Server) patchComment(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "invalid comment id"})
+		return
+	}
+	cm, err := s.store.GetComment(id)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if cm == nil {
+		c.JSON(404, gin.H{"error": "comment not found"})
+		return
+	}
+	if !s.canEditComment(s.currentUser(c), cm) {
+		c.JSON(403, gin.H{"error": "只能编辑自己发表的评论"})
+		return
+	}
+	var req struct {
+		Body string `json:"body" binding:"required,min=1,max=4000"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	out, err := s.store.UpdateCommentBody(id, req.Body)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, out)
+}
+
+// deleteComment soft-deletes... actually hard-deletes a comment. We don't
+// keep tombstones because the audit_logs table is the authoritative
+// per-action history; if you need "soft delete" semantics, add it there.
+func (s *Server) deleteComment(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "invalid comment id"})
+		return
+	}
+	cm, err := s.store.GetComment(id)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if cm == nil {
+		c.JSON(404, gin.H{"error": "comment not found"})
+		return
+	}
+	if !s.canEditComment(s.currentUser(c), cm) {
+		c.JSON(403, gin.H{"error": "只能删除自己发表的评论"})
+		return
+	}
+	if _, err := s.store.DeleteComment(id); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true})
 }
 
 // canManageReviewers gates POST/DELETE on /reviews/:id/reviewers. We accept:
