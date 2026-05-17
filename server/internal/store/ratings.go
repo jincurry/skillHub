@@ -1,8 +1,6 @@
 package store
 
 import (
-	"database/sql"
-
 	"github.com/jincurry/skillhub/server/internal/model"
 )
 
@@ -15,38 +13,35 @@ func (s *Store) RateSkill(ns, name, username string, stars int, comment string) 
 	defer tx.Rollback()
 
 	var skillID int64
-	if err := tx.QueryRow(`SELECT id FROM skills WHERE ns=? AND name=?`, ns, name).Scan(&skillID); err != nil {
-		return nil, err
-	}
 	var skillAuthor string
-	_ = tx.QueryRow(`SELECT author FROM skills WHERE id=?`, skillID).Scan(&skillAuthor)
-
-	var prev int
-	row := tx.QueryRow(`SELECT stars FROM skill_ratings WHERE skill_id=? AND username=?`, skillID, username)
-	switch err := row.Scan(&prev); err {
-	case nil:
-		// update existing
-		if _, err := tx.Exec(`UPDATE skill_ratings SET stars=?, comment=?, created_at=CURRENT_TIMESTAMP WHERE skill_id=? AND username=?`,
-			stars, comment, skillID, username); err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(`UPDATE skills SET ratings_sum = ratings_sum - ? + ?, rating = CAST(ratings_sum - ? + ? AS REAL)/ratings_count
-			WHERE id=? AND ratings_count > 0`, prev, stars, prev, stars, skillID); err != nil {
-			return nil, err
-		}
-	case sql.ErrNoRows:
-		if _, err := tx.Exec(`INSERT INTO skill_ratings(skill_id,username,stars,comment) VALUES(?,?,?,?)`,
-			skillID, username, stars, comment); err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(`UPDATE skills SET ratings_sum = ratings_sum + ?, ratings_count = ratings_count + 1,
-			rating = CAST(ratings_sum + ? AS REAL)/(ratings_count + 1) WHERE id=?`,
-			stars, stars, skillID); err != nil {
-			return nil, err
-		}
-	default:
+	if err := tx.QueryRow(`SELECT id, author FROM skills WHERE ns=? AND name=?`, ns, name).
+		Scan(&skillID, &skillAuthor); err != nil {
 		return nil, err
 	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO skill_ratings(skill_id, username, stars, comment)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(skill_id, username) DO UPDATE SET
+			stars      = excluded.stars,
+			comment    = excluded.comment,
+			created_at = CURRENT_TIMESTAMP`,
+		skillID, username, stars, comment); err != nil {
+		return nil, err
+	}
+
+	// Recompute aggregates from the source of truth rather than maintaining
+	// incremental deltas across insert vs update branches.
+	if _, err := tx.Exec(`
+		UPDATE skills SET
+			ratings_count = (SELECT COUNT(*)                FROM skill_ratings WHERE skill_id = ?),
+			ratings_sum   = (SELECT COALESCE(SUM(stars), 0) FROM skill_ratings WHERE skill_id = ?),
+			rating        = COALESCE((SELECT AVG(CAST(stars AS REAL)) FROM skill_ratings WHERE skill_id = ?), 0)
+		WHERE id = ?`,
+		skillID, skillID, skillID, skillID); err != nil {
+		return nil, err
+	}
+
 	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
 		username, "rate_skill", ns+"/"+name, "", "127.0.0.1"); err != nil {
 		return nil, err

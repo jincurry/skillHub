@@ -12,6 +12,30 @@ import (
 	"github.com/jincurry/skillhub/server/internal/policy"
 )
 
+// skillCols is the canonical SELECT column list for the skills table.
+// All queries that hydrate a model.Skill must use this constant so that
+// adding a new column only requires one change here plus the scanSkill body.
+const skillCols = `id,ns,name,description,long_desc,icon,icon_class,classification,` +
+	`status,version,author,rating,ratings_count,activations,delta_pct,hot,tags_csv,updated_at`
+
+// scanner is satisfied by both *sql.Row and *sql.Rows.
+type scanner interface{ Scan(dest ...any) error }
+
+// scanSkill scans one skills row into a model.Skill.
+func scanSkill(row scanner) (model.Skill, error) {
+	var k model.Skill
+	var tagsCSV string
+	var hot int
+	if err := row.Scan(&k.ID, &k.Namespace, &k.Name, &k.Description, &k.LongDesc,
+		&k.Icon, &k.IconClass, &k.Classification, &k.Status, &k.Version, &k.Author,
+		&k.Rating, &k.Ratings, &k.Activations, &k.DeltaPct, &hot, &tagsCSV, &k.UpdatedAt); err != nil {
+		return model.Skill{}, err
+	}
+	k.Hot = hot != 0
+	k.Tags = splitCSV(tagsCSV)
+	return k, nil
+}
+
 // scanReviewSnapshot decodes the policy_snapshot JSON column into a
 // *model.PolicySnapshot. Empty string (legacy rows) → nil so callers can
 // fall back to the live policy.
@@ -50,9 +74,7 @@ type SkillFilter struct {
 }
 
 func (s *Store) ListSkills(f SkillFilter) ([]model.Skill, error) {
-	q := `SELECT id,ns,name,description,long_desc,icon,icon_class,classification,status,version,author,
-	             rating,ratings_count,activations,delta_pct,hot,tags_csv,updated_at
-	      FROM skills WHERE 1=1`
+	q := `SELECT ` + skillCols + ` FROM skills WHERE 1=1`
 	args := []any{}
 	if f.Namespace != "" {
 		q += ` AND ns = ?`
@@ -84,38 +106,24 @@ func (s *Store) ListSkills(f SkillFilter) ([]model.Skill, error) {
 	defer rows.Close()
 	var out []model.Skill
 	for rows.Next() {
-		var k model.Skill
-		var tagsCSV string
-		var hot int
-		if err := rows.Scan(&k.ID, &k.Namespace, &k.Name, &k.Description, &k.LongDesc,
-			&k.Icon, &k.IconClass, &k.Classification, &k.Status, &k.Version, &k.Author,
-			&k.Rating, &k.Ratings, &k.Activations, &k.DeltaPct, &hot, &tagsCSV, &k.UpdatedAt); err != nil {
+		k, err := scanSkill(rows)
+		if err != nil {
 			return nil, err
 		}
-		k.Hot = hot != 0
-		k.Tags = splitCSV(tagsCSV)
 		out = append(out, k)
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) GetSkill(ns, name string) (*model.Skill, error) {
-	row := s.DB.QueryRow(`SELECT id,ns,name,description,long_desc,icon,icon_class,classification,status,version,author,
-	             rating,ratings_count,activations,delta_pct,hot,tags_csv,updated_at
-	      FROM skills WHERE ns=? AND name=?`, ns, name)
-	var k model.Skill
-	var tagsCSV string
-	var hot int
-	if err := row.Scan(&k.ID, &k.Namespace, &k.Name, &k.Description, &k.LongDesc,
-		&k.Icon, &k.IconClass, &k.Classification, &k.Status, &k.Version, &k.Author,
-		&k.Rating, &k.Ratings, &k.Activations, &k.DeltaPct, &hot, &tagsCSV, &k.UpdatedAt); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
+	row := s.DB.QueryRow(`SELECT `+skillCols+` FROM skills WHERE ns=? AND name=?`, ns, name)
+	k, err := scanSkill(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, err
 	}
-	k.Hot = hot != 0
-	k.Tags = splitCSV(tagsCSV)
 	return &k, nil
 }
 
@@ -575,8 +583,7 @@ func (s *Store) MarkNotificationsRead(user string, ids []int64, all bool) error 
 }
 
 func (s *Store) ListMyDrafts(user string) ([]model.Skill, error) {
-	rows, err := s.DB.Query(`SELECT id,ns,name,description,long_desc,icon,icon_class,classification,status,version,author,
-		rating,ratings_count,activations,delta_pct,hot,tags_csv,updated_at
+	rows, err := s.DB.Query(`SELECT `+skillCols+`
 		FROM skills WHERE author=? AND status='draft' ORDER BY updated_at DESC`, user)
 	if err != nil {
 		return nil, err
@@ -584,16 +591,10 @@ func (s *Store) ListMyDrafts(user string) ([]model.Skill, error) {
 	defer rows.Close()
 	var out []model.Skill
 	for rows.Next() {
-		var k model.Skill
-		var tagsCSV string
-		var hot int
-		if err := rows.Scan(&k.ID, &k.Namespace, &k.Name, &k.Description, &k.LongDesc,
-			&k.Icon, &k.IconClass, &k.Classification, &k.Status, &k.Version, &k.Author,
-			&k.Rating, &k.Ratings, &k.Activations, &k.DeltaPct, &hot, &tagsCSV, &k.UpdatedAt); err != nil {
+		k, err := scanSkill(rows)
+		if err != nil {
 			return nil, err
 		}
-		k.Hot = hot != 0
-		k.Tags = splitCSV(tagsCSV)
 		out = append(out, k)
 	}
 	return out, rows.Err()
