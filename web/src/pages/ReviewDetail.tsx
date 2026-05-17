@@ -606,7 +606,6 @@ function ChangesView({ files, comments, reviewId, me, editingCommentId, editingB
 
   // Editor refs for click-to-comment
   const originalEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
-  const modifiedEditorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
   const handleEditorMount = (editor: editor.IStandaloneDiffEditor) => {
     originalEditorRef.current = editor;

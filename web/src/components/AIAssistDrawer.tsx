@@ -122,7 +122,6 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
     return estimateTokens(base) + estimateTokens(sel) + estimateTokens(instruction);
     // bridge identity is stable per active file; we explicitly want this to
     // recompute when the user toggles useSelection or edits the instruction.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge, useSelection, instruction]);
 
   const outputTokens = useMemo(() => estimateTokens(output), [output]);

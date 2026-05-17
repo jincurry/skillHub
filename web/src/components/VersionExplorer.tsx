@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { renderMarkdown } from '../lib/markdown';
 import { languageFor } from '../lib/files';
-import type { ReviewFile, SkillVersion } from '../api/types';
+import type { SkillVersion } from '../api/types';
 import { IconXCircle, IconFile, IconChevronRight } from './Icons';
 
 interface Props {

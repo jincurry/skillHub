@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom';
-import { Sparkline } from '../components/Sparkline';
 import { StatusPill, ClassificationTag } from '../components/Tags';
 import {
   IconPlus, IconArrowUp, IconArrowDown, IconCheckCircle,

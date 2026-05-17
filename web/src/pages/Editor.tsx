@@ -213,7 +213,7 @@ function serializeFrontmatter(fields: Record<string, string>): string {
       lines.push(`${k}: ""`);
       continue;
     }
-    const needsQuote = /[:#"']/.test(v) || /^\s|\s$/.test(v) || /^[\[{>|&*!%@`]/.test(v);
+    const needsQuote = /[:#"']/.test(v) || /^\s|\s$/.test(v) || /^[[{|>|&*!%@`]/.test(v);
     lines.push(`${k}: ${needsQuote ? JSON.stringify(v) : v}`);
   }
   return lines.join('\n');
@@ -1303,7 +1303,6 @@ export function Editor() {
     if (!showSubmit && draftHandleRef.current) {
       stopDraft();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSubmit]);
 
   // Collect validation error strings for the AI fix-validation action.
