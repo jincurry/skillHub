@@ -13,7 +13,7 @@ func (s *Server) listNamespacePolicies(c *gin.Context) {
 	ns := c.Param("ns")
 	out, err := s.store.ListNamespacePolicies(ns)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{"ns": ns, "policies": out})
@@ -69,13 +69,13 @@ func (s *Server) upsertNamespacePolicy(c *gin.Context) {
 	}
 	actor := s.currentUser(c)
 	if err := s.store.UpsertNamespacePolicy(ns, cls, pol, actor); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	// Echo back the full list so the UI can refresh in one round-trip.
 	out, err := s.store.ListNamespacePolicies(ns)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{"ns": ns, "policies": out})
@@ -91,12 +91,12 @@ func (s *Server) deleteNamespacePolicy(c *gin.Context) {
 		return
 	}
 	if err := s.store.DeleteNamespacePolicy(ns, cls); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	out, err := s.store.ListNamespacePolicies(ns)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{"ns": ns, "policies": out})

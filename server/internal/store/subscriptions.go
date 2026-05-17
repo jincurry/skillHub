@@ -71,26 +71,18 @@ func (s *Store) ListMySubscriptions(user string) ([]model.Subscription, error) {
 // reviewer who approved) are excluded — they don't need to hear about
 // their own publish. Runs inside the existing DecideReview transaction so
 // either everything commits or nothing does.
+//
+// Implemented as a single INSERT … SELECT so we hold the writer lock for one
+// statement regardless of subscriber count, instead of N+1 round-trips.
 func fanOutPublishNotifTx(tx *sql.Tx, ns, name, version, author, actor string) error {
-	rows, err := tx.Query(`SELECT username FROM subscriptions WHERE ns=? AND skill_name=?`, ns, name)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
 	body := "你关注的 " + ns + "/" + name + " 发布了 v" + version
-	for rows.Next() {
-		var u string
-		if err := rows.Scan(&u); err != nil {
-			return err
-		}
-		if u == author || u == actor {
-			continue
-		}
-		if _, err := tx.Exec(
-			`INSERT INTO notifications(user,kind,target_kind,target_ref,body) VALUES(?,?,?,?,?)`,
-			u, "publish", "skill", ns+"/"+name, body); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
+	target := ns + "/" + name
+	_, err := tx.Exec(`
+		INSERT INTO notifications(user, kind, target_kind, target_ref, body)
+		SELECT username, 'publish', 'skill', ?, ?
+		  FROM subscriptions
+		 WHERE ns = ? AND skill_name = ?
+		   AND username != ? AND username != ?`,
+		target, body, ns, name, author, actor)
+	return err
 }
