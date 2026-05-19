@@ -5,6 +5,7 @@ type Props = Omit<SVGProps<SVGSVGElement>, 'stroke'> & { size?: number; stroke?:
 const Base = ({ children, size = 16, stroke = 1.6, ...rest }: Props) => (
   <svg
     className="icon"
+    role="img"
     width={size}
     height={size}
     viewBox="0 0 24 24"
