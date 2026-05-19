@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { RequireAuth } from './components/RequireAuth';
@@ -9,9 +10,21 @@ import { Reviews } from './pages/Reviews';
 import { ReviewDetail } from './pages/ReviewDetail';
 import { Audit } from './pages/Audit';
 import { Admin } from './pages/Admin';
-import { Editor } from './pages/Editor';
 import { Profile } from './pages/Profile';
 import { Login } from './pages/Login';
+
+// Editor pulls in @monaco-editor/react (~2MB) and the markdown preview
+// pipeline. Lazy-load it so users browsing skills, reviewing, or doing admin
+// work don't pay the cost up front.
+const Editor = lazy(() => import('./pages/Editor').then((m) => ({ default: m.Editor })));
+
+function EditorFallback() {
+  return (
+    <div style={{ padding: 32, color: 'var(--text-subtle)', fontSize: 13 }}>
+      正在加载编辑器…
+    </div>
+  );
+}
 
 export default function App() {
   return (
@@ -22,7 +35,10 @@ export default function App() {
         <Route path="workspace" element={<Workspace />} />
         <Route path="skills" element={<Browse />} />
         <Route path="skills/:ns/:name" element={<SkillDetail />} />
-        <Route path="skills/:ns/:name/edit" element={<Editor />} />
+        <Route
+          path="skills/:ns/:name/edit"
+          element={<Suspense fallback={<EditorFallback />}><Editor /></Suspense>}
+        />
         <Route path="reviews" element={<Reviews />} />
         <Route path="reviews/:id" element={<ReviewDetail />} />
         <Route path="audit" element={<Audit />} />

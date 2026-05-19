@@ -1,762 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import MonacoEditor, { type OnMount } from '@monaco-editor/react';
 import {
   IconCode, IconCheckCircle, IconRocket, IconChevronDown, IconChevronRight,
-  IconAlertTriangle, IconXCircle, IconPlus, IconSparkles, IconPencil,
+  IconAlertTriangle, IconXCircle, IconPlus, IconSparkles,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
-import type { AIAssistAction, SkillFile, ValidationReport } from '../api/types';
+import type { AIAssistAction, ValidationReport } from '../api/types';
 import { AIAssistDrawer, type EditorBridge } from '../components/AIAssistDrawer';
 import { runAssist, type AssistHandle } from '../lib/aiAssist';
 import { languageFor } from '../lib/files';
 import { renderMarkdown } from '../lib/markdown';
 import { estimateTokens, fmtTokens } from '../lib/tokens';
+import {
+  AUTOSAVE_MS, REQUIRED_FILES, SEMVER_RE, STD_DIRS, TEMPLATE_GROUPS,
+  type StdDirKey,
+} from './editor/constants';
+import { bumpVersion, draftKeyFor, iconFor, seedFileForDir, type SemverBump } from './editor/helpers';
+import { bodyForPreview, parseFrontmatter, setFrontmatter } from './editor/frontmatter';
+import { computeDiff } from './editor/diff';
+import { FrontmatterField, TagsField } from './editor/FrontmatterField';
+import { FilePicker } from './editor/FilePicker';
+import { FileTree, buildTree } from './editor/FileTree';
 
-// --------- helpers --------------------------------------------------------
-
-type SemverBump = 'patch' | 'minor' | 'major';
-
-// Parse a semver-ish version into its three numeric components plus an
-// optional pre-release tail (so `1.2.3-beta.4` survives intact). We don't
-// try to be a full semver parser — just "good enough" to bump correctly.
-function parseSemver(v: string): { maj: number; min: number; patch: number; tail: string } | null {
-  const m = v.match(/^(\d+)\.(\d+)\.(\d+)(.*)$/);
-  if (!m) return null;
-  return { maj: +m[1], min: +m[2], patch: +m[3], tail: m[4] || '' };
-}
-
-function bumpVersion(current?: string, kind: SemverBump = 'patch'): string {
-  if (!current) return '0.1.0';
-  const p = parseSemver(current);
-  if (!p) return current;
-  // We deliberately drop the pre-release tail on a bump — semver says a
-  // pre-release is "less than" the release, so 1.2.3-beta + patch must
-  // become 1.2.4, not 1.2.4-beta.
-  switch (kind) {
-    case 'major': return `${p.maj + 1}.0.0`;
-    case 'minor': return `${p.maj}.${p.min + 1}.0`;
-    default:      return `${p.maj}.${p.min}.${p.patch + 1}`;
-  }
-}
-
-const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
-
-// Only SKILL.md is pinned — it's the bundle's canonical entry point and the
-// validate pass treats its absence as a blocker. skill.yaml / README.md are
-// useful defaults but the author can delete them if they want a different
-// structure.
-const REQUIRED_FILES = new Set(['SKILL.md']);
-
-// Recommended skill-bundle layout (matches the Anthropic skill spec).
-// We surface these in the file tree (always visible, even when empty) and in
-// the side-panel Bundle Structure card.
-const STD_DIRS = [
-  { key: 'scripts', label: 'scripts', desc: '可执行脚本（.py / .sh / .ts …）', icon: '🔧' },
-  { key: 'references', label: 'references', desc: '参考文档与长篇说明', icon: '📚' },
-  { key: 'assets', label: 'assets', desc: '模板与静态资源', icon: '🎨' },
-] as const;
-type StdDirKey = (typeof STD_DIRS)[number]['key'];
-
-const STD_DIR_KEYS = new Set<string>(STD_DIRS.map((d) => d.key));
-
-function dirIconFor(name: string): string {
-  switch (name) {
-    case 'scripts': return '🔧';
-    case 'references': return '📚';
-    case 'assets': return '🎨';
-    case 'docs': return '📘';
-    case 'examples': return '💡';
-    case 'tests': return '🧪';
-    default: return '📁';
-  }
-}
-
-// Default seed contents used by the "Create dir" shortcut and the categorized
-// template list in the new-file dialog. The path is the file we'll actually
-// create; the content is what gets PUT to it.
-interface FileTemplate {
-  path: string;
-  content?: string;
-  desc?: string;
-}
-const TEMPLATE_GROUPS: { title: string; items: FileTemplate[] }[] = [
-  {
-    title: '核心',
-    items: [
-      {
-        path: 'SKILL.md',
-        desc: '元数据 + 说明（推荐入口）',
-        content:
-          '---\nname: my-skill\ndescription: (一句话描述)\nlicense: Apache-2.0\n---\n\n' +
-          '# my-skill\n\n## 何时使用\n\n- \n\n## 使用方式\n\n## 脚本\n\n## 参考资料\n\n## 资源\n',
-      },
-      { path: 'README.md', desc: '中文 README' },
-    ],
-  },
-  {
-    title: '🔧 scripts/ · 脚本',
-    items: [
-      {
-        path: 'scripts/main.py',
-        desc: 'Python 入口',
-        content: '#!/usr/bin/env python3\n"""Entry point for this skill."""\n\n\ndef main() -> None:\n    pass\n\n\nif __name__ == "__main__":\n    main()\n',
-      },
-      {
-        path: 'scripts/run.sh',
-        desc: 'Shell 入口',
-        content: '#!/usr/bin/env bash\nset -euo pipefail\n\n# Entry point — replace with your logic.\necho "hello from skill"\n',
-      },
-    ],
-  },
-  {
-    title: '📚 references/ · 参考',
-    items: [
-      { path: 'references/api.md', desc: 'API / 数据规约', content: '# API 规约\n\n## 输入\n\n## 输出\n' },
-      { path: 'references/notes.md', desc: '设计笔记', content: '# 设计笔记\n' },
-    ],
-  },
-  {
-    title: '🎨 assets/ · 资源',
-    items: [
-      { path: 'assets/template.json', desc: 'JSON 模板', content: '{\n  "example": true\n}\n' },
-      { path: 'assets/prompt.md', desc: 'Prompt 模板', content: '# Prompt 模板\n\n你是一个 ...\n' },
-    ],
-  },
-  {
-    title: '其他',
-    items: [
-      { path: 'docs/usage.md', desc: '使用说明' },
-      { path: 'examples/basic.md', desc: '示例' },
-      { path: 'tests/fixtures.md', desc: '测试夹具' },
-    ],
-  },
-];
-
-// Quick-create stub for a missing recommended dir. We seed the dir with a
-// short README.md so the directory actually exists in storage (the backend
-// has no concept of empty dirs) and so the file gives the maintainer a hint
-// about what to put there.
-function seedFileForDir(d: StdDirKey, name: string): { path: string; content: string } {
-  switch (d) {
-    case 'scripts':
-      return {
-        path: 'scripts/README.md',
-        content: '# scripts/\n\n可执行脚本（Python / Shell / TypeScript）。\n\n约定:\n- 第一个 shebang 行声明解释器\n- 每个脚本都应能独立运行\n',
-      };
-    case 'references':
-      return {
-        path: 'references/README.md',
-        content: '# references/\n\n参考资料与长篇说明文档放在这里。SKILL.md 应当只放最关键的指引，详细内容链接到这里。\n',
-      };
-    case 'assets':
-      return {
-        path: 'assets/README.md',
-        content: '# assets/\n\n模板、Prompt 片段、静态资源（JSON / YAML / 图片等）放在这里。\n',
-      };
-  }
-  // Unreachable but TS demands the path.
-  return { path: `${name}/README.md`, content: `# ${name}/\n` };
-}
-
-// --------- frontmatter ----------------------------------------------------
-//
-// The frontmatter form (SKILL.md → name / description / license / ...) reads
-// and writes the YAML block between the leading `---` fences. We deliberately
-// keep the parser tiny — only scalar `key: value` lines — and quote on output
-// only when a value contains characters that would round-trip ambiguously.
-
-interface ParsedFrontmatter {
-  /** Recognized scalar fields. Unparseable lines (lists, nested objects) are
-      preserved by leaving the raw region in place when we don't write back. */
-  fields: Record<string, string>;
-  /** Doc body after the closing fence (or the whole doc when there's no fm). */
-  body: string;
-  /** True if the doc starts with a `---` block we recognised. */
-  hasFrontmatter: boolean;
-}
-
-function parseFrontmatter(src: string): ParsedFrontmatter {
-  if (!src.startsWith('---\n') && !src.startsWith('---\r\n')) {
-    return { fields: {}, body: src, hasFrontmatter: false };
-  }
-  const after = src.indexOf('\n', 3) + 1;
-  const close = src.indexOf('\n---', after);
-  if (close < 0) {
-    return { fields: {}, body: src, hasFrontmatter: false };
-  }
-  const raw = src.slice(after, close);
-  let bodyStart = close + 4;            // past "\n---"
-  if (src[bodyStart] === '\r') bodyStart++;
-  if (src[bodyStart] === '\n') bodyStart++;
-  const fields: Record<string, string> = {};
-  for (const line of raw.split(/\r?\n/)) {
-    const m = /^([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*)$/.exec(line);
-    if (!m) continue;
-    let v = m[2].trim();
-    if (
-      (v.startsWith('"') && v.endsWith('"') && v.length >= 2) ||
-      (v.startsWith("'") && v.endsWith("'") && v.length >= 2)
-    ) {
-      v = v.slice(1, -1);
-    }
-    fields[m[1]] = v;
-  }
-  return { fields, body: src.slice(bodyStart), hasFrontmatter: true };
-}
-
-function serializeFrontmatter(fields: Record<string, string>): string {
-  const lines: string[] = [];
-  for (const [k, v] of Object.entries(fields)) {
-    if (v === '') {
-      lines.push(`${k}: ""`);
-      continue;
-    }
-    const needsQuote = /[:#"']/.test(v) || /^\s|\s$/.test(v) || /^[[{|>|&*!%@`]/.test(v);
-    lines.push(`${k}: ${needsQuote ? JSON.stringify(v) : v}`);
-  }
-  return lines.join('\n');
-}
-
-/** Replace the frontmatter region in `src` with `fields`. If `src` had no
-    frontmatter, prepend a fresh one. */
-function setFrontmatter(src: string, fields: Record<string, string>): string {
-  const yaml = serializeFrontmatter(fields);
-  const parsed = parseFrontmatter(src);
-  if (parsed.hasFrontmatter) {
-    return `---\n${yaml}\n---\n${parsed.body}`;
-  }
-  return `---\n${yaml}\n---\n\n${src}`;
-}
-
-/** Strip frontmatter so the preview pane only renders the document body. */
-function bodyForPreview(src: string): string {
-  return parseFrontmatter(src).body;
-}
-
-// --------- misc -----------------------------------------------------------
-
-// Draft backup keys live under one namespace so we can sweep them later
-// (e.g. on logout) without hitting unrelated keys.
-function draftKeyFor(ns: string, name: string, path: string): string {
-  return `skillHub:draft:${ns}/${name}/${path}`;
-}
-
-// Debounce window for the network autosave. The localStorage backup is
-// written eagerly on every buffer change since it's cheap.
-const AUTOSAVE_MS = 1500;
-
-function iconFor(path: string): string {
-  const ext = path.toLowerCase().split('.').pop() || '';
-  if (ext === 'yaml' || ext === 'yml') return '⚙️';
-  if (ext === 'md') return '📝';
-  if (ext === 'go' || ext === 'py' || ext === 'ts' || ext === 'js' || ext === 'sh') return '🔧';
-  if (ext === 'json' || ext === 'toml') return '🧾';
-  return '📄';
-}
-
-// --------- frontmatter form ----------------------------------------------
-
-/** A single labelled input that holds its own typing buffer and only flushes
- *  to the parent on blur (or Enter). This avoids re-rendering the Monaco
- *  model on every keystroke when the user types in the form. */
-function FrontmatterField({
-  label,
-  fieldKey,
-  upstream,
-  placeholder,
-  multiline = false,
-  readOnly = false,
-  onCommit,
-}: {
-  label: string;
-  fieldKey: string;
-  upstream: string;
-  placeholder?: string;
-  multiline?: boolean;
-  readOnly?: boolean;
-  onCommit: (key: string, val: string) => void;
-}) {
-  const [local, setLocal] = useState(upstream);
-  const [focused, setFocused] = useState(false);
-  // Re-sync from upstream when we're not actively typing. This catches both
-  // file switches and any frontmatter edits the user might make in Monaco.
-  useEffect(() => {
-    if (!focused) setLocal(upstream);
-  }, [upstream, focused]);
-  const commit = () => {
-    if (local !== upstream) onCommit(fieldKey, local);
-  };
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    fontSize: 12,
-    padding: '4px 8px',
-    background: 'var(--bg)',
-    border: '1px solid var(--border)',
-    borderRadius: 4,
-    color: 'var(--text)',
-    fontFamily: 'inherit',
-    resize: multiline ? 'vertical' : 'none',
-  };
-  return (
-    <label style={{
-      display: 'flex', gap: 8,
-      alignItems: multiline ? 'flex-start' : 'center',
-      fontSize: 12,
-    }}>
-      <span style={{
-        width: 76, flexShrink: 0,
-        color: 'var(--text-muted)',
-        textAlign: 'right',
-        paddingTop: multiline ? 5 : 0,
-      }}>{label}</span>
-      {multiline ? (
-        <textarea
-          value={local}
-          readOnly={readOnly}
-          placeholder={placeholder}
-          rows={2}
-          onChange={(e) => setLocal(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => { setFocused(false); commit(); }}
-          style={inputStyle}
-        />
-      ) : (
-        <input
-          value={local}
-          readOnly={readOnly}
-          placeholder={placeholder}
-          onChange={(e) => setLocal(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => { setFocused(false); commit(); }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); }
-          }}
-          style={inputStyle}
-        />
-      )}
-    </label>
-  );
-}
-
-// --------- tags chip field -----------------------------------------------
-
-function TagsField({
-  upstream,
-  readOnly,
-  onCommit,
-}: {
-  upstream: string;
-  readOnly: boolean;
-  onCommit: (key: string, val: string) => void;
-}) {
-  const [input, setInput] = useState('');
-  const tags = upstream ? upstream.split(',').map((t) => t.trim()).filter(Boolean) : [];
-
-  function addTag(raw: string) {
-    const t = raw.trim();
-    if (!t || tags.includes(t)) { setInput(''); return; }
-    onCommit('tags', [...tags, t].join(','));
-    setInput('');
-  }
-  function removeTag(tag: string) {
-    onCommit('tags', tags.filter((t) => t !== tag).join(','));
-  }
-
-  return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12 }}>
-      <span style={{ width: 76, flexShrink: 0, color: 'var(--text-muted)', textAlign: 'right', paddingTop: 4 }}>tags</span>
-      <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: tags.length ? 4 : 0 }}>
-          {tags.map((t) => (
-            <span key={t} style={{
-              display: 'inline-flex', alignItems: 'center', gap: 3,
-              padding: '1px 6px', borderRadius: 4,
-              background: 'rgba(79,70,229,0.08)', color: 'var(--primary)',
-              fontSize: 11, fontWeight: 500,
-            }}>
-              {t}
-              {!readOnly && (
-                <button type="button" onClick={() => removeTag(t)} style={{
-                  border: 'none', background: 'transparent', cursor: 'pointer',
-                  padding: 0, lineHeight: 1, color: 'inherit', opacity: 0.7, fontSize: 13,
-                }}>×</button>
-              )}
-            </span>
-          ))}
-        </div>
-        {!readOnly && (
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(input); }
-              if (e.key === 'Backspace' && !input && tags.length > 0) removeTag(tags[tags.length - 1]);
-            }}
-            onBlur={() => { if (input.trim()) addTag(input); }}
-            placeholder={tags.length ? '继续添加…' : '输入后按 Enter 或逗号添加标签'}
-            style={{
-              fontSize: 12, padding: '3px 8px', width: '100%',
-              background: 'var(--bg)', border: '1px solid var(--border)',
-              borderRadius: 4, color: 'var(--text)',
-            }}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// --------- quick-open file picker ----------------------------------------
-
-function FilePicker({
-  files,
-  onPick,
-  onClose,
-}: {
-  files: SkillFile[];
-  onPick: (path: string) => void;
-  onClose: () => void;
-}) {
-  const [query, setQuery] = useState('');
-  const [sel, setSel] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { inputRef.current?.focus(); }, []);
-
-  const filtered = useMemo(() => {
-    if (!query) return files.slice(0, 20);
-    const q = query.toLowerCase();
-    return files
-      .map((f) => ({ f, score: f.path.toLowerCase().indexOf(q) }))
-      .filter((x) => x.score >= 0)
-      .sort((a, b) => a.score - b.score)
-      .map((x) => x.f)
-      .slice(0, 20);
-  }, [files, query]);
-
-  useEffect(() => { setSel(0); }, [query]);
-
-  function pick(path: string) { onPick(path); onClose(); }
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
-      if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(s + 1, filtered.length - 1)); return; }
-      if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(s - 1, 0)); return; }
-      if (e.key === 'Enter') { e.preventDefault(); if (filtered[sel]) pick(filtered[sel].path); }
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, sel]);
-
-  return (
-    <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)',
-      display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-      zIndex: 200, paddingTop: '12vh',
-    }}>
-      <div onClick={(e) => e.stopPropagation()} style={{
-        background: 'var(--bg)', borderRadius: 10, width: 480, maxWidth: '92vw',
-        boxShadow: '0 20px 50px rgba(15,23,42,0.28)', border: '1px solid var(--border)', overflow: 'hidden',
-      }}>
-        <input
-          ref={inputRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="输入文件名快速跳转…"
-          style={{
-            width: '100%', padding: '12px 16px', fontSize: 14, border: 'none',
-            borderBottom: '1px solid var(--border)', background: 'var(--bg)',
-            color: 'var(--text)', outline: 'none', boxSizing: 'border-box',
-          }}
-        />
-        <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-          {filtered.length === 0 && (
-            <div style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-faint)' }}>没有匹配文件</div>
-          )}
-          {filtered.map((f, i) => (
-            <div
-              key={f.path}
-              onClick={() => pick(f.path)}
-              onMouseEnter={() => setSel(i)}
-              style={{
-                padding: '8px 16px', fontSize: 13, cursor: 'pointer',
-                background: i === sel ? 'var(--bg-hover)' : 'transparent',
-                display: 'flex', alignItems: 'center', gap: 8,
-              }}
-            >
-              <span>{iconFor(f.path)}</span>
-              <span style={{ flex: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5 }}>{f.path}</span>
-              {f.size != null && (
-                <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{f.size}B</span>
-              )}
-            </div>
-          ))}
-        </div>
-        <div style={{
-          padding: '7px 16px', borderTop: '1px solid var(--border)',
-          fontSize: 11, color: 'var(--text-faint)', display: 'flex', gap: 14,
-        }}>
-          <span>↑↓ 移动</span><span>↵ 打开</span><span>Esc 关闭</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// --------- line diff ---------------------------------------------------------
-
-type DiffLine = { t: ' ' | '+' | '-' | '…'; s: string };
-
-function computeDiff(before: string, after: string, ctx = 3): DiffLine[] {
-  const A = before ? before.split('\n') : [];
-  const B = after ? after.split('\n') : [];
-  // Cap for perf; skill files are tiny so this never triggers in practice.
-  const m = Math.min(A.length, 400), n = Math.min(B.length, 400);
-  const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
-  for (let i = m - 1; i >= 0; i--)
-    for (let j = n - 1; j >= 0; j--)
-      dp[i][j] = A[i] === B[j]
-        ? dp[i + 1][j + 1] + 1
-        : Math.max(dp[i + 1][j], dp[i][j + 1]);
-
-  const raw: DiffLine[] = [];
-  let i = 0, j = 0;
-  while (i < m || j < n) {
-    if (i < m && j < n && A[i] === B[j]) { raw.push({ t: ' ', s: A[i] }); i++; j++; }
-    else if (j < n && (i >= m || dp[i + 1][j] <= dp[i][j + 1])) { raw.push({ t: '+', s: B[j] }); j++; }
-    else { raw.push({ t: '-', s: A[i] }); i++; }
-  }
-
-  // Show only lines within ctx-range of a change.
-  const out: DiffLine[] = [];
-  let skip = 0;
-  for (let k = 0; k < raw.length; k++) {
-    const nearChange = raw
-      .slice(Math.max(0, k - ctx), Math.min(raw.length, k + ctx + 1))
-      .some((l) => l.t !== ' ');
-    if (!nearChange) { skip++; continue; }
-    if (skip > 0) { out.push({ t: '…', s: `⋯ ${skip} 行未更改` }); skip = 0; }
-    out.push(raw[k]);
-  }
-  if (skip > 0) out.push({ t: '…', s: `⋯ ${skip} 行未更改` });
-  return out;
-}
-
-// --------- file tree ------------------------------------------------------
-
-interface TreeNode {
-  name: string;
-  path: string;             // full path for files; directory prefix for dirs
-  isDir: boolean;
-  children: TreeNode[];
-  size?: number;
-}
-
-function buildTree(files: SkillFile[]): TreeNode {
-  const root: TreeNode = { name: '', path: '', isDir: true, children: [] };
-  for (const f of files) {
-    const parts = f.path.split('/');
-    let node = root;
-    let acc = '';
-    for (let i = 0; i < parts.length; i++) {
-      const seg = parts[i];
-      const isLeaf = i === parts.length - 1;
-      acc = acc ? acc + '/' + seg : seg;
-      let child = node.children.find((c) => c.name === seg && c.isDir === !isLeaf);
-      if (!child) {
-        child = { name: seg, path: acc, isDir: !isLeaf, children: [] };
-        node.children.push(child);
-      }
-      if (isLeaf) child.size = f.size;
-      node = child;
-    }
-  }
-  // Sort: dirs first, alpha
-  const sortRec = (n: TreeNode) => {
-    n.children.sort((a, b) => {
-      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-    n.children.forEach(sortRec);
-  };
-  sortRec(root);
-  return root;
-}
-
-function FileTree({
-  root,
-  activePath,
-  dirtyPaths,
-  onPick,
-  onDelete,
-  onRename,
-  canEdit,
-}: {
-  root: TreeNode;
-  activePath: string | null;
-  dirtyPaths: Set<string>;
-  onPick: (p: string) => void;
-  onDelete: (p: string) => void;
-  /** Called with (oldPath, newPath). Should return true on success so the
-      inline editor can close itself. */
-  onRename: (oldPath: string, newPath: string) => Promise<boolean>;
-  canEdit: boolean;
-}) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  // Path currently being inline-renamed (null = none).
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [renameBusy, setRenameBusy] = useState(false);
-  const [renameErr, setRenameErr] = useState<string | null>(null);
-
-  const toggle = (p: string) => {
-    const next = new Set(collapsed);
-    next.has(p) ? next.delete(p) : next.add(p);
-    setCollapsed(next);
-  };
-  const startRename = (p: string) => {
-    setRenaming(p);
-    setRenameValue(p);
-    setRenameErr(null);
-  };
-  const cancelRename = () => {
-    if (renameBusy) return;
-    setRenaming(null);
-    setRenameValue('');
-    setRenameErr(null);
-  };
-  const commitRename = async () => {
-    if (!renaming) return;
-    const next = renameValue.trim();
-    if (!next || next === renaming) {
-      cancelRename();
-      return;
-    }
-    setRenameBusy(true);
-    setRenameErr(null);
-    try {
-      const ok = await onRename(renaming, next);
-      if (ok) {
-        setRenaming(null);
-        setRenameValue('');
-      }
-    } catch (e) {
-      setRenameErr((e as Error).message);
-    } finally {
-      setRenameBusy(false);
-    }
-  };
-
-  const renderNode = (n: TreeNode, depth: number): React.ReactNode => {
-    if (n.isDir) {
-      const isOpen = !collapsed.has(n.path);
-      // Top-level dirs that match the recommended layout get a coloured tint
-      // so users learn the convention without reading any docs.
-      const isStdDir = n.path === n.name && STD_DIR_KEYS.has(n.name);
-      return (
-        <div key={n.path || '(root)'}>
-          {n.path && (
-            <div
-              className="file-row dir"
-              style={{ paddingLeft: 8 + depth * 16, color: isStdDir ? 'var(--primary)' : undefined }}
-              onClick={() => toggle(n.path)}
-              title={isStdDir ? `推荐目录 · ${STD_DIRS.find((d) => d.key === n.name)?.desc ?? ''}` : n.path}
-            >
-              {isOpen ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
-              <span style={{ marginRight: 2 }}>{dirIconFor(n.name)}</span>
-              {n.name}/
-            </div>
-          )}
-          {(n.path === '' || isOpen) && n.children.map((c) => renderNode(c, n.path === '' ? depth : depth + 1))}
-        </div>
-      );
-    }
-    const dirty = dirtyPaths.has(n.path);
-    const isActive = activePath === n.path;
-    const required = REQUIRED_FILES.has(n.path);
-    const isRenaming = renaming === n.path;
-    if (isRenaming) {
-      // While renaming we replace the row with an inline form. We keep the
-      // same paddingLeft so the user's eye doesn't jump.
-      return (
-        <div key={n.path} style={{ paddingLeft: 8 + depth * 16, padding: '4px 8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>{iconFor(n.path)}</span>
-            <input
-              autoFocus
-              value={renameValue}
-              disabled={renameBusy}
-              onChange={(e) => { setRenameValue(e.target.value); if (renameErr) setRenameErr(null); }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
-                else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
-              }}
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                flex: 1, minWidth: 0,
-                fontSize: 12, fontFamily: 'var(--font-mono, monospace)',
-                padding: '2px 6px', height: 22,
-                border: '1px solid var(--primary, #4f46e5)', borderRadius: 4,
-                background: 'var(--bg)', color: 'var(--text)',
-              }}
-            />
-            <button
-              className="btn sm primary"
-              style={{ height: 22, padding: '0 6px', fontSize: 11 }}
-              disabled={renameBusy}
-              onClick={(e) => { e.stopPropagation(); commitRename(); }}
-            >{renameBusy ? '...' : 'OK'}</button>
-            <button
-              className="btn sm ghost"
-              style={{ height: 22, padding: '0 6px', fontSize: 11 }}
-              disabled={renameBusy}
-              onClick={(e) => { e.stopPropagation(); cancelRename(); }}
-            >取消</button>
-          </div>
-          {renameErr && (
-            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--red-text, #b91c1c)' }}>{renameErr}</div>
-          )}
-        </div>
-      );
-    }
-    return (
-      <div
-        key={n.path}
-        className={`file-row ${isActive ? 'active' : ''}`}
-        style={{ paddingLeft: 8 + depth * 16, display: 'flex', alignItems: 'center', gap: 6 }}
-        onClick={() => onPick(n.path)}
-        title={n.path}
-      >
-        <span>{iconFor(n.path)}</span>
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {n.name}
-        </span>
-        {dirty && <span className="file-status M" title="未保存">M</span>}
-        {canEdit && !required && (
-          <>
-            <button
-              className="btn sm ghost"
-              style={{ padding: '0 4px', height: 18, minWidth: 0, opacity: 0.5 }}
-              title={`重命名 ${n.path}`}
-              onClick={(e) => { e.stopPropagation(); startRename(n.path); }}
-            ><IconPencil size={11} /></button>
-            <button
-              className="btn sm ghost"
-              style={{ padding: '0 4px', height: 18, minWidth: 0, fontSize: 11, opacity: 0.5 }}
-              title={`删除 ${n.path}`}
-              onClick={(e) => { e.stopPropagation(); onDelete(n.path); }}
-            >×</button>
-          </>
-        )}
-      </div>
-    );
-  };
-  return <>{renderNode(root, 0)}</>;
-}
 
 // --------- main page ------------------------------------------------------
 
@@ -972,6 +239,13 @@ export function Editor() {
   }, [buffers]);
   const anyDirty = dirtyPaths.size > 0;
 
+  // Defer the buffer map for any derived view that doesn't need keystroke
+  // freshness. Keeps the side panels (token count, outline, preview, fm form)
+  // from blocking Monaco input while the user types in a big file. dirtyPaths
+  // and the save buttons stay sync because they gate user actions.
+  const deferredBuffers = useDeferredValue(buffers);
+  const deferredActiveBuf = activePath ? deferredBuffers[activePath] : undefined;
+
   // Warn users before leaving the page with unsaved edits.
   useEffect(() => {
     if (!anyDirty) return;
@@ -995,10 +269,12 @@ export function Editor() {
 
   // Total estimated token count for the whole bundle. Loaded buffers are
   // measured directly; unloaded files fall back to a byte-based estimate.
+  // Driven by deferredBuffers so per-keystroke typing doesn't re-walk every
+  // file in the bundle on the critical render path.
   const totalTokens = useMemo(() => {
     const counted = new Set<string>();
     let total = 0;
-    for (const [p, b] of Object.entries(buffers)) {
+    for (const [p, b] of Object.entries(deferredBuffers)) {
       total += estimateTokens(b.content);
       counted.add(p);
     }
@@ -1006,7 +282,7 @@ export function Editor() {
       if (!counted.has(f.path)) total += Math.ceil((f.size ?? 0) * 0.25);
     }
     return total;
-  }, [buffers, files.data]);
+  }, [deferredBuffers, files.data]);
 
   const tree = useMemo(() => buildTree(files.data ?? []), [files.data]);
   const activeBuf = activePath ? buffers[activePath] : undefined;
@@ -1030,11 +306,12 @@ export function Editor() {
   // Markdown outline for the currently-open SKILL.md (or any other .md). Used
   // by the side panel so users can jump to a heading inside long docs. We
   // re-parse on every buffer change but it's just a regex over a few KB so
-  // it's effectively free.
+  // it's effectively free. Driven by the deferred buffer so per-keystroke
+  // typing doesn't re-scan headings on the critical path.
   const outline = useMemo(() => {
-    if (!activePath || !activeBuf) return [] as { level: number; text: string; line: number }[];
+    if (!activePath || !deferredActiveBuf) return [] as { level: number; text: string; line: number }[];
     if (!activePath.toLowerCase().endsWith('.md')) return [];
-    const lines = activeBuf.content.split('\n');
+    const lines = deferredActiveBuf.content.split('\n');
     const result: { level: number; text: string; line: number }[] = [];
     let inFence = false;
     for (let i = 0; i < lines.length; i++) {
@@ -1048,7 +325,7 @@ export function Editor() {
       result.push({ level: m[1].length, text: m[2], line: i + 1 });
     }
     return result;
-  }, [activePath, activeBuf]);
+  }, [activePath, deferredActiveBuf]);
 
   function jumpToLine(line: number) {
     const ed = editorRef.current;
@@ -1065,20 +342,24 @@ export function Editor() {
 
   // Memoise the rendered preview so we only re-run the tiny markdown parser
   // when the buffer changes. The frontmatter block is stripped so it doesn't
-  // render as a stray paragraph.
+  // render as a stray paragraph. Deferred so a fast typist doesn't trigger
+  // the markdown parser on every keystroke on the critical path.
   const previewHtml = useMemo(() => {
-    if (!isMdFile || !activeBuf) return '';
-    return renderMarkdown(bodyForPreview(activeBuf.content));
-  }, [isMdFile, activeBuf]);
+    if (!isMdFile || !deferredActiveBuf) return '';
+    return renderMarkdown(bodyForPreview(deferredActiveBuf.content));
+  }, [isMdFile, deferredActiveBuf]);
 
   // Frontmatter form (B). The form mirrors `parseFrontmatter(activeBuf)` and
   // writes back through writeFrontmatter on field blur. We deliberately only
   // commit on blur so per-keystroke typing in the form doesn't fire a
   // model.setValue on Monaco (which would reset its cursor / scroll position).
+  // Deferred so editing in Monaco doesn't re-parse the YAML block on every
+  // keystroke; the form fields lag behind by one frame and that's fine because
+  // the underlying input components hold their own typing buffer anyway.
   const skillMdFm = useMemo(() => {
-    if (!isSkillMd || !activeBuf) return null;
-    return parseFrontmatter(activeBuf.content);
-  }, [isSkillMd, activeBuf]);
+    if (!isSkillMd || !deferredActiveBuf) return null;
+    return parseFrontmatter(deferredActiveBuf.content);
+  }, [isSkillMd, deferredActiveBuf]);
 
   const [fmCollapsed, setFmCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem('skillHub.editor.fmCollapsed') === '1'; }
