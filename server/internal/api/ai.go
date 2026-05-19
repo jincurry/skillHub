@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,7 +23,9 @@ func (s *Server) requireAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ok, err := s.store.IsAdmin(s.currentUser(c))
 		if err != nil {
-			c.AbortWithStatusJSON(500, gin.H{"error": err.Error()})
+			log.Printf("internal error: method=%s path=%s err=%v",
+				c.Request.Method, c.Request.URL.Path, err)
+			c.AbortWithStatusJSON(500, gin.H{"error": "internal server error"})
 			return
 		}
 		if !ok {
@@ -38,7 +41,7 @@ func (s *Server) requireAdmin() gin.HandlerFunc {
 func (s *Server) listAIProviders(c *gin.Context) {
 	out, err := s.store.ListAIProviders()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -52,7 +55,7 @@ func (s *Server) createAIProvider(c *gin.Context) {
 	}
 	p, err := s.store.CreateAIProvider(req, s.cfg.JWTSecret)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, p)
@@ -101,7 +104,7 @@ func (s *Server) testAIProvider(c *gin.Context) {
 	}
 	prov, key, err := s.store.GetAIProviderForUse(id, s.cfg.JWTSecret)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if prov == nil {
@@ -145,7 +148,7 @@ func (s *Server) testAIProvider(c *gin.Context) {
 func (s *Server) listAIProviderRefs(c *gin.Context) {
 	out, err := s.store.ListAIProviderRefs()
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)
@@ -160,7 +163,7 @@ func (s *Server) aiAssist(c *gin.Context) {
 
 	allowed, err := s.canEditSkill(user, ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -176,7 +179,7 @@ func (s *Server) aiAssist(c *gin.Context) {
 
 	prov, key, err := s.store.GetAIProviderForUse(req.ProviderID, s.cfg.JWTSecret)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if prov == nil {
@@ -186,7 +189,7 @@ func (s *Server) aiAssist(c *gin.Context) {
 
 	skill, err := s.store.GetSkill(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 

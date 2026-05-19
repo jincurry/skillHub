@@ -120,10 +120,7 @@ func (s *Store) Search(q string) (*model.SearchResult, error) {
 	}
 	like := "%" + q + "%"
 
-	// Skills — same column list as ListSkills so the JSON shape matches.
-	skillRows, err := s.DB.Query(`
-		SELECT id,ns,name,description,long_desc,icon,icon_class,classification,status,version,author,
-			rating,ratings_count,activations,delta_pct,hot,tags_csv,updated_at
+	skillRows, err := s.DB.Query(`SELECT `+skillCols+`
 		FROM skills
 		WHERE name LIKE ? OR description LIKE ? OR tags_csv LIKE ? OR ns LIKE ?
 		ORDER BY hot DESC, activations DESC
@@ -133,16 +130,10 @@ func (s *Store) Search(q string) (*model.SearchResult, error) {
 	}
 	defer skillRows.Close()
 	for skillRows.Next() {
-		var k model.Skill
-		var tagsCSV string
-		var hot int
-		if err := skillRows.Scan(&k.ID, &k.Namespace, &k.Name, &k.Description, &k.LongDesc,
-			&k.Icon, &k.IconClass, &k.Classification, &k.Status, &k.Version, &k.Author,
-			&k.Rating, &k.Ratings, &k.Activations, &k.DeltaPct, &hot, &tagsCSV, &k.UpdatedAt); err != nil {
+		k, err := scanSkill(skillRows)
+		if err != nil {
 			return nil, err
 		}
-		k.Hot = hot != 0
-		k.Tags = splitCSV(tagsCSV)
 		out.Skills = append(out.Skills, k)
 	}
 

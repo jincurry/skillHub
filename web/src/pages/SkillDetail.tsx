@@ -4,13 +4,15 @@ import { ClassificationTag, StatusPill } from '../components/Tags';
 import {
   IconStar, IconFire, IconCode,
   IconArrowUp, IconArrowDown, IconAlertTriangle,
-  IconFile, IconChevronRight, IconDownload, IconPlus,
+  IconFile, IconChevronRight, IconPlus,
 } from '../components/Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { RatingsPanel } from '../components/RatingsPanel';
 import { TrendChart } from '../components/TrendChart';
 import { VersionExplorer } from '../components/VersionExplorer';
+import { DownloadMenu } from '../components/DownloadMenu';
+import { SkillIcon } from '../components/SkillIcon';
 import { renderMarkdown } from '../lib/markdown';
 import { fmtRelative } from '../lib/notify';
 import {
@@ -178,14 +180,6 @@ export function SkillDetail() {
     }
   }
 
-  async function doDownloadBundle() {
-    try {
-      await api.downloadBundle(p.ns, p.name);
-    } catch (e) {
-      alert('下载失败：' + (e as Error).message);
-    }
-  }
-
   function openDistTagsModal() { setDistModalOpen(true); }
 
   return (
@@ -199,7 +193,7 @@ export function SkillDetail() {
       </div>
 
       <div className="detail-hero">
-        <div className={`skill-icon ${p.iconClass}`}>{p.icon}</div>
+        <SkillIcon ns={p.ns} name={p.name} icon={p.icon} iconClass={p.iconClass} size={56} borderRadius={12} fontSize={22} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>
@@ -247,12 +241,9 @@ export function SkillDetail() {
           )}
         </div>
         <div className="detail-hero-actions">
-          {/* Download bundle — available to everyone who can see the skill. */}
-          <button
-            className="btn"
-            onClick={doDownloadBundle}
-            title={`下载 ${p.ns}/${p.name} v${p.version} 的文件 bundle (.tar.gz)`}
-          ><IconDownload size={14} /> 下载</button>
+          {/* Download bundle — available to everyone who can see the skill.
+              The split button also exposes CLI commands (skillhub skill pull/get/activate). */}
+          <DownloadMenu ns={p.ns} name={p.name} version={p.version} />
 
           {/* Subscribe: writes an in-app notification on every publish. */}
           <button
@@ -289,7 +280,7 @@ export function SkillDetail() {
           )}
           {canEdit && (
             <button
-              className="btn sm"
+              className="btn"
               onClick={() => setEditMetaOpen(true)}
               title="修改描述、标签、密级等元数据"
             >编辑信息</button>

@@ -15,7 +15,7 @@ func (s *Server) listDistTags(c *gin.Context) {
 	ns, name := c.Param("ns"), c.Param("name")
 	out, err := s.store.ListDistTags(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if out == nil {
@@ -35,7 +35,7 @@ func (s *Server) setDistTag(c *gin.Context) {
 	user := s.currentUser(c)
 	allowed, err := s.canEditSkill(user, ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -64,7 +64,7 @@ func (s *Server) deleteDistTag(c *gin.Context) {
 	user := s.currentUser(c)
 	allowed, err := s.canEditSkill(user, ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if !allowed {
@@ -93,7 +93,7 @@ func (s *Server) subscribeSkill(c *gin.Context) {
 	// non-existent rows and never get notifications.
 	k, err := s.store.GetSkill(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if k == nil {
@@ -101,7 +101,7 @@ func (s *Server) subscribeSkill(c *gin.Context) {
 		return
 	}
 	if err := s.store.Subscribe(user, ns, name); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{"ok": true, "subscribed": true})
@@ -111,7 +111,7 @@ func (s *Server) unsubscribeSkill(c *gin.Context) {
 	ns, name := c.Param("ns"), c.Param("name")
 	user := s.currentUser(c)
 	if err := s.store.Unsubscribe(user, ns, name); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{"ok": true, "subscribed": false})
@@ -124,12 +124,12 @@ func (s *Server) getSubscriptionState(c *gin.Context) {
 	user := s.currentUser(c)
 	subbed, err := s.store.IsSubscribed(user, ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	count, err := s.store.CountSubscribers(ns, name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{"subscribed": subbed, "count": count})
@@ -139,7 +139,7 @@ func (s *Server) listMySubscriptions(c *gin.Context) {
 	user := s.currentUser(c)
 	out, err := s.store.ListMySubscriptions(user)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, out)

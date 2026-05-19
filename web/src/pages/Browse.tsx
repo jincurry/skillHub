@@ -9,6 +9,7 @@ import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { openCreateSkill } from '../components/CreateSkillModal';
 import type { Skill } from '../api/types';
+import { SkillIcon } from '../components/SkillIcon';
 
 type SortKey = 'updated' | 'activations' | 'rating';
 const SORT_LABELS: Record<SortKey, string> = {
@@ -39,7 +40,7 @@ function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
   return (
     <div className="skill-card" onClick={() => onOpen(s)}>
       <div className="skill-card-head">
-        <div className={`skill-icon ${s.iconClass}`} style={{ width: 36, height: 36, borderRadius: 8, fontSize: 14 }}>{s.icon}</div>
+        <SkillIcon ns={s.ns} name={s.name} icon={s.icon} iconClass={s.iconClass} size={36} borderRadius={8} fontSize={14} />
         <div className="skill-card-title-block">
           <div className="skill-card-name">
             <span className="ns">{s.ns} /</span>
@@ -133,7 +134,12 @@ export function Browse() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNs]);
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  useEffect(() => {
+    const id = setTimeout(() => setSearch(searchInput), 300);
+    return () => clearTimeout(id);
+  }, [searchInput]);
   const [sort, setSort] = useState<SortKey>('updated');
   const [sortOpen, setSortOpen] = useState(false);
 
@@ -261,7 +267,7 @@ export function Browse() {
 
           <div style={{ paddingTop: 14, borderTop: '1px solid var(--border)' }}>
             <button className="btn" style={{ width: '100%' }} onClick={() => {
-              setSelectedNs(new Set()); setSelectedClass(new Set()); setSelectedStatus(new Set()); setSelectedTags(new Set()); setSearch('');
+              setSelectedNs(new Set()); setSelectedClass(new Set()); setSelectedStatus(new Set()); setSelectedTags(new Set()); setSearchInput(''); setSearch('');
               clearAuthor();
             }}>清空所有过滤</button>
           </div>
@@ -293,7 +299,7 @@ export function Browse() {
           <div className="browse-toolbar">
             <div className="input-wrap">
               <span className="icon-left"><IconSearch size={15} /></span>
-              <input className="input with-icon" placeholder="搜索 skill 名称、描述、标签..." value={search} onChange={(e) => setSearch(e.target.value)} />
+              <input className="input with-icon" placeholder="搜索 skill 名称、描述、标签..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
             </div>
             <div style={{ position: 'relative' }}>
               <button className="dropdown" style={{ height: 36 }} onClick={() => setSortOpen((v) => !v)}>
@@ -355,7 +361,7 @@ export function Browse() {
                       <tr key={s.id} onClick={() => openSkill(s)}>
                         <td>
                           <div className="tbl-name">
-                            <div className={`skill-icon ${s.iconClass}`}>{s.icon}</div>
+                            <SkillIcon ns={s.ns} name={s.name} icon={s.icon} iconClass={s.iconClass} />
                             <div>
                               <div className="skill-name-text"><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{s.ns}/</span>{s.name}</div>
                               <div className="skill-name-desc" style={{ maxWidth: 380, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.desc}</div>

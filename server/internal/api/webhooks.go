@@ -39,7 +39,7 @@ func (s *Server) listWebhooks(c *gin.Context) {
 	}
 	hooks, err := s.store.ListWebhooks(ns)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if hooks == nil {
@@ -76,7 +76,7 @@ func (s *Server) createWebhook(c *gin.Context) {
 	}
 	hook, err := s.store.CreateWebhook(req, user)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(201, hook)
@@ -124,7 +124,7 @@ func (s *Server) updateWebhook(c *gin.Context) {
 	}
 	updated, err := s.store.UpdateWebhook(id, req)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(200, updated)
@@ -144,7 +144,7 @@ func (s *Server) deleteWebhook(c *gin.Context) {
 		return
 	}
 	if err := s.store.DeleteWebhook(id); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(204, nil)
@@ -166,7 +166,7 @@ func (s *Server) listWebhookDeliveries(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	deliveries, err := s.store.ListDeliveries(id, limit)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if deliveries == nil {
@@ -222,7 +222,7 @@ func (s *Server) listAPITokens(c *gin.Context) {
 	user := s.currentUser(c)
 	tokens, err := s.store.ListAPITokens(user)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	if tokens == nil {
@@ -239,7 +239,7 @@ func (s *Server) createAPIToken(c *gin.Context) {
 	}
 	raw, tok, err := s.store.CreateAPIToken(s.currentUser(c), req)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		serverError(c, err)
 		return
 	}
 	c.JSON(201, model.CreateAPITokenResponse{Token: raw, APIToken: *tok})
