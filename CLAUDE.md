@@ -124,6 +124,37 @@ Key features beyond basic Monaco editing:
 
 **Activation tracking**: `POST /skills/:ns/:name/activate` atomically increments `skills.activations` and upserts today's row in `skill_daily_metrics`, then recomputes `delta_pct` (7-day vs prior 7-day) and the `hot` flag (delta > 20%) from the last 14 days of daily data. No cron job needed.
 
+## i18n
+
+Two-locale setup (zh-CN default, en). Frontend uses **react-i18next**; backend has a tiny custom helper. The frontend sends `Accept-Language` on every request (set by `web/src/api/client.ts`); the backend reads it via `i18n.LangFromGin(c)`.
+
+**Frontend** (`web/src/i18n/`):
+- `index.ts` — boots i18next with localStorage persistence (key: `skillHub.lang`). Imported once from `main.tsx`.
+- `locales/zh-CN.json` and `locales/en.json` — translation dictionaries. Keys are dotted, lowercase: `nav.workspace`, `login.submit`, `commandPalette.placeholder`. Adding a key means filling it in BOTH files.
+- `LanguageSwitcher` (in `components/`) sits in the topbar and cycles through `SUPPORTED_LANGUAGES`.
+- Components use `const { t } = useTranslation()` and `t('namespace.key', { interpolation })`.
+- `lib/notify.ts`'s `fmtRelative()` uses `Intl.RelativeTimeFormat` keyed on `i18n.resolvedLanguage`, so "5 minutes ago" / "5 分钟前" come from the platform without us writing pluralization rules.
+
+**Backend** (`server/internal/i18n/`):
+- `i18n.go` exposes `LangFromHeader`, `LangFromGin`, `T(lang, key, args...)`. No external deps; we do our own Accept-Language parsing (very loose — first-match wins, q-values ignored).
+- `tables.go` is the flat `map[Lang]map[string]string` translation table. Keys grouped by surface: `api.*` for HTTP error responses, `notif.*` for notification body templates.
+- `gin.go` provides `i18n.Error(c, status, key, args...)` shorthand — most call sites use this instead of `c.JSON(status, gin.H{"error": i18n.T(...)})`.
+- Missing keys fall back to default locale (zh-CN), then to the literal key. Never panics.
+- `i18n_test.go` covers parsing, fallbacks, sprintf, and a parity check that every key exists in both locales.
+
+**What's migrated so far** (Phase 1):
+- Frontend: Layout (sidebar nav, breadcrumbs, topbar search), `Login`, `ThemeToggle`, `NotificationBell`, `CommandPalette`, `SessionExpiryBanner`, `App.tsx` lazy-load fallback, `lib/notify.ts` relative time.
+- Backend: 5 error responses in `api.go` (`api.skill_md_*`, `api.need_author_or_member`, `api.namespace_exists`) and 2 in `dist_tags_subs.go` (`api.need_author_or_maintainer`).
+
+**What's deferred** (Phase 2+):
+- Pages still in zh-CN: `Workspace`, `Browse`, `SkillDetail`, `Reviews`, `ReviewDetail`, `Audit`, `Admin`, `Profile`, `Editor` and most of `web/src/components/` (CreateSkillModal, AIAssistDrawer, WebhookPanel, etc.). These are migrated by adding new keys under the matching i18n namespace and replacing literal strings with `t('...')` — no architectural changes.
+- `lib/audit.ts` action labels — straightforward dictionary replacement.
+- Backend notification bodies in `store/queries.go`, `skill_lifecycle.go`, `me.go`, `ratings.go`, `subscriptions.go`, `reviewers.go`. These are persisted at write time, so translating them needs an architectural decision: either (a) add `users.preferred_lang` and translate at write time, or (b) store structured `kind + args_json` and render at read time on the client. Option (b) is cleaner — language switches retroactively re-render existing notifications — but requires a schema change. Until that's resolved, notifications stay zh-CN.
+- `validate/validate.go` Check.Label / Check.Detail. Recommend moving these to the frontend keyed by `Check.ID` so the server only emits IDs and severities (similar to the discover.go achievements pattern that needs the same fix).
+- Skill bundle templates (`templates/templates.go`, `editor/constants.ts`'s `TEMPLATE_GROUPS` content), seed data, and CLI strings — intentionally not translated. They're either bundle scaffolding or power-user surfaces.
+
+To migrate a page, follow the pattern in `Layout.tsx`: add `const { t } = useTranslation()`, replace literals with `t('...')`, and add the keys to BOTH locale JSONs (the test in `server/internal/i18n/i18n_test.go::TestTables_ParityBetweenLocales` enforces parity on the server side; the frontend has no equivalent guard yet).
+
 ## Tests
 
 Tests live in `server/internal/store/`:

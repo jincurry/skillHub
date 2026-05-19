@@ -1,0 +1,90 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "close": "Close",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "search": "Search",
+    "logout": "Log out"
+  },
+  "app": {
+    "loadingEditor": "Loading editor…"
+  },
+  "nav": {
+    "section": "Navigation",
+    "workspace": "Workspace",
+    "browse": "Browse skills",
+    "reviews": "Reviews",
+    "audit": "Audit log",
+    "admin": "Admin",
+    "profile": "My profile"
+  },
+  "breadcrumb": {
+    "home": "Home",
+    "workspace": "Workspace",
+    "skills": "Skills",
+    "browse": "Browse",
+    "reviews": "Reviews",
+    "audit": "Audit log",
+    "admin": "Admin",
+    "editor": "Editor",
+    "review": "Review #{{id}}"
+  },
+  "topbar": {
+    "searchPlaceholder": "Search skills, namespaces, users...",
+    "searchTitle": "Search (Ctrl/Cmd+K)"
+  },
+  "session": {
+    "expiringIn": "Session expiring in {{countdown}}. Please sign in again.",
+    "minutesAndSeconds": "{{m}}m {{s}}s",
+    "secondsOnly": "{{s}}s",
+    "reLogin": "Sign in",
+    "dismiss": "Dismiss"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "system": "Follow system",
+    "tooltip": "Theme: {{label}} (click to cycle)",
+    "ariaLabel": "Toggle theme, currently {{label}}"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "markAllRead": "Mark all read",
+    "empty": "No notifications",
+    "openHint": "Click to open {{url}}",
+    "iconAriaLabel": "Notifications"
+  },
+  "commandPalette": {
+    "placeholder": "Search skills / namespaces / users...",
+    "hint": "Start typing to find a skill, namespace or user.",
+    "keyHintsBefore": "select ·",
+    "keyHintsMid": "open ·",
+    "keyHintsAfter": "close",
+    "searching": "Searching...",
+    "noResults": "No matches for {{query}}",
+    "groupSkill": "Skills",
+    "groupNamespace": "Namespaces",
+    "groupUser": "Users",
+    "footerSelect": "select",
+    "footerOpen": "open",
+    "footerCount": "{{n}} results"
+  },
+  "login": {
+    "title": "Sign in",
+    "seedHint": "Seed users: alice / bob / charlie / diana / frank. Default password: password.",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in…"
+  },
+  "relative": {
+    "justNow": "just now"
+  },
+  "language": {
+    "switcherLabel": "Language",
+    "zh-CN": "简体中文",
+    "en": "English"
+  }
+}

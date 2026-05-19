@@ -1,0 +1,90 @@
+{
+  "common": {
+    "loading": "加载中...",
+    "close": "关闭",
+    "cancel": "取消",
+    "confirm": "确认",
+    "save": "保存",
+    "search": "搜索",
+    "logout": "登出"
+  },
+  "app": {
+    "loadingEditor": "正在加载编辑器…"
+  },
+  "nav": {
+    "section": "导航",
+    "workspace": "工作台",
+    "browse": "浏览 Skills",
+    "reviews": "审批中心",
+    "audit": "审计日志",
+    "admin": "管理后台",
+    "profile": "我的主页"
+  },
+  "breadcrumb": {
+    "home": "Home",
+    "workspace": "工作台",
+    "skills": "Skills",
+    "browse": "浏览",
+    "reviews": "审批中心",
+    "audit": "审计日志",
+    "admin": "管理后台",
+    "editor": "编辑器",
+    "review": "审批 #{{id}}"
+  },
+  "topbar": {
+    "searchPlaceholder": "搜索 skill、命名空间、用户...",
+    "searchTitle": "搜索 (Ctrl/Cmd+K)"
+  },
+  "session": {
+    "expiringIn": "登录即将过期（{{countdown}}），请重新登录以保持会话。",
+    "minutesAndSeconds": "{{m}} 分 {{s}} 秒",
+    "secondsOnly": "{{s}} 秒",
+    "reLogin": "重新登录",
+    "dismiss": "关闭提示"
+  },
+  "theme": {
+    "light": "亮色",
+    "dark": "暗色",
+    "system": "跟随系统",
+    "tooltip": "主题: {{label}}（点击切换）",
+    "ariaLabel": "切换主题，当前 {{label}}"
+  },
+  "notifications": {
+    "title": "通知",
+    "markAllRead": "全部已读",
+    "empty": "暂无通知",
+    "openHint": "点击打开 {{url}}",
+    "iconAriaLabel": "通知"
+  },
+  "commandPalette": {
+    "placeholder": "搜索 skill / namespace / 用户...",
+    "hint": "开始输入查找 skill、namespace 或用户。",
+    "keyHintsBefore": "选择 ·",
+    "keyHintsMid": "打开 ·",
+    "keyHintsAfter": "关闭",
+    "searching": "搜索中...",
+    "noResults": "没有匹配 {{query}} 的结果",
+    "groupSkill": "Skills",
+    "groupNamespace": "Namespaces",
+    "groupUser": "Users",
+    "footerSelect": "选择",
+    "footerOpen": "打开",
+    "footerCount": "共 {{n}} 条"
+  },
+  "login": {
+    "title": "登录",
+    "seedHint": "种子用户：alice / bob / charlie / diana / frank。默认密码 password。",
+    "username": "用户名",
+    "password": "密码",
+    "submit": "登录",
+    "submitting": "登录中…"
+  },
+  "relative": {
+    "justNow": "刚刚"
+  },
+  "language": {
+    "switcherLabel": "语言",
+    "zh-CN": "简体中文",
+    "en": "English"
+  }
+}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { IconSearch, IconBox, IconUsers, IconCheck } from './Icons';
 import { api } from '../api/client';
@@ -60,6 +61,7 @@ function flatten(r: SearchResult): FlatItem[] {
 }
 
 export function CommandPalette() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -184,7 +186,7 @@ export function CommandPalette() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="搜索 skill / namespace / 用户..."
+            placeholder={t('commandPalette.placeholder')}
             style={{
               flex: 1, border: 'none', outline: 'none', background: 'transparent',
               fontSize: 14, color: 'var(--text)',
@@ -196,20 +198,20 @@ export function CommandPalette() {
         <div style={{ overflowY: 'auto', flex: 1, padding: '4px 0' }}>
           {!debounced && (
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-faint)', fontSize: 13 }}>
-              开始输入查找 skill、namespace 或用户。
+              {t('commandPalette.hint')}
               <div style={{ marginTop: 6, fontSize: 11.5 }}>
-                <span className="kbd">↑</span> <span className="kbd">↓</span> 选择 ·{' '}
-                <span className="kbd">Enter</span> 打开 ·{' '}
-                <span className="kbd">Esc</span> 关闭
+                <span className="kbd">↑</span> <span className="kbd">↓</span> {t('commandPalette.keyHintsBefore')}{' '}
+                <span className="kbd">Enter</span> {t('commandPalette.keyHintsMid')}{' '}
+                <span className="kbd">Esc</span> {t('commandPalette.keyHintsAfter')}
               </div>
             </div>
           )}
           {debounced && loading && (
-            <div style={{ padding: 16, color: 'var(--text-subtle)', fontSize: 13 }}>搜索中...</div>
+            <div style={{ padding: 16, color: 'var(--text-subtle)', fontSize: 13 }}>{t('commandPalette.searching')}</div>
           )}
           {debounced && !loading && flat.length === 0 && (
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-subtle)', fontSize: 13 }}>
-              没有匹配 <strong>{debounced}</strong> 的结果
+              {t('commandPalette.noResults', { query: debounced })}
             </div>
           )}
           {(() => {
@@ -258,9 +260,9 @@ export function CommandPalette() {
 
         {flat.length > 0 && (
           <div style={{ padding: '8px 16px', borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-faint)', display: 'flex', gap: 12 }}>
-            <span><span className="kbd">↑↓</span> 选择</span>
-            <span><span className="kbd">Enter</span> 打开</span>
-            <span style={{ marginLeft: 'auto' }}>共 {flat.length} 条</span>
+            <span><span className="kbd">↑↓</span> {t('commandPalette.footerSelect')}</span>
+            <span><span className="kbd">Enter</span> {t('commandPalette.footerOpen')}</span>
+            <span style={{ marginLeft: 'auto' }}>{t('commandPalette.footerCount', { n: flat.length })}</span>
           </div>
         )}
       </div>

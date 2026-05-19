@@ -1,4 +1,5 @@
 import { Fragment, useEffect, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   IconHome, IconBox, IconCheck, IconClipboard, IconSettings, IconUsers,
@@ -7,6 +8,7 @@ import {
 import { CreateSkillModal } from './CreateSkillModal';
 import { NotificationBell } from './NotificationBell';
 import { ThemeToggle } from './ThemeToggle';
+import { LanguageSwitcher } from './LanguageSwitcher';
 import { CommandPalette, openCommandPalette } from './CommandPalette';
 import { SessionExpiryBanner } from './SessionExpiryBanner';
 import { api } from '../api/client';
@@ -14,18 +16,19 @@ import { useAsync } from '../api/useAsync';
 import { useUnreadCount } from '../lib/notifStore';
 import { clearAuth } from '../api/auth';
 
-type NavItem = { id: string; to: string; icon: ReactNode; label: string };
+type NavItem = { id: string; to: string; icon: ReactNode; labelKey: string };
 
 const NAV_ITEMS: NavItem[] = [
-  { id: 'workspace', to: '/workspace', icon: <IconHome />, label: '工作台' },
-  { id: 'browse', to: '/skills', icon: <IconBox />, label: '浏览 Skills' },
-  { id: 'reviews', to: '/reviews', icon: <IconCheck />, label: '审批中心' },
-  { id: 'audit', to: '/audit', icon: <IconClipboard />, label: '审计日志' },
-  { id: 'admin', to: '/admin', icon: <IconSettings />, label: '管理后台' },
-  { id: 'profile', to: '/profile', icon: <IconUsers />, label: '我的主页' },
+  { id: 'workspace', to: '/workspace', icon: <IconHome />, labelKey: 'nav.workspace' },
+  { id: 'browse', to: '/skills', icon: <IconBox />, labelKey: 'nav.browse' },
+  { id: 'reviews', to: '/reviews', icon: <IconCheck />, labelKey: 'nav.reviews' },
+  { id: 'audit', to: '/audit', icon: <IconClipboard />, labelKey: 'nav.audit' },
+  { id: 'admin', to: '/admin', icon: <IconSettings />, labelKey: 'nav.admin' },
+  { id: 'profile', to: '/profile', icon: <IconUsers />, labelKey: 'nav.profile' },
 ];
 
 function Sidebar() {
+  const { t } = useTranslation();
   const { data: me } = useAsync(() => api.me());
   const pendingReviewsState = useAsync(() => api.listReviews('pending'));
   const { data: pendingReviews } = pendingReviewsState;
@@ -71,7 +74,7 @@ function Sidebar() {
       </div>
 
       <div className="sidebar-section">
-        <div className="sidebar-label">导航</div>
+        <div className="sidebar-label">{t('nav.section')}</div>
         {NAV_ITEMS.map((item) => {
           // Hide /admin from non-admin users — backend rejects them anyway,
           // but keeping the link visible would be a footgun.
@@ -93,7 +96,7 @@ function Sidebar() {
               className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
             >
               {item.icon}
-              <span className="label">{item.label}</span>
+              <span className="label">{t(item.labelKey)}</span>
               {badge !== null && <span className="badge">{badge}</span>}
             </NavLink>
           );
@@ -113,12 +116,12 @@ function Sidebar() {
           </div>
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); logout(); }}
-            title="登出"
+            title={t('common.logout')}
             style={{
               border: 'none', background: 'transparent', cursor: 'pointer',
               color: 'var(--text-muted)', fontSize: 11, padding: '4px 6px',
             }}
-          >登出</button>
+          >{t('common.logout')}</button>
           <IconChevronDown size={14} />
         </NavLink>
       </div>
@@ -126,29 +129,36 @@ function Sidebar() {
   );
 }
 
-function buildCrumbs(pathname: string, username?: string): string[] {
+function buildCrumbs(
+  pathname: string,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  username?: string,
+): string[] {
   const STATIC: Record<string, string[]> = {
-    '/workspace': ['Home', '工作台'],
-    '/skills': ['Home', 'Skills', '浏览'],
-    '/reviews': ['Home', '审批中心'],
-    '/audit': ['Home', '审计日志'],
-    '/admin': ['Home', '管理后台'],
+    '/workspace': [t('breadcrumb.home'), t('breadcrumb.workspace')],
+    '/skills': [t('breadcrumb.home'), t('breadcrumb.skills'), t('breadcrumb.browse')],
+    '/reviews': [t('breadcrumb.home'), t('breadcrumb.reviews')],
+    '/audit': [t('breadcrumb.home'), t('breadcrumb.audit')],
+    '/admin': [t('breadcrumb.home'), t('breadcrumb.admin')],
   };
   if (STATIC[pathname]) return STATIC[pathname];
-  if (pathname === '/profile') return ['Home', `@${username ?? '...'}`];
+  if (pathname === '/profile') return [t('breadcrumb.home'), `@${username ?? '...'}`];
   const parts = pathname.split('/').filter(Boolean);
   if (parts[0] === 'skills' && parts.length >= 3) {
-    if (parts[3] === 'edit') return ['Home', '编辑器', `${parts[1]} / ${parts[2]}`];
-    return ['Home', 'Skills', `${parts[1]} / ${parts[2]}`];
+    if (parts[3] === 'edit') return [t('breadcrumb.home'), t('breadcrumb.editor'), `${parts[1]} / ${parts[2]}`];
+    return [t('breadcrumb.home'), t('breadcrumb.skills'), `${parts[1]} / ${parts[2]}`];
   }
-  if (parts[0] === 'reviews' && parts[1]) return ['Home', '审批中心', `审批 #${parts[1]}`];
-  return ['Home'];
+  if (parts[0] === 'reviews' && parts[1]) {
+    return [t('breadcrumb.home'), t('breadcrumb.reviews'), t('breadcrumb.review', { id: parts[1] })];
+  }
+  return [t('breadcrumb.home')];
 }
 
 function Topbar() {
+  const { t } = useTranslation();
   const { pathname } = useLocation();
   const { data: me } = useAsync(() => api.me());
-  const crumbs = buildCrumbs(pathname, me?.username);
+  const crumbs = buildCrumbs(pathname, t, me?.username);
   return (
     <div className="topbar">
       <div className="breadcrumb">
@@ -163,16 +173,17 @@ function Topbar() {
       <button
         className="search-box"
         onClick={openCommandPalette}
-        title="搜索 (Ctrl/Cmd+K)"
+        title={t('topbar.searchTitle')}
         style={{
           border: 'none', background: 'inherit', cursor: 'pointer', font: 'inherit',
           color: 'inherit', textAlign: 'left',
         }}
       >
         <IconSearch size={15} />
-        <span>搜索 skill、命名空间、用户...</span>
+        <span>{t('topbar.searchPlaceholder')}</span>
         <span className="kbd">Ctrl K</span>
       </button>
+      <LanguageSwitcher />
       <ThemeToggle />
       <NotificationBell />
     </div>

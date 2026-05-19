@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/jincurry/skillhub/server/internal/i18n"
 	"github.com/jincurry/skillhub/server/internal/model"
 )
 
@@ -39,7 +40,7 @@ func (s *Server) setDistTag(c *gin.Context) {
 		return
 	}
 	if !allowed {
-		c.JSON(403, gin.H{"error": "需要 author 或 namespace owner / maintainer 身份"})
+		c.JSON(403, gin.H{"error": i18n.T(i18n.LangFromGin(c), "api.need_author_or_maintainer")})
 		return
 	}
 	// "latest" is auto-managed by the publish flow; pinning it manually
@@ -68,7 +69,7 @@ func (s *Server) deleteDistTag(c *gin.Context) {
 		return
 	}
 	if !allowed {
-		c.JSON(403, gin.H{"error": "需要 author 或 namespace owner / maintainer 身份"})
+		c.JSON(403, gin.H{"error": i18n.T(i18n.LangFromGin(c), "api.need_author_or_maintainer")})
 		return
 	}
 	if err := s.store.DeleteDistTag(ns, name, tag); err != nil {

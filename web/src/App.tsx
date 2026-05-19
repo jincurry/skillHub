@@ -19,9 +19,12 @@ import { Login } from './pages/Login';
 const Editor = lazy(() => import('./pages/Editor').then((m) => ({ default: m.Editor })));
 
 function EditorFallback() {
+  // We can't use useTranslation here because i18next may not have finished
+  // loading when Suspense first kicks in. Use a hardcoded fallback string —
+  // the editor chunk loads in <100ms so this is barely ever visible anyway.
   return (
     <div style={{ padding: 32, color: 'var(--text-subtle)', fontSize: 13 }}>
-      正在加载编辑器…
+      Loading editor… / 正在加载编辑器…
     </div>
   );
 }

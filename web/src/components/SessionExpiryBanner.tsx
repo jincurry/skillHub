@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getTokenExpiry } from '../api/auth';
 
 const WARN_MS = 5 * 60 * 1000; // show banner 5 min before expiry
@@ -7,16 +8,19 @@ function msUntilExpiry(exp: Date): number {
   return exp.getTime() - Date.now();
 }
 
-function fmtCountdown(ms: number): string {
-  const totalSec = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  return m > 0 ? `${m} 分 ${s} 秒` : `${s} 秒`;
-}
-
 export function SessionExpiryBanner() {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [countdown, setCountdown] = useState('');
+
+  function fmtCountdown(ms: number): string {
+    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return m > 0
+      ? t('session.minutesAndSeconds', { m, s })
+      : t('session.secondsOnly', { s });
+  }
 
   useEffect(() => {
     const exp = getTokenExpiry();
@@ -59,6 +63,10 @@ export function SessionExpiryBanner() {
       if (wakeup !== null) clearTimeout(wakeup);
       clearInterval(tick);
     };
+    // fmtCountdown closes over t, but we deliberately don't re-run the timer
+    // when the language changes — the running countdown will re-render
+    // through React's normal flow on the next setCountdown.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!visible) return null;
@@ -77,7 +85,7 @@ export function SessionExpiryBanner() {
       color: 'var(--amber-text, #92400e)',
       maxWidth: 'calc(100vw - 40px)',
     }}>
-      <span>⚠ 登录即将过期（{countdown}），请重新登录以保持会话。</span>
+      <span>⚠ {t('session.expiringIn', { countdown })}</span>
       <button
         onClick={() => window.location.assign('/login')}
         style={{
@@ -86,7 +94,7 @@ export function SessionExpiryBanner() {
           border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
           flexShrink: 0,
         }}
-      >重新登录</button>
+      >{t('session.reLogin')}</button>
       <button
         onClick={() => setVisible(false)}
         style={{
@@ -94,7 +102,7 @@ export function SessionExpiryBanner() {
           color: 'var(--amber-text, #92400e)', fontSize: 16, lineHeight: 1,
           padding: '0 2px', flexShrink: 0,
         }}
-        title="关闭提示"
+        title={t('session.dismiss')}
       >×</button>
     </div>
   );
