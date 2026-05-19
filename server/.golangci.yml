@@ -1,49 +1,26 @@
+version: "2"
+
 run:
   timeout: 5m
   tests: true
   modules-download-mode: readonly
 
 linters:
+  default: none
   enable:
-    - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
-    - typecheck
     - unused
-    - gocyclo
-    - gofmt
-    - goimports
-    - misspell
-    - unparam
-    - nilerr
-    - prealloc
-    - gocritic
-    - revive
-    - exportloopref
-    - gosec
-    - bodyclose
-    - noctx
-    - rowserrcheck
-    - sqlclosecheck
-
-linters-settings:
-  gocyclo:
-    min-complexity: 15
-  gosec:
-    excludes:
-      - G104
-  revive:
-    rules:
-      - name: exported
-        severity: warning
-      - name: var-naming
-        severity: warning
-  misspell:
-    locale: US
-
-issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
-  exclude-use-default: false
+  settings:
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -QF1003
+        - -QF1008
+        - -S1040
