@@ -124,6 +124,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/skills/:ns/:name/ratings", s.rateSkill)
 		auth.POST("/skills/:ns/:name/yank", s.yankSkill)
 		auth.POST("/skills/:ns/:name/deprecate", s.deprecateSkill)
+		auth.POST("/skills/:ns/:name/rollback", s.rollbackSkill)
 		auth.POST("/skills/:ns/:name/activate", s.activateSkill)
 		// Author-facing hard delete. Only works while the skill is still a
 		// draft and only the original author can call it — anything else
@@ -627,6 +628,36 @@ func (s *Server) getSkillTrend(c *gin.Context) {
 
 func (s *Server) yankSkill(c *gin.Context)       { s.lifecycleAction(c, "yanked") }
 func (s *Server) deprecateSkill(c *gin.Context) { s.lifecycleAction(c, "deprecated") }
+
+// rollbackSkill restores a skill's live files from a previously published
+// version's review_files snapshot, points the skill row at that version,
+// and bumps the `latest` dist tag. Same permission model as yank.
+func (s *Server) rollbackSkill(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	user := s.currentUser(c)
+	role, _ := s.store.UserRoleInNamespace(ns, user)
+	if role != "owner" && role != "maintainer" {
+		c.JSON(403, gin.H{"error": "需要 maintainer 或 owner 角色"})
+		return
+	}
+	var req struct {
+		Version string `json:"version"`
+		Reason  string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request body"})
+		return
+	}
+	skill, err := s.store.RollbackToVersion(ns, name, req.Version, req.Reason, user)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if skill != nil {
+		go s.FireLifecycleWebhook(*skill, user, "skill.rollback", req.Reason)
+	}
+	c.JSON(200, gin.H{"ok": true, "skill": skill})
+}
 
 func (s *Server) lifecycleAction(c *gin.Context, status string) {
 	ns, name := c.Param("ns"), c.Param("name")

@@ -94,6 +94,10 @@ export const api = {
     request<{ ok: true; status: string }>(`/skills/${ns}/${name}/deprecate`, {
       method: 'POST', body: JSON.stringify({ reason: reason ?? '' }),
     }),
+  rollbackSkill: (ns: string, name: string, version: string, reason: string) =>
+    request<{ ok: true; skill: Skill }>(`/skills/${ns}/${name}/rollback`, {
+      method: 'POST', body: JSON.stringify({ version, reason }),
+    }),
   activateSkill: (ns: string, name: string, count?: number) =>
     request<{ activations: number }>(`/skills/${ns}/${name}/activate`, {
       method: 'POST', body: JSON.stringify({ count: count ?? 1 }),
