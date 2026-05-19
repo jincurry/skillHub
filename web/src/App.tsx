@@ -12,6 +12,7 @@ import { Audit } from './pages/Audit';
 import { Admin } from './pages/Admin';
 import { Profile } from './pages/Profile';
 import { Login } from './pages/Login';
+import { Register } from './pages/Register';
 
 // Editor pulls in @monaco-editor/react (~2MB) and the markdown preview
 // pipeline. Lazy-load it so users browsing skills, reviewing, or doing admin
@@ -33,6 +34,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="login" element={<Login />} />
+      <Route path="register" element={<Register />} />
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
         <Route index element={<Navigate to="/workspace" replace />} />
         <Route path="workspace" element={<Workspace />} />

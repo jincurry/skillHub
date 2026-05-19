@@ -148,6 +148,64 @@ func (s *Store) GetAdminUser(username string) (*model.AdminUser, error) {
 	return &u, nil
 }
 
+// RegisterUser creates a brand new account for self-service signup. The very
+// first account created on an empty users table is promoted to admin so the
+// install has someone who can configure AI providers, namespaces, and policies
+// out of the box.
+func (s *Store) RegisterUser(username, password, display, email string) (*model.Me, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, errors.New("username is required")
+	}
+	if len(password) < 6 {
+		return nil, errors.New("password must be at least 6 characters")
+	}
+	display = strings.TrimSpace(display)
+	if display == "" {
+		display = username
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var existing int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE username = ?`, username).Scan(&existing); err != nil {
+		return nil, err
+	}
+	if existing > 0 {
+		return nil, errors.New("username already taken")
+	}
+
+	var total int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&total); err != nil {
+		return nil, err
+	}
+	isAdmin := 0
+	role := "Member"
+	if total == 0 {
+		isAdmin = 1
+		role = "Maintainer"
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO users(username, display, role, team, email, password_hash, is_admin, joined_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		username, display, role, "", strings.TrimSpace(email), hash, isAdmin); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetUser(username)
+}
+
 // IsUserDisabled reports whether the user has is_disabled=1.
 // Used by the login handler to block disabled accounts.
 func (s *Store) IsUserDisabled(username string) (bool, error) {

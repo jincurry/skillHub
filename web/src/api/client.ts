@@ -60,6 +60,10 @@ export const api = {
     request<{ token: string; user: Me }>('/auth/login', {
       method: 'POST', body: JSON.stringify({ username, password }),
     }),
+  register: (body: { username: string; password: string; display?: string; email?: string }) =>
+    request<{ token: string; user: Me }>('/auth/register', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
   me: () => request<Me>('/me'),
   updateMe: (body: UpdateMeRequest) =>
     request<Me>('/me', { method: 'PATCH', body: JSON.stringify(body) }),
@@ -105,6 +109,10 @@ export const api = {
   deprecateSkill: (ns: string, name: string, reason?: string) =>
     request<{ ok: true; status: string }>(`/skills/${ns}/${name}/deprecate`, {
       method: 'POST', body: JSON.stringify({ reason: reason ?? '' }),
+    }),
+  rollbackSkill: (ns: string, name: string, version: string, reason: string) =>
+    request<{ ok: true; skill: Skill }>(`/skills/${ns}/${name}/rollback`, {
+      method: 'POST', body: JSON.stringify({ version, reason }),
     }),
   activateSkill: (ns: string, name: string, count?: number) =>
     request<{ activations: number }>(`/skills/${ns}/${name}/activate`, {

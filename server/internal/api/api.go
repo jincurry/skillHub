@@ -75,6 +75,7 @@ func (s *Server) Routes() *gin.Engine {
 	{
 		// public
 		v1.POST("/auth/login", s.login)
+		v1.POST("/auth/register", s.register)
 		// OpenAPI 3 spec. Public so external tooling (codegen, postman) can
 		// pull it without an auth dance.
 		v1.GET("/openapi.json", func(c *gin.Context) {
@@ -124,6 +125,7 @@ func (s *Server) Routes() *gin.Engine {
 		auth.POST("/skills/:ns/:name/ratings", s.rateSkill)
 		auth.POST("/skills/:ns/:name/yank", s.yankSkill)
 		auth.POST("/skills/:ns/:name/deprecate", s.deprecateSkill)
+		auth.POST("/skills/:ns/:name/rollback", s.rollbackSkill)
 		auth.POST("/skills/:ns/:name/activate", s.activateSkill)
 		// Author-facing hard delete. Only works while the skill is still a
 		// draft and only the original author can call it — anything else
@@ -222,6 +224,30 @@ func (s *Server) Routes() *gin.Engine {
 		adminAI.POST("/users", s.createAdminUser)
 		adminAI.PATCH("/users/:username", s.adminUpdateUser)
 	}
+
+	if webDir := strings.TrimSpace(os.Getenv("SKILLHUB_WEB_DIR")); webDir != "" {
+		index := filepath.Join(webDir, "index.html")
+		if _, err := os.Stat(index); err == nil {
+			r.Static("/assets", filepath.Join(webDir, "assets"))
+			r.NoRoute(func(c *gin.Context) {
+				p := c.Request.URL.Path
+				if strings.HasPrefix(p, "/api/") || p == "/healthz" || p == "/readyz" || p == "/metrics" {
+					c.JSON(404, gin.H{"error": "not found"})
+					return
+				}
+				if p != "/" && !strings.HasSuffix(p, "/") {
+					if f := filepath.Join(webDir, filepath.Clean(p)); strings.HasPrefix(f, webDir) {
+						if st, err := os.Stat(f); err == nil && !st.IsDir() {
+							c.File(f)
+							return
+						}
+					}
+				}
+				c.File(index)
+			})
+		}
+	}
+
 	return r
 }
 
@@ -303,6 +329,30 @@ func (s *Server) login(c *gin.Context) {
 	}
 	user, _ := s.store.GetUser(req.Username)
 	c.JSON(200, gin.H{"token": tok, "user": user})
+}
+
+func (s *Server) register(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Display  string `json:"display"`
+		Email    string `json:"email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request body"})
+		return
+	}
+	user, err := s.store.RegisterUser(req.Username, req.Password, req.Display, req.Email)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	tok, err := auth.SignJWT(user.Username, s.cfg.JWTSecret, s.cfg.JWTTTL)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(201, gin.H{"token": tok, "user": user})
 }
 
 func (s *Server) currentUser(c *gin.Context) string {
@@ -579,6 +629,36 @@ func (s *Server) getSkillTrend(c *gin.Context) {
 
 func (s *Server) yankSkill(c *gin.Context)       { s.lifecycleAction(c, "yanked") }
 func (s *Server) deprecateSkill(c *gin.Context) { s.lifecycleAction(c, "deprecated") }
+
+// rollbackSkill restores a skill's live files from a previously published
+// version's review_files snapshot, points the skill row at that version,
+// and bumps the `latest` dist tag. Same permission model as yank.
+func (s *Server) rollbackSkill(c *gin.Context) {
+	ns, name := c.Param("ns"), c.Param("name")
+	user := s.currentUser(c)
+	role, _ := s.store.UserRoleInNamespace(ns, user)
+	if role != "owner" && role != "maintainer" {
+		c.JSON(403, gin.H{"error": "需要 maintainer 或 owner 角色"})
+		return
+	}
+	var req struct {
+		Version string `json:"version"`
+		Reason  string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request body"})
+		return
+	}
+	skill, err := s.store.RollbackToVersion(ns, name, req.Version, req.Reason, user)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if skill != nil {
+		go s.FireLifecycleWebhook(*skill, user, "skill.rollback", req.Reason)
+	}
+	c.JSON(200, gin.H{"ok": true, "skill": skill})
+}
 
 func (s *Server) lifecycleAction(c *gin.Context, status string) {
 	ns, name := c.Param("ns"), c.Param("name")

@@ -86,6 +86,7 @@ export function SkillDetail() {
   const subState = useAsync(() => api.getSubscriptionState(ns, name), [ns, name]);
   const [subBusy, setSubBusy] = useState(false);
   const [distModalOpen, setDistModalOpen] = useState(false);
+  const [rollbackOpen, setRollbackOpen] = useState(false);
   const [editMetaOpen, setEditMetaOpen] = useState(false);
   async function toggleSubscribe() {
     if (subBusy) return;
@@ -157,6 +158,18 @@ export function SkillDetail() {
       await skill.reload();
     } catch (e) {
       alert('操作失败：' + (e as Error).message);
+    }
+  }
+
+  async function doRollback(targetVersion: string, reason: string) {
+    try {
+      await api.rollbackSkill(p.ns, p.name, targetVersion, reason);
+      await skill.reload();
+      await versions.reload();
+      await distTags.reload();
+      setRollbackOpen(false);
+    } catch (e) {
+      alert('回滚失败：' + (e as Error).message);
     }
   }
 
@@ -291,6 +304,15 @@ export function SkillDetail() {
               <button className="btn" onClick={doYank} style={{ color: 'var(--red-text)' }} title="撤销发布，禁止再被激活">撤销</button>
             </>
           )}
+          {canManageLifecycle
+            && (p.status === 'published' || p.status === 'yanked' || p.status === 'deprecated')
+            && (versions.data ?? []).filter((v) => v.status === 'published' && v.version !== p.version).length > 0 && (
+              <button
+                className="btn"
+                onClick={() => setRollbackOpen(true)}
+                title="把文件 / 版本号 / latest 标签恢复到指定的历史发布版本"
+              >回滚</button>
+            )}
         </div>
       </div>
 
@@ -642,6 +664,17 @@ export function SkillDetail() {
           onSaved={() => { setEditMetaOpen(false); skill.reload(); }}
         />
       )}
+
+      {rollbackOpen && (
+        <RollbackModal
+          ns={p.ns}
+          name={p.name}
+          currentVersion={p.version}
+          versions={(versions.data ?? []).filter((v) => v.status === 'published' && v.version !== p.version)}
+          onClose={() => setRollbackOpen(false)}
+          onSubmit={doRollback}
+        />
+      )}
     </div>
   );
 }
@@ -865,6 +898,102 @@ function EditMetaModal({
           <button className="btn" onClick={onClose} disabled={busy}>取消</button>
           <button className="btn primary" onClick={save} disabled={busy}>
             {busy ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// RollbackModal: pick a previously published version + provide a reason,
+// then hand off to the parent's onSubmit which calls the backend. The
+// parent owns the actual API call so it can also reload skill / versions /
+// dist tags after success.
+function RollbackModal({
+  ns, name, currentVersion, versions, onClose, onSubmit,
+}: {
+  ns: string;
+  name: string;
+  currentVersion: string;
+  versions: import('../api/types').SkillVersion[];
+  onClose: () => void;
+  onSubmit: (target: string, reason: string) => Promise<void>;
+}) {
+  const [target, setTarget] = useState<string>(versions[0]?.version ?? '');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (!target) { setErr('请选择目标版本'); return; }
+    if (!reason.trim()) { setErr('请填写回滚原因'); return; }
+    setBusy(true);
+    setErr(null);
+    try {
+      await onSubmit(target, reason.trim());
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 480 }}>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>回滚 {ns}/{name}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+            将 skill 的文件、版本号和 latest 标签恢复到指定的历史发布版本。
+            当前 v{currentVersion}。
+          </div>
+        </div>
+        <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <label style={{ display: 'block' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>目标版本</div>
+            <select
+              className="input"
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              style={{ width: '100%' }}
+            >
+              {versions.length === 0 && <option value="">没有可回滚的历史版本</option>}
+              {versions.map((v) => (
+                <option key={v.version} value={v.version}>
+                  v{v.version}
+                  {v.author ? ` · @${v.author}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: 'block' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+              回滚原因（必填，将进入审计日志和订阅者通知）
+            </div>
+            <textarea
+              className="input"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="例如：v1.2.0 引入了 bug，需要先回滚到 v1.1.3 止血"
+              rows={3}
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+          </label>
+          <div style={{
+            fontSize: 12, color: 'var(--text-muted)',
+            background: 'var(--bg-muted)',
+            border: '1px solid var(--border)',
+            borderRadius: 6, padding: 10, lineHeight: 1.6,
+          }}>
+            ⚠️ 回滚会用目标版本的文件覆盖当前所有 skill 文件（包括草稿编辑中的内容）。
+            原版本 v{currentVersion} 的快照仍保留在版本列表里，可重新回滚。
+          </div>
+          {err && <div style={{ color: 'var(--red-text)', fontSize: 12.5 }}>{err}</div>}
+        </div>
+        <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn" onClick={onClose} disabled={busy}>取消</button>
+          <button className="btn primary" onClick={submit} disabled={busy || !target || !reason.trim()}>
+            {busy ? '回滚中…' : '确认回滚'}
           </button>
         </div>
       </div>

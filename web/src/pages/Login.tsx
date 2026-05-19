@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { getToken, setStoredUser, setToken } from '../api/auth';
 
@@ -8,8 +8,8 @@ export function Login() {
   const { t } = useTranslation();
   const nav = useNavigate();
   const loc = useLocation();
-  const [username, setUsername] = useState('alice');
-  const [password, setPassword] = useState('password');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -54,11 +54,11 @@ export function Login() {
         </div>
 
         <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{t('login.username')}</label>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus
+        <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required
                style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12 }} />
 
         <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{t('login.password')}</label>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required
                style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 14 }} />
 
         {err && <div style={{ color: 'var(--danger, #c33)', fontSize: 12, marginBottom: 10 }}>{err}</div>}
@@ -69,6 +69,10 @@ export function Login() {
                          opacity: busy ? 0.6 : 1 }}>
           {busy ? t('login.submitting') : t('login.submit')}
         </button>
+
+        <div style={{ marginTop: 14, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
+          {t('login.noAccount')}<Link to="/register" style={{ color: 'var(--primary)' }}>{t('login.registerNow')}</Link>
+        </div>
       </form>
     </div>
   );

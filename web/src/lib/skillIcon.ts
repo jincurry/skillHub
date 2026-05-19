@@ -1,29 +1,44 @@
-// Deterministic skill icon generator.
-//
-// Each skill renders either:
-//   - the explicit icon char the author set (e.g. an emoji), OR
-//   - an auto-generated avatar with letters + a hash-derived gradient.
-//
-// Picks for the gradient palette and "is this the default placeholder?" check
-// live here so every place that draws a skill avatar stays in sync.
+import {
+  BarChart3, Database, Search, PenTool, FileText, Calendar, DollarSign,
+  TrendingUp, Package, ClipboardList, Sparkles, Globe, Workflow, Lock,
+  MessageSquare, Code, Box, Bot, Mic, GitBranch, Cpu, Zap, BookOpen,
+  ScrollText, Wrench, Server, Image, Mail, Settings, Cloud, Shield,
+  type LucideIcon,
+} from 'lucide-react';
 
-const GRADIENTS: ReadonlyArray<readonly [string, string]> = [
-  ['#6366f1', '#a855f7'], // indigo → purple
-  ['#0ea5e9', '#6366f1'], // sky → indigo
-  ['#10b981', '#0ea5e9'], // emerald → sky
-  ['#f59e0b', '#ef4444'], // amber → red
-  ['#ec4899', '#f43f5e'], // pink → rose
-  ['#8b5cf6', '#ec4899'], // violet → pink
-  ['#06b6d4', '#3b82f6'], // cyan → blue
-  ['#22c55e', '#84cc16'], // green → lime
-  ['#f97316', '#ec4899'], // orange → pink
-  ['#14b8a6', '#0ea5e9'], // teal → sky
-  ['#a855f7', '#3b82f6'], // purple → blue
-  ['#eab308', '#f97316'], // yellow → orange
+const KEYWORD_ICONS: ReadonlyArray<readonly [RegExp, LucideIcon]> = [
+  [/\banaly[zs]is|analyz/i, BarChart3],
+  [/\b(market|finance|financial|trading|stock|price|revenue)\b/i, TrendingUp],
+  [/\b(money|payment|billing|invoice|cost|fee)\b/i, DollarSign],
+  [/\b(calendar|schedule|date|time|deadline)\b/i, Calendar],
+  [/\b(meeting|notes?|transcript|minutes)\b/i, ClipboardList],
+  [/\b(record|audio|voice|speech|mic)\b/i, Mic],
+  [/\b(write|writing|writer|draft|essay|article|blog|post)\b/i, PenTool],
+  [/\b(content|document|doc|paper|report)\b/i, FileText],
+  [/\b(book|read|reading|reference|wiki|knowledge)\b/i, BookOpen],
+  [/\b(research|investigate|explore|discover|find|search|seo)\b/i, Search],
+  [/\b(web|browser|scrape|crawler|http|url)\b/i, Globe],
+  [/\b(data|dataset|database|sql|query|table|etl)\b/i, Database],
+  [/\b(ai|llm|gpt|chat|agent|assistant|bot)\b/i, Bot],
+  [/\b(install|package|plugin|extension|setup|deploy)\b/i, Package],
+  [/\b(workflow|pipeline|orchestrat|chain|flow)\b/i, Workflow],
+  [/\b(task|job|executor|runner|step)\b/i, GitBranch],
+  [/\b(creator|generate|generator|build|make|new)\b/i, Sparkles],
+  [/\b(auth|login|password|secret|secure|token)\b/i, Lock],
+  [/\b(security|guard|protect|policy|compliance)\b/i, Shield],
+  [/\b(message|chat|reply|conversation|comment)\b/i, MessageSquare],
+  [/\b(mail|email|notify|notification|alert)\b/i, Mail],
+  [/\b(image|photo|picture|vision|ocr|visual)\b/i, Image],
+  [/\b(code|coding|developer|github|git|repo|programming)\b/i, Code],
+  [/\b(infra|server|host|deploy|kubernetes|k8s|docker)\b/i, Server],
+  [/\b(cloud|aws|gcp|azure|s3)\b/i, Cloud],
+  [/\b(tool|util|utility|helper|fix)\b/i, Wrench],
+  [/\b(config|setting|preference|option)\b/i, Settings],
+  [/\b(performance|monitor|metric|observ|trace)\b/i, Cpu],
+  [/\b(automation|automat|trigger|webhook|hook)\b/i, Zap],
+  [/\b(script|prompt|template|skill)\b/i, ScrollText],
 ];
 
-// Cheap, stable 32-bit hash (FNV-1a). Same input → same output across runs
-// and across platforms; we only need decent distribution, not crypto.
 function hash32(s: string): number {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < s.length; i++) {
@@ -33,35 +48,16 @@ function hash32(s: string): number {
   return h >>> 0;
 }
 
-export function pickGradient(ns: string, name: string): readonly [string, string] {
-  const h = hash32(`${ns}/${name}`);
-  return GRADIENTS[h % GRADIENTS.length];
+const FALLBACK_ICONS: ReadonlyArray<LucideIcon> = [Box, Sparkles, Workflow, ScrollText, Wrench];
+
+export function pickIcon(ns: string, name: string): LucideIcon {
+  const haystack = `${name} ${ns}`.replace(/[-_./]+/g, ' ');
+  for (const [pattern, icon] of KEYWORD_ICONS) {
+    if (pattern.test(haystack)) return icon;
+  }
+  return FALLBACK_ICONS[hash32(`${ns}/${name}`) % FALLBACK_ICONS.length];
 }
 
-// Returns 1-2 uppercase letters that represent the skill name.
-//   "auth-service"   → "AS"
-//   "data_pipeline"  → "DP"
-//   "tool"           → "T"
-//   "rag-eval-bench" → "RB"  (first + last token)
-//   "数据-清洗"        → "数清" (CJK preserves 2 chars)
-export function getInitials(name: string): string {
-  const cleaned = name.trim();
-  if (!cleaned) return '?';
-  // CJK characters carry meaning per glyph; show up to 2.
-  if (/[\u4e00-\u9fff]/.test(cleaned)) {
-    const cjk = Array.from(cleaned).filter((c) => /[\u4e00-\u9fff]/.test(c));
-    return cjk.slice(0, 2).join('');
-  }
-  const tokens = cleaned.split(/[-_.\s/]+/).filter(Boolean);
-  if (tokens.length === 0) return cleaned.slice(0, 2).toUpperCase();
-  if (tokens.length === 1) {
-    return tokens[0].slice(0, Math.min(2, tokens[0].length)).toUpperCase();
-  }
-  return (tokens[0][0] + tokens[tokens.length - 1][0]).toUpperCase();
-}
-
-// Server defaults are icon='?', iconClass='blue' for unconfigured skills.
-// Anything outside that pair is treated as user-curated and rendered as-is.
 export function shouldAutoGenerate(icon: string | undefined): boolean {
   return !icon || icon === '?' || icon === '';
 }

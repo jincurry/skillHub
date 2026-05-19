@@ -306,3 +306,155 @@ func (s *Store) ListSkillFilesWithContent(ns, name string) ([]model.SkillFile, e
 	}
 	return out, rows.Err()
 }
+
+// RollbackToVersion is the "hard rollback" path: it overwrites the live
+// skill_files with the snapshot from a previously published version, points
+// the skill row at that old version, bumps the `latest` dist tag, and
+// notifies subscribers.
+//
+// Constraints:
+//   - skill must be in published / yanked / deprecated (not mid-review)
+//   - target version must exist in skill_versions and != current version
+//   - target's review_files snapshot must exist (legacy versions without
+//     snapshots can't be rolled back via this path)
+//   - reason is required and goes into audit_logs + notification body
+//
+// A new skill_versions row is inserted (status='published', review_id=0)
+// with a note like "rollback from v1.2.0 to v1.1.0: <reason>" so the
+// version list shows the rollback action without silently mutating older
+// rows.
+func (s *Store) RollbackToVersion(ns, name, target, reason, actor string) (*model.Skill, error) {
+	target = strings.TrimSpace(target)
+	reason = strings.TrimSpace(reason)
+	if target == "" {
+		return nil, errors.New("target version is required")
+	}
+	if reason == "" {
+		return nil, errors.New("rollback reason is required")
+	}
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var status, current, author string
+	if err := tx.QueryRow(`SELECT status, version, author FROM skills WHERE ns=? AND name=?`, ns, name).Scan(&status, &current, &author); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, errors.New("skill not found")
+		}
+		return nil, err
+	}
+	switch status {
+	case "published", "yanked", "deprecated":
+		// allowed
+	default:
+		return nil, errors.New("skill is " + status + "; cannot rollback while in draft / review")
+	}
+	if target == current {
+		return nil, errors.New("target version equals current; nothing to rollback")
+	}
+
+	// Resolve the review_id whose review_files holds the snapshot for
+	// `target`. Mirror ListSkillFilesAtVersion: prefer approved reviews,
+	// fall back to most recent review id.
+	var reviewID int64
+	err = tx.QueryRow(`
+		SELECT id FROM reviews
+		WHERE ns = ? AND skill_name = ? AND version = ?
+		ORDER BY (status='approved') DESC, id DESC
+		LIMIT 1`, ns, name, target).Scan(&reviewID)
+	if err == sql.ErrNoRows {
+		return nil, errors.New("no snapshot found for version " + target)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Pull the snapshot from review_files. Use new_content (the body the
+	// author submitted at that review) as the canonical state of the file
+	// at that version.
+	rows, err := tx.Query(`SELECT path, new_content FROM review_files WHERE review_id = ?`, reviewID)
+	if err != nil {
+		return nil, err
+	}
+	type snap struct {
+		path, body string
+	}
+	var snaps []snap
+	for rows.Next() {
+		var p, b string
+		if err := rows.Scan(&p, &b); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		snaps = append(snaps, snap{p, b})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(snaps) == 0 {
+		return nil, errors.New("snapshot for version " + target + " is empty; cannot rollback")
+	}
+
+	// Wipe live files, re-insert from snapshot. Single-writer SQLite + tx
+	// guarantees no concurrent reader sees an empty file list.
+	if _, err := tx.Exec(`DELETE FROM skill_files WHERE ns=? AND skill_name=?`, ns, name); err != nil {
+		return nil, err
+	}
+	for _, sn := range snaps {
+		if _, err := tx.Exec(`
+			INSERT INTO skill_files(ns, skill_name, path, content, size, updated_by, updated_at)
+			VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP)`,
+			ns, name, sn.path, sn.body, len(sn.body), actor); err != nil {
+			return nil, err
+		}
+	}
+
+	// Point the skill row at the rolled-back version. Status stays
+	// 'published' because the rolled-back content is, by definition, a
+	// previously approved bundle.
+	if _, err := tx.Exec(`UPDATE skills SET status='published', version=?, updated_at=CURRENT_TIMESTAMP WHERE ns=? AND name=?`,
+		target, ns, name); err != nil {
+		return nil, err
+	}
+
+	// Insert a new skill_versions row recording the rollback. review_id=0
+	// because there is no real review behind a rollback. Status='published'
+	// so dist-tag bookkeeping (which checks skill_versions exists) is happy.
+	note := fmt.Sprintf("rollback from v%s to v%s: %s", current, target, reason)
+	if _, err := tx.Exec(`INSERT INTO skill_versions(ns,name,version,status,author,note,review_id) VALUES(?,?,?,?,?,?,0)`,
+		ns, name, target, "published", actor, note); err != nil {
+		return nil, err
+	}
+
+	// Auto-bump `latest` so consumers pinned to it pick up the rollback.
+	if err := upsertDistTagTx(tx, ns, name, "latest", target, actor); err != nil {
+		return nil, err
+	}
+
+	// Audit + fan-out notifications. Use a rollback-specific notification
+	// body so subscribers can tell this from a normal publish.
+	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
+		actor, "rollback", ns+"/"+name+": "+reason, "v"+target, "127.0.0.1"); err != nil {
+		return nil, err
+	}
+	notifBody := ns + "/" + name + " 已回滚到 v" + target
+	target_ref := ns + "/" + name
+	if _, err := tx.Exec(`
+		INSERT INTO notifications(user, kind, target_kind, target_ref, body)
+		SELECT username, 'publish', 'skill', ?, ?
+		  FROM subscriptions
+		 WHERE ns = ? AND skill_name = ?
+		   AND username != ? AND username != ?`,
+		target_ref, notifBody, ns, name, author, actor); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetSkill(ns, name)
+}

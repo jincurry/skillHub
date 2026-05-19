@@ -77,7 +77,9 @@
     "username": "用户名",
     "password": "密码",
     "submit": "登录",
-    "submitting": "登录中…"
+    "submitting": "登录中…",
+    "noAccount": "还没有账号？",
+    "registerNow": "立即注册"
   },
   "relative": {
     "justNow": "刚刚"
