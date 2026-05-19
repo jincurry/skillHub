@@ -74,6 +74,7 @@ func (s *Server) Routes() *gin.Engine {
 	{
 		// public
 		v1.POST("/auth/login", s.login)
+		v1.POST("/auth/register", s.register)
 		// OpenAPI 3 spec. Public so external tooling (codegen, postman) can
 		// pull it without an auth dance.
 		v1.GET("/openapi.json", func(c *gin.Context) {
@@ -221,6 +222,30 @@ func (s *Server) Routes() *gin.Engine {
 		adminAI.POST("/users", s.createAdminUser)
 		adminAI.PATCH("/users/:username", s.adminUpdateUser)
 	}
+
+	if webDir := strings.TrimSpace(os.Getenv("SKILLHUB_WEB_DIR")); webDir != "" {
+		index := filepath.Join(webDir, "index.html")
+		if _, err := os.Stat(index); err == nil {
+			r.Static("/assets", filepath.Join(webDir, "assets"))
+			r.NoRoute(func(c *gin.Context) {
+				p := c.Request.URL.Path
+				if strings.HasPrefix(p, "/api/") || p == "/healthz" || p == "/readyz" || p == "/metrics" {
+					c.JSON(404, gin.H{"error": "not found"})
+					return
+				}
+				if p != "/" && !strings.HasSuffix(p, "/") {
+					if f := filepath.Join(webDir, filepath.Clean(p)); strings.HasPrefix(f, webDir) {
+						if st, err := os.Stat(f); err == nil && !st.IsDir() {
+							c.File(f)
+							return
+						}
+					}
+				}
+				c.File(index)
+			})
+		}
+	}
+
 	return r
 }
 
@@ -302,6 +327,30 @@ func (s *Server) login(c *gin.Context) {
 	}
 	user, _ := s.store.GetUser(req.Username)
 	c.JSON(200, gin.H{"token": tok, "user": user})
+}
+
+func (s *Server) register(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Display  string `json:"display"`
+		Email    string `json:"email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request body"})
+		return
+	}
+	user, err := s.store.RegisterUser(req.Username, req.Password, req.Display, req.Email)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	tok, err := auth.SignJWT(user.Username, s.cfg.JWTSecret, s.cfg.JWTTTL)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(201, gin.H{"token": tok, "user": user})
 }
 
 func (s *Server) currentUser(c *gin.Context) string {

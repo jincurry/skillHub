@@ -1,0 +1,12 @@
+.git
+.github
+.claude
+design
+prototype
+**/node_modules
+web/dist
+server/skillhub
+server/skillhub.db*
+server/data
+server/cli
+*.log

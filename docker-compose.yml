@@ -1,0 +1,27 @@
+services:
+  skillhub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: skillhub:latest
+    container_name: skillhub
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SKILLHUB_ADDR: ":8080"
+      SKILLHUB_DB: "/app/data/skillhub.db"
+      SKILLHUB_WEB_DIR: "/app/web"
+      SKILLHUB_SEED: "false"
+      SKILLHUB_JWT_SECRET: "${SKILLHUB_JWT_SECRET:-change-me-please-set-a-real-secret}"
+    volumes:
+      - skillhub-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  skillhub-data:

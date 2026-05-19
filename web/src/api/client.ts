@@ -44,6 +44,10 @@ export const api = {
     request<{ token: string; user: Me }>('/auth/login', {
       method: 'POST', body: JSON.stringify({ username, password }),
     }),
+  register: (body: { username: string; password: string; display?: string; email?: string }) =>
+    request<{ token: string; user: Me }>('/auth/register', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
   me: () => request<Me>('/me'),
   updateMe: (body: UpdateMeRequest) =>
     request<Me>('/me', { method: 'PATCH', body: JSON.stringify(body) }),

@@ -12,11 +12,13 @@ import { Admin } from './pages/Admin';
 import { Editor } from './pages/Editor';
 import { Profile } from './pages/Profile';
 import { Login } from './pages/Login';
+import { Register } from './pages/Register';
 
 export default function App() {
   return (
     <Routes>
       <Route path="login" element={<Login />} />
+      <Route path="register" element={<Register />} />
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
         <Route index element={<Navigate to="/workspace" replace />} />
         <Route path="workspace" element={<Workspace />} />

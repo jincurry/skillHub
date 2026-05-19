@@ -1,13 +1,13 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { getToken, setStoredUser, setToken } from '../api/auth';
 
 export function Login() {
   const nav = useNavigate();
   const loc = useLocation();
-  const [username, setUsername] = useState('alice');
-  const [password, setPassword] = useState('password');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -46,17 +46,14 @@ export function Login() {
           <div className="logo-mark" style={{ width: 32, height: 32, fontSize: 18 }}>s</div>
           <div className="logo-text" style={{ fontSize: 20 }}>skill<em>Hub</em></div>
         </div>
-        <h2 style={{ margin: '0 0 6px', fontSize: 18 }}>登录</h2>
-        <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 18 }}>
-          种子用户:alice / bob / charlie / diana / frank。默认密码 <code>password</code>。
-        </div>
+        <h2 style={{ margin: '0 0 18px', fontSize: 18 }}>登录</h2>
 
         <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>用户名</label>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus
+        <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required
                style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12 }} />
 
         <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>密码</label>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required
                style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 14 }} />
 
         {err && <div style={{ color: 'var(--danger, #c33)', fontSize: 12, marginBottom: 10 }}>{err}</div>}
@@ -67,6 +64,10 @@ export function Login() {
                          opacity: busy ? 0.6 : 1 }}>
           {busy ? '登录中…' : '登录'}
         </button>
+
+        <div style={{ marginTop: 14, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
+          还没有账号？<Link to="/register" style={{ color: 'var(--primary)' }}>立即注册</Link>
+        </div>
       </form>
     </div>
   );

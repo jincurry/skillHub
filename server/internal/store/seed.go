@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +11,9 @@ import (
 )
 
 func (s *Store) seedIfEmpty() error {
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("SKILLHUB_SEED"))); v == "false" || v == "0" || v == "off" || v == "no" {
+		return nil
+	}
 	var n int
 	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM skills`).Scan(&n); err != nil {
 		return err
