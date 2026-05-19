@@ -7,6 +7,7 @@ import {
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import type { Review } from '../api/types';
+import { SkillIcon } from '../components/SkillIcon';
 
 function csvEscape(s: string): string {
   if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
@@ -218,7 +219,7 @@ export function Reviews() {
                 <tr key={r.id} onClick={() => navigate(`/reviews/${r.id}`)}>
                   <td>
                     <div className="tbl-name">
-                      <div className="skill-icon blue" style={{ width: 24, height: 24, fontSize: 11 }}>{r.name.slice(0, 2).toUpperCase()}</div>
+                      <SkillIcon ns={r.ns} name={r.name} size={24} fontSize={11} />
                       <div>
                         <div className="skill-name-text" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <span><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{r.ns}/</span>{r.name}</span>

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { IconSearch, IconBox, IconUsers, IconCheck } from './Icons';
 import { api } from '../api/client';
 import type { SearchResult } from '../api/types';
+import { SkillIcon } from './SkillIcon';
 
 const EVENT = 'skillhub:command-palette';
 
@@ -29,7 +30,7 @@ function flatten(r: SearchResult): FlatItem[] {
       label: `${s.ns} / ${s.name}`,
       detail: s.desc,
       to: `/skills/${s.ns}/${s.name}`,
-      icon: <span className={`skill-icon ${s.iconClass}`} style={{ width: 20, height: 20, fontSize: 9, borderRadius: 4 }}>{s.icon}</span>,
+      icon: <SkillIcon ns={s.ns} name={s.name} icon={s.icon} iconClass={s.iconClass} size={20} fontSize={9} borderRadius={4} />,
     });
   }
   for (const n of r.namespaces) {

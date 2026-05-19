@@ -1,3 +1,4 @@
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { StatusPill, ClassificationTag } from '../components/Tags';
 import {
@@ -9,9 +10,10 @@ import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { openCreateSkill } from '../components/CreateSkillModal';
 import { fmtRelative, notifTargetUrl, filterAndSort, type NotifFilter } from '../lib/notify';
-import { markAllReadOptimistic, markOneReadOptimistic, useNotifStore } from '../lib/notifStore';
-import { useEffect, useRef, useState } from 'react';
+import { markAllReadOptimistic, markOneReadOptimistic, useNotifSelector } from '../lib/notifStore';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import type { Notification, Review, Skill, ValidationReport } from '../api/types';
+import { SkillIcon } from '../components/SkillIcon';
 
 const DRAFT_CHECKS_FALLBACK = [
   { severity: 'ok' as const, label: 'Schema' },
@@ -127,7 +129,7 @@ function DraftCard({ d, meName, onChanged }: {
     <div className="draft-card">
       <div className="draft-card-head">
         <div className="draft-card-name">
-          <div className={`skill-icon ${d.iconClass}`}>{d.icon}</div>
+          <SkillIcon ns={d.ns} name={d.name} icon={d.icon} iconClass={d.iconClass} />
           <div>
             <div><span className="ns">{d.ns} /</span> {d.name}</div>
             <div className="draft-card-meta" style={{ margin: 0, marginTop: 2 }}>
@@ -290,6 +292,76 @@ const FILTER_LABELS: Record<NotifFilter, string> = {
   comment: '评论',
 };
 
+function NotificationFeed() {
+  const items = useNotifSelector(state => state.items);
+  const loading = useNotifSelector(state => state.loading);
+  const error = useNotifSelector(state => state.error);
+  const [notifFilter, setNotifFilter] = useState<NotifFilter>('all');
+  const filteredNotifs = useMemo(() => filterAndSort(items, notifFilter), [items, notifFilter]);
+  const unreadCount = useMemo(() => items.reduce((n, x) => n + (x.unread ? 1 : 0), 0), [items]);
+
+  function clickNotif(n: Notification) {
+    const url = notifTargetUrl(n);
+    if (n.unread) void markOneReadOptimistic(n.id);
+    if (url) window.location.href = url;
+  }
+
+  return (
+    <div className="card">
+      <div className="card-header" style={{ padding: '12px 16px' }}>
+        <h3 className="card-title">
+          <IconBell size={14} />
+          需要我关注
+          {unreadCount > 0 && (
+            <span className="count-pill" style={{ marginLeft: 4 }}>{unreadCount}</span>
+          )}
+        </h3>
+        <a
+          style={{ fontSize: 12, color: unreadCount > 0 ? 'var(--primary)' : 'var(--text-faint)', cursor: unreadCount > 0 ? 'pointer' : 'default' }}
+          onClick={() => void markAllReadOptimistic()}
+        >全部已读</a>
+      </div>
+      <div style={{ display: 'flex', gap: 6, padding: '8px 16px 10px', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
+        {(Object.keys(FILTER_LABELS) as NotifFilter[]).map((f) => {
+          const isActive = notifFilter === f;
+          return (
+            <button
+              key={f}
+              onClick={() => setNotifFilter(f)}
+              style={{
+                padding: '3px 10px', fontSize: 12, borderRadius: 999,
+                border: '1px solid ' + (isActive ? 'var(--primary)' : 'var(--border)'),
+                background: isActive ? 'var(--primary)' : 'transparent',
+                color: isActive ? 'white' : 'var(--text-subtle)',
+                cursor: 'pointer', fontWeight: isActive ? 500 : 400,
+                transition: 'all 0.12s',
+              }}
+            >{FILTER_LABELS[f]}</button>
+          );
+        })}
+      </div>
+      <div className="card-body flush feed">
+        {loading && items.length === 0 && (
+          <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>加载中...</div>
+        )}
+        {error && (
+          <div style={{ padding: 14, fontSize: 13, color: 'var(--red-text)' }}>{error}</div>
+        )}
+        {!loading && filteredNotifs.map((n) => (
+          <NotificationItem key={n.id} n={n} onClick={clickNotif} onMarkRead={(x) => void markOneReadOptimistic(x.id)} />
+        ))}
+        {!loading && filteredNotifs.length === 0 && (
+          <div style={{ padding: '28px 16px', fontSize: 13, color: 'var(--text-subtle)', textAlign: 'center' }}>
+            {notifFilter === 'all' ? '🎉 你现在没有待办，好棒' : `暂无${FILTER_LABELS[notifFilter]}通知`}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const MemoizedNotificationFeed = React.memo(NotificationFeed);
+
 function PendingReviewItem({ r }: { r: Review }) {
   const navigate = useNavigate();
   const ucol = ({
@@ -339,9 +411,6 @@ export function Workspace() {
     const all = await api.listSkills();
     return all.filter((s) => s.author === u.username && s.status !== 'draft');
   }, []);
-  // Notifications come from the shared store (see lib/notifStore.ts) so the
-  // Workspace feed, topbar bell and sidebar badge stay in lockstep.
-  const notifStore = useNotifStore();
   const pending = useAsync(() => api.listReviews('pending'), []);
 
   // Keep the pending review list fresh: 30s polling + reviews:changed
@@ -381,16 +450,6 @@ export function Workspace() {
     ? ratedSkills.reduce((a, s) => a + s.rating, 0) / ratedSkills.length
     : 0;
   const overdueReviews = myPendingReviews.filter((r) => r.urgency === 'overdue').length;
-
-  const [notifFilter, setNotifFilter] = useState<NotifFilter>('all');
-  const filteredNotifs = filterAndSort(notifStore.items, notifFilter);
-  const unreadCount = notifStore.items.reduce((n, x) => n + (x.unread ? 1 : 0), 0);
-
-  function clickNotif(n: Notification) {
-    const url = notifTargetUrl(n);
-    if (n.unread) void markOneReadOptimistic(n.id);
-    if (url) navigate(url);
-  }
 
   return (
     <div className="content-inner">
@@ -491,7 +550,7 @@ export function Workspace() {
                     <tr key={s.id} onClick={() => navigate(`/skills/${s.ns}/${s.name}`)}>
                       <td>
                         <div className="tbl-name">
-                          <div className={`skill-icon ${s.iconClass}`}>{s.icon}</div>
+                          <SkillIcon ns={s.ns} name={s.name} icon={s.icon} iconClass={s.iconClass} />
                           <div>
                             <div className="skill-name-text"><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{s.ns}/</span>{s.name}</div>
                           </div>
@@ -548,56 +607,7 @@ export function Workspace() {
             </div>
           </div>
 
-          <div className="card">
-            <div className="card-header" style={{ padding: '12px 16px' }}>
-              <h3 className="card-title">
-                <IconBell size={14} />
-                需要我关注
-                {unreadCount > 0 && (
-                  <span className="count-pill" style={{ marginLeft: 4 }}>{unreadCount}</span>
-                )}
-              </h3>
-              <a
-                style={{ fontSize: 12, color: unreadCount > 0 ? 'var(--primary)' : 'var(--text-faint)', cursor: unreadCount > 0 ? 'pointer' : 'default' }}
-                onClick={() => void markAllReadOptimistic()}
-              >全部已读</a>
-            </div>
-            <div style={{ display: 'flex', gap: 6, padding: '8px 16px 10px', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
-              {(Object.keys(FILTER_LABELS) as NotifFilter[]).map((f) => {
-                const isActive = notifFilter === f;
-                return (
-                  <button
-                    key={f}
-                    onClick={() => setNotifFilter(f)}
-                    style={{
-                      padding: '3px 10px', fontSize: 12, borderRadius: 999,
-                      border: '1px solid ' + (isActive ? 'var(--primary)' : 'var(--border)'),
-                      background: isActive ? 'var(--primary)' : 'transparent',
-                      color: isActive ? 'white' : 'var(--text-subtle)',
-                      cursor: 'pointer', fontWeight: isActive ? 500 : 400,
-                      transition: 'all 0.12s',
-                    }}
-                  >{FILTER_LABELS[f]}</button>
-                );
-              })}
-            </div>
-            <div className="card-body flush feed">
-              {notifStore.loading && notifStore.items.length === 0 && (
-                <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>加载中...</div>
-              )}
-              {notifStore.error && (
-                <div style={{ padding: 14, fontSize: 13, color: 'var(--red-text)' }}>{notifStore.error}</div>
-              )}
-              {!notifStore.loading && filteredNotifs.map((n) => (
-                <NotificationItem key={n.id} n={n} onClick={clickNotif} onMarkRead={(x) => void markOneReadOptimistic(x.id)} />
-              ))}
-              {!notifStore.loading && filteredNotifs.length === 0 && (
-                <div style={{ padding: '28px 16px', fontSize: 13, color: 'var(--text-subtle)', textAlign: 'center' }}>
-                  {notifFilter === 'all' ? '🎉 你现在没有待办，好棒' : `暂无${FILTER_LABELS[notifFilter]}通知`}
-                </div>
-              )}
-            </div>
-          </div>
+          <MemoizedNotificationFeed />
         </div>
       </div>
     </div>

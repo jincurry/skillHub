@@ -12,6 +12,7 @@ import { AvatarUploadModal } from '../components/AvatarUploadModal';
 import { CoverPicker } from '../components/CoverPicker';
 import { coverBackground, avatarFallbackGradient } from '../lib/profile';
 import { TokensPanel } from '../components/TokensPanel';
+import { SkillIcon } from '../components/SkillIcon';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -430,7 +431,7 @@ export function Profile() {
                   onClick={() => navigate(`/skills/${s.ns}/${s.name}`)}
                 >
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                    <div className={`skill-icon ${s.iconClass}`} style={{ width: 32, height: 32, fontSize: 13 }}>{s.icon}</div>
+                    <SkillIcon ns={s.ns} name={s.name} icon={s.icon} iconClass={s.iconClass} size={32} fontSize={13} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 600 }}>
                         <span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{s.ns}/</span>{s.name}
@@ -494,7 +495,7 @@ export function Profile() {
                     <tr key={s.id} onClick={() => navigate(`/skills/${s.ns}/${s.name}`)}>
                       <td>
                         <div className="tbl-name">
-                          <div className={`skill-icon ${s.iconClass}`}>{s.icon}</div>
+                          <SkillIcon ns={s.ns} name={s.name} icon={s.icon} iconClass={s.iconClass} />
                           <div className="skill-name-text"><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{s.ns}/</span>{s.name}</div>
                         </div>
                       </td>

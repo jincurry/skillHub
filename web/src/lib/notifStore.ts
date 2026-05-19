@@ -39,8 +39,26 @@ function emit() {
 }
 
 function setState(patch: Partial<State>) {
-  state = { ...state, ...patch };
-  emit();
+  const newState = { ...state, ...patch };
+  // Only emit if something actually changed
+  const itemsChanged = newState.items !== state.items && !itemsEqual(newState.items, state.items);
+  if (itemsChanged ||
+      newState.loading !== state.loading ||
+      newState.error !== state.error ||
+      newState.lastLoadedAt !== state.lastLoadedAt) {
+    state = newState;
+    emit();
+  }
+}
+
+/** Deep comparison for notification arrays - checks if the content actually changed */
+function itemsEqual(a: Notification[], b: Notification[]): boolean {
+  if (a.length !== b.length) return false;
+  // Compare by ID and unread status
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].unread !== b[i].unread) return false;
+  }
+  return true;
 }
 
 /** Fetch the latest notifications and publish them. Deduped: concurrent
@@ -110,9 +128,23 @@ function getSnapshot(): State {
   return state;
 }
 
+function getServerSnapshot(): State {
+  return state;
+}
+
 /** React hook: returns the shared notification state, polling while mounted. */
 export function useNotifStore(): State {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+/** React hook with selector: returns a derived value from the shared state,
+ *  only re-renders when the selected value changes. */
+export function useNotifSelector<T>(selector: (state: State) => T): T {
+  return useSyncExternalStore(
+    subscribe,
+    () => selector(state),
+    () => selector(state),
+  );
 }
 
 /** Convenience: unread count from the shared store. */

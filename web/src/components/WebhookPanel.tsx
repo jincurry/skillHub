@@ -13,6 +13,7 @@ interface Props {
 export function WebhookPanel({ ns = '' }: Props) {
   const { data: hooks, loading, error, reload } = useAsync(() => api.listWebhooks(ns || undefined), [ns]);
   const [creating, setCreating] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [form, setForm] = useState<CreateWebhookRequest>({
     ns,
     url: '',
@@ -77,50 +78,100 @@ export function WebhookPanel({ ns = '' }: Props) {
     }));
   }
 
-  if (loading) return <div className="text-sm text-gray-500">加载中…</div>;
-  if (error) return <div className="text-sm text-red-500">{String(error.message ?? error)}</div>;
+  if (loading) return <div className="card"><div className="card-body" style={{ color: 'var(--text-muted)' }}>加载中…</div></div>;
+  if (error) return <div className="card"><div className="card-body" style={{ color: 'var(--red-text)' }}>{String(error.message ?? error)}</div></div>;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-sm">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
           Webhooks{ns ? ` · ${ns}` : ' (全局)'}
         </h3>
-        <button
-          onClick={() => setCreating(c => !c)}
-          className="text-xs px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700"
-        >
-          + 新建
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => setShowHelp(h => !h)}
+            className="btn sm ghost"
+            style={{ fontSize: 12 }}
+          >
+            {showHelp ? '收起帮助' : '使用说明'}
+          </button>
+          <button
+            onClick={() => setCreating(c => !c)}
+            className="btn sm"
+          >
+            + 新建
+          </button>
+        </div>
       </div>
 
+      {showHelp && (
+        <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--bg-soft)' }}>
+          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>什么是 Webhook？</h4>
+          <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--text-subtle)' }}>
+            Webhook 是一种 HTTP 回调机制。当特定事件发生时（如 skill 发布、下架、废弃），SkillHub 会自动向您配置的 URL 发送 POST 请求，通知您的系统。
+          </p>
+
+          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>如何使用？</h4>
+          <ol style={{ margin: 0, fontSize: 12, paddingLeft: 16, lineHeight: 1.8, color: 'var(--text-subtle)' }}>
+            <li>点击右上角"新建"按钮创建 Webhook</li>
+            <li>输入您的接收端点 URL（必须支持 HTTPS）</li>
+            <li>（可选）设置签名密钥用于验证请求来源</li>
+            <li>选择需要触发的事件类型</li>
+            <li>点击"测试"按钮验证配置是否正确</li>
+          </ol>
+
+          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>事件类型</h4>
+          <ul style={{ margin: 0, fontSize: 12, paddingLeft: 16, lineHeight: 1.8, color: 'var(--text-subtle)' }}>
+            <li><code style={{ background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>skill.published</code>: skill 被发布时触发</li>
+            <li><code style={{ background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>skill.yanked</code>: skill 被下架时触发</li>
+            <li><code style={{ background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>skill.deprecated</code>: skill 被标记为废弃时触发</li>
+          </ul>
+
+          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>请求格式</h4>
+          <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--text-subtle)' }}>
+            请求方法：<code style={{ background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>POST</code><br/>
+            Content-Type：<code style={{ background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>application/json</code>
+          </p>
+
+          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>签名验证</h4>
+          <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--text-subtle)' }}>
+            如果配置了签名密钥，请求头会包含 <code style={{ background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>X-Webhook-Signature</code>，值为 HMAC-SHA256(request_body, secret) 的十六进制表示。您的服务端可以用相同算法验证请求来源。
+          </p>
+
+          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>重试机制</h4>
+          <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--text-subtle)' }}>
+            如果接收端返回非 2xx 状态码或超时，系统会自动重试。您可以在 webhook 详情中查看投递日志。
+          </p>
+        </div>
+      )}
+
       {creating && (
-        <div className="border rounded-lg p-4 space-y-3 bg-gray-50 dark:bg-gray-800">
+        <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
-            <label className="block text-xs font-medium mb-1">Endpoint URL *</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>Endpoint URL *</label>
             <input
-              className="w-full border rounded px-2 py-1 text-sm"
+              className="input"
               placeholder="https://your-system.example.com/hooks/skillhub"
               value={form.url}
               onChange={e => setForm(f => ({ ...f, url: e.target.value }))}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium mb-1">
-              签名密钥 <span className="text-gray-400">(可选，用于 HMAC-SHA256 验签)</span>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>
+              签名密钥 <span style={{ color: 'var(--text-faint)' }}>(可选，用于 HMAC-SHA256 验签)</span>
             </label>
             <input
-              className="w-full border rounded px-2 py-1 text-sm font-mono"
+              className="input mono"
               placeholder="my-webhook-secret"
               value={form.secret}
               onChange={e => setForm(f => ({ ...f, secret: e.target.value }))}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium mb-1">触发事件</label>
-            <div className="flex gap-3">
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>触发事件</label>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               {ALL_EVENTS.map(ev => (
-                <label key={ev} className="flex items-center gap-1 text-xs cursor-pointer">
+                <label key={ev} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={form.events?.includes(ev) ?? false}
@@ -131,18 +182,19 @@ export function WebhookPanel({ ns = '' }: Props) {
               ))}
             </div>
           </div>
-          {saveError && <p className="text-xs text-red-500">{saveError}</p>}
-          <div className="flex gap-2">
+          {saveError && <p style={{ fontSize: 12, color: 'var(--red-text)' }}>{saveError}</p>}
+          <div style={{ display: 'flex', gap: 8 }}>
             <button
               onClick={handleCreate}
               disabled={!form.url || !form.events?.length}
-              className="text-xs px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
+              className="btn sm primary"
+              style={{ opacity: (!form.url || !form.events?.length) ? 0.4 : 1 }}
             >
               保存
             </button>
             <button
               onClick={() => { setCreating(false); setSaveError(''); }}
-              className="text-xs px-3 py-1 rounded border hover:bg-gray-100"
+              className="btn sm"
             >
               取消
             </button>
@@ -151,71 +203,80 @@ export function WebhookPanel({ ns = '' }: Props) {
       )}
 
       {!hooks?.length && !creating && (
-        <p className="text-sm text-gray-400">暂无 Webhook，点击"新建"添加第一个。</p>
+        <p style={{ fontSize: 13, color: 'var(--text-faint)' }}>暂无 Webhook，点击"新建"添加第一个。</p>
       )}
 
-      <div className="space-y-2">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {(hooks ?? []).map(hook => (
-          <div key={hook.id} className="border rounded-lg overflow-hidden">
-            <div className="flex items-center gap-3 px-4 py-3">
-              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${hook.enabled ? 'bg-green-500' : 'bg-gray-300'}`} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-mono truncate">{hook.url}</p>
-                <p className="text-xs text-gray-400">
+          <div key={hook.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12 }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                background: hook.enabled ? 'var(--green)' : 'var(--text-faint)'
+              }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p className="mono" style={{ margin: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hook.url}</p>
+                <p style={{ marginTop: 2, marginBottom: 0, fontSize: 12, color: 'var(--text-faint)' }}>
                   {hook.events.join(', ')}
                   {hook.ns ? ` · ${hook.ns}` : ' · 全局'}
                   {hook.hasSecret ? ' · 已签名' : ''}
                 </p>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                 {pingResult[hook.id] && (
-                  <span className={`text-xs px-2 py-0.5 rounded font-mono ${
-                    pingResult[hook.id].startsWith('✓') ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50'
-                  }`}>
+                  <span style={{
+                    fontSize: 12, padding: '2px 6px', borderRadius: 4,
+                    background: pingResult[hook.id].startsWith('✓') ? 'var(--green-bg)' : 'var(--red-bg)',
+                    color: pingResult[hook.id].startsWith('✓') ? 'var(--green-text)' : 'var(--red-text)',
+                  }}>
                     {pingResult[hook.id]}
                   </span>
                 )}
-                <button onClick={() => handlePing(hook)} className="text-xs text-gray-500 hover:text-indigo-600">测试</button>
-                <button onClick={() => handleToggle(hook)} className="text-xs text-gray-500 hover:text-indigo-600">
+                <button onClick={() => handlePing(hook)} className="btn sm ghost" style={{ fontSize: 12 }}>测试</button>
+                <button onClick={() => handleToggle(hook)} className="btn sm ghost" style={{ fontSize: 12 }}>
                   {hook.enabled ? '停用' : '启用'}
                 </button>
-                <button onClick={() => handleExpand(hook)} className="text-xs text-gray-500 hover:text-indigo-600">
+                <button onClick={() => handleExpand(hook)} className="btn sm ghost" style={{ fontSize: 12 }}>
                   {expanded === hook.id ? '收起' : '日志'}
                 </button>
-                <button onClick={() => handleDelete(hook.id)} className="text-xs text-red-400 hover:text-red-600">删除</button>
+                <button onClick={() => handleDelete(hook.id)} className="btn sm ghost" style={{ fontSize: 12, color: 'var(--red-text)' }}>删除</button>
               </div>
             </div>
 
             {expanded === hook.id && (
-              <div className="border-t bg-gray-50 dark:bg-gray-900 px-4 py-3">
-                <p className="text-xs font-medium mb-2">最近投递记录</p>
+              <div style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-soft)', padding: 12 }}>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 500, marginBottom: 8 }}>最近投递记录</p>
                 {!deliveries[hook.id]?.length ? (
-                  <p className="text-xs text-gray-400">暂无投递记录</p>
+                  <p style={{ margin: 0, fontSize: 12, color: 'var(--text-faint)' }}>暂无投递记录</p>
                 ) : (
-                  <table className="w-full text-xs">
+                  <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr className="text-gray-500">
-                        <th className="text-left font-normal pb-1">事件</th>
-                        <th className="text-left font-normal pb-1">状态</th>
-                        <th className="text-left font-normal pb-1">耗时</th>
-                        <th className="text-left font-normal pb-1">时间</th>
+                      <tr style={{ color: 'var(--text-subtle)' }}>
+                        <th style={{ textAlign: 'left', fontWeight: 400, paddingBottom: 6 }}>事件</th>
+                        <th style={{ textAlign: 'left', fontWeight: 400, paddingBottom: 6 }}>状态</th>
+                        <th style={{ textAlign: 'left', fontWeight: 400, paddingBottom: 6 }}>耗时</th>
+                        <th style={{ textAlign: 'left', fontWeight: 400, paddingBottom: 6 }}>时间</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody>
                       {deliveries[hook.id].map(d => (
-                        <tr key={d.id}>
-                          <td className="py-1 font-mono">{d.event}</td>
-                          <td className="py-1">
-                            <span className={`px-1.5 py-0.5 rounded text-xs ${
-                              d.statusCode >= 200 && d.statusCode < 300
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-red-100 text-red-700'
-                            }`}>
+                        <tr key={d.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: 6, fontFamily: 'monospace' }}>{d.event}</td>
+                          <td style={{ padding: 6 }}>
+                            <span style={{
+                              padding: '2px 6px', borderRadius: 4, fontSize: 11,
+                              background: d.statusCode >= 200 && d.statusCode < 300
+                                ? 'var(--green-bg)'
+                                : 'var(--red-bg)',
+                              color: d.statusCode >= 200 && d.statusCode < 300
+                                ? 'var(--green-text)'
+                                : 'var(--red-text)',
+                            }}>
                               {d.statusCode || d.error || '—'}
                             </span>
                           </td>
-                          <td className="py-1 text-gray-500">{d.durationMs}ms</td>
-                          <td className="py-1 text-gray-400">{new Date(d.deliveredAt).toLocaleString()}</td>
+                          <td style={{ padding: 6, color: 'var(--text-subtle)' }}>{d.durationMs}ms</td>
+                          <td style={{ padding: 6, color: 'var(--text-faint)' }}>{new Date(d.deliveredAt).toLocaleString()}</td>
                         </tr>
                       ))}
                     </tbody>

@@ -9,6 +9,7 @@ import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { openCreateSkill } from '../components/CreateSkillModal';
 import type { Skill } from '../api/types';
+import { SkillIcon } from '../components/SkillIcon';
 
 type SortKey = 'updated' | 'activations' | 'rating';
 const SORT_LABELS: Record<SortKey, string> = {
@@ -39,7 +40,7 @@ function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
   return (
     <div className="skill-card" onClick={() => onOpen(s)}>
       <div className="skill-card-head">
-        <div className={`skill-icon ${s.iconClass}`} style={{ width: 36, height: 36, borderRadius: 8, fontSize: 14 }}>{s.icon}</div>
+        <SkillIcon ns={s.ns} name={s.name} icon={s.icon} iconClass={s.iconClass} size={36} borderRadius={8} fontSize={14} />
         <div className="skill-card-title-block">
           <div className="skill-card-name">
             <span className="ns">{s.ns} /</span>
@@ -360,7 +361,7 @@ export function Browse() {
                       <tr key={s.id} onClick={() => openSkill(s)}>
                         <td>
                           <div className="tbl-name">
-                            <div className={`skill-icon ${s.iconClass}`}>{s.icon}</div>
+                            <SkillIcon ns={s.ns} name={s.name} icon={s.icon} iconClass={s.iconClass} />
                             <div>
                               <div className="skill-name-text"><span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}>{s.ns}/</span>{s.name}</div>
                               <div className="skill-name-desc" style={{ maxWidth: 380, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.desc}</div>
