@@ -118,7 +118,7 @@ Key features beyond basic Monaco editing:
 
 **Hotfix channel**: `isHotfix=true` on submit uses a relaxed 1-reviewer / 4h-SLA policy. Only namespace owners/maintainers can use it. The audit log always records a `hotfix_submit` entry.
 
-**Skill files**: Three files are pinned and cannot be deleted or renamed: `skill.yaml`, `SKILL.md`, `README.md`. Small files are stored inline in the DB; larger ones go to disk under `./data/`.
+**Skill files**: Only `SKILL.md` is pinned — it's the bundle's canonical entry point and the validate pass treats its absence as a blocker. `skill.yaml` and `README.md` are seeded by the default template but the author can delete or rename them. The `REQUIRED_FILES` set in `web/src/pages/Editor.tsx` is the source of truth. Small files are stored inline in the DB; larger ones go to disk under `./data/`.
 
 **Dist tags**: `latest` is automatically upserted to point at the newest approved version on every `approve` decision. `stable` / `beta` / custom tags are managed manually by owners/maintainers. `latest` cannot be manually deleted.
 
