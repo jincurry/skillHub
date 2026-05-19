@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { getToken, setStoredUser, setToken } from '../api/auth';
 
 export function Login() {
+  const { t } = useTranslation();
   const nav = useNavigate();
   const loc = useLocation();
   const [username, setUsername] = useState('alice');
@@ -46,16 +48,16 @@ export function Login() {
           <div className="logo-mark" style={{ width: 32, height: 32, fontSize: 18 }}>s</div>
           <div className="logo-text" style={{ fontSize: 20 }}>skill<em>Hub</em></div>
         </div>
-        <h2 style={{ margin: '0 0 6px', fontSize: 18 }}>登录</h2>
+        <h2 style={{ margin: '0 0 6px', fontSize: 18 }}>{t('login.title')}</h2>
         <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 18 }}>
-          种子用户:alice / bob / charlie / diana / frank。默认密码 <code>password</code>。
+          {t('login.seedHint')}
         </div>
 
-        <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>用户名</label>
+        <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{t('login.username')}</label>
         <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus
                style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12 }} />
 
-        <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>密码</label>
+        <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{t('login.password')}</label>
         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
                style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 14 }} />
 
@@ -65,7 +67,7 @@ export function Login() {
                 style={{ width: '100%', padding: '9px 12px', borderRadius: 6, border: 'none',
                          background: 'var(--primary)', color: '#fff', fontWeight: 600, cursor: 'pointer',
                          opacity: busy ? 0.6 : 1 }}>
-          {busy ? '登录中…' : '登录'}
+          {busy ? t('login.submitting') : t('login.submit')}
         </button>
       </form>
     </div>

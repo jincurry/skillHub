@@ -1,12 +1,7 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { IconSun, IconMoon, IconMonitor } from './Icons';
 import { applyTheme, getStoredTheme, nextTheme, watchSystemTheme, type Theme } from '../lib/theme';
-
-const THEME_LABEL: Record<Theme, string> = {
-  light: '亮色',
-  dark: '暗色',
-  system: '跟随系统',
-};
 
 function iconFor(t: Theme) {
   if (t === 'light') return <IconSun size={18} />;
@@ -20,6 +15,7 @@ function iconFor(t: Theme) {
  * is on `system` mode and the OS preference flips, we re-apply automatically.
  */
 export function ThemeToggle() {
+  const { t } = useTranslation();
   const [theme, setTheme] = useState<Theme>(() => getStoredTheme());
 
   useEffect(() => {
@@ -31,12 +27,13 @@ export function ThemeToggle() {
     return watchSystemTheme(() => applyTheme('system'));
   }, [theme]);
 
+  const label = t(`theme.${theme}`);
   return (
     <button
       className="icon-btn"
-      title={`主题: ${THEME_LABEL[theme]}（点击切换）`}
-      aria-label={`切换主题，当前 ${THEME_LABEL[theme]}`}
-      onClick={() => setTheme((t) => nextTheme(t))}
+      title={t('theme.tooltip', { label })}
+      aria-label={t('theme.ariaLabel', { label })}
+      onClick={() => setTheme((tt) => nextTheme(tt))}
     >
       {iconFor(theme)}
     </button>

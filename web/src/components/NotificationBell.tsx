@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { IconBell } from './Icons';
 import { fmtRelative, notifTargetUrl } from '../lib/notify';
@@ -16,6 +17,7 @@ const KIND_COLOR: Record<string, string> = {
 };
 
 export function NotificationBell() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -54,7 +56,7 @@ export function NotificationBell() {
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button className="icon-btn" title="通知" onClick={toggle} aria-label="通知">
+      <button className="icon-btn" title={t('notifications.title')} onClick={toggle} aria-label={t('notifications.iconAriaLabel')}>
         <IconBell size={18} />
         {unreadCount > 0 && (
           <span
@@ -92,7 +94,7 @@ export function NotificationBell() {
             background: 'var(--bg)',
             position: 'sticky', top: 0, zIndex: 1,
           }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>通知</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{t('notifications.title')}</span>
             <button
               onClick={markAllRead}
               disabled={unreadCount === 0}
@@ -100,12 +102,12 @@ export function NotificationBell() {
                 border: 'none', background: 'transparent', cursor: unreadCount ? 'pointer' : 'default',
                 color: unreadCount ? 'var(--primary)' : 'var(--text-faint)', fontSize: 12,
               }}
-            >全部已读</button>
+            >{t('notifications.markAllRead')}</button>
           </div>
-          {loading && <div style={{ padding: 14, fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
+          {loading && <div style={{ padding: 14, fontSize: 12, color: 'var(--text-subtle)' }}>{t('common.loading')}</div>}
           {!loading && items.length === 0 && (
             <div style={{ padding: 24, fontSize: 13, color: 'var(--text-subtle)', textAlign: 'center' }}>
-              暂无通知
+              {t('notifications.empty')}
             </div>
           )}
           {[...items]
@@ -119,7 +121,7 @@ export function NotificationBell() {
                 <div
                   key={n.id}
                   onClick={() => clickItem(n)}
-                  title={url ? `点击打开 ${url}` : undefined}
+                  title={url ? t('notifications.openHint', { url }) : undefined}
                   style={{
                     padding: '10px 14px', borderBottom: '1px solid var(--border)',
                     cursor: url ? 'pointer' : 'default',

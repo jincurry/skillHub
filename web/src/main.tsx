@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { setUnauthorizedHandler } from './api/client';
 import { applyTheme, getStoredTheme } from './lib/theme';
+import './i18n';
 import './styles/global.css';
 
 // Apply the saved theme synchronously, before React mounts, to avoid a

@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jincurry/skillhub/server/internal/auth"
 	"github.com/jincurry/skillhub/server/internal/config"
+	"github.com/jincurry/skillhub/server/internal/i18n"
 	"github.com/jincurry/skillhub/server/internal/middleware"
 	"github.com/jincurry/skillhub/server/internal/model"
 	"github.com/jincurry/skillhub/server/internal/notifier"
@@ -1344,7 +1345,7 @@ func (s *Server) putSkillFile(c *gin.Context) {
 		return
 	}
 	if !allowed {
-		c.JSON(403, gin.H{"error": "需要 author 或 namespace 成员身份"})
+		i18n.Error(c, 403, "api.need_author_or_member")
 		return
 	}
 	var req model.PutFileRequest
@@ -1375,14 +1376,14 @@ func (s *Server) deleteSkillFile(c *gin.Context) {
 		return
 	}
 	if !allowed {
-		c.JSON(403, gin.H{"error": "需要 author 或 namespace 成员身份"})
+		i18n.Error(c, 403, "api.need_author_or_member")
 		return
 	}
 	// SKILL.md is the only pinned file — it's the canonical entry point and
 	// the validate pass treats its absence as a blocker. Everything else is
 	// fair game for deletion.
 	if p == "SKILL.md" {
-		c.JSON(400, gin.H{"error": "SKILL.md 是 skill 入口，不可删除"})
+		i18n.Error(c, 400, "api.skill_md_undeletable")
 		return
 	}
 	deleted, err := s.store.DeleteSkillFile(ns, name, p)
@@ -1412,7 +1413,7 @@ func (s *Server) renameSkillFile(c *gin.Context) {
 		return
 	}
 	if !allowed {
-		c.JSON(403, gin.H{"error": "需要 author 或 namespace 成员身份"})
+		i18n.Error(c, 403, "api.need_author_or_member")
 		return
 	}
 	var req model.RenameFileRequest
@@ -1431,7 +1432,7 @@ func (s *Server) renameSkillFile(c *gin.Context) {
 		return
 	}
 	if from == "SKILL.md" {
-		c.JSON(400, gin.H{"error": "SKILL.md 是 skill 入口，不可重命名"})
+		i18n.Error(c, 400, "api.skill_md_unrenameable")
 		return
 	}
 	f, err := s.store.RenameSkillFile(ns, name, from, to, user)
@@ -1466,7 +1467,7 @@ func (s *Server) createNamespace(c *gin.Context) {
 		msg := err.Error()
 		switch {
 		case strings.Contains(msg, "UNIQUE"):
-			c.JSON(409, gin.H{"error": "namespace already exists"})
+			i18n.Error(c, 409, "api.namespace_exists")
 		case strings.Contains(msg, "owner user does not exist"):
 			c.JSON(400, gin.H{"error": msg})
 		default:

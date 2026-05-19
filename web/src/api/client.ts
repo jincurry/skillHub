@@ -1,5 +1,6 @@
 import type { Achievement, AdminUpdateUserRequest, AdminUser, AIProvider, AIProviderRef, APIToken, AuditFilter, AuditLog, Comment, CreateAIProviderRequest, CreateAPITokenRequest, CreateAPITokenResponse, CreateUserRequest, CreateWebhookRequest, DistTag, Me, MeStats, Namespace, NamespaceMember, NamespacePoliciesResponse, Notification, PingResult, PlatformMetrics, PolicyPreview, RatingsResponse, RatingSummary, Review, ReviewFile, ReviewStats, SearchResult, Skill, SkillFile, SkillTemplate, SkillVersion, Subscription, SubscriptionState, TrendPoint, UpdateAIProviderRequest, UpdateMeRequest, UpdateSkillMetaRequest, UpdateWebhookRequest, UpsertPolicyRequest, ValidationReport, Webhook, WebhookDelivery } from './types';
 import { clearAuth, getToken } from './auth';
+import i18n from '../i18n';
 
 const BASE = '/api/v1';
 
@@ -8,8 +9,23 @@ export function setUnauthorizedHandler(h: () => void): void {
   onUnauthorized = h;
 }
 
+/** Resolve the current UI language as an Accept-Language header value. The
+    backend's i18n middleware reads this to decide which locale to render
+    error messages and notification bodies in. */
+function acceptLanguageHeader(): string {
+  const lang = i18n.resolvedLanguage ?? i18n.language ?? 'zh-CN';
+  // Most languages we care about pass through; we just give the backend a
+  // simple priority list with our resolved language first.
+  if (lang.startsWith('en')) return 'en, zh-CN;q=0.8';
+  return 'zh-CN, en;q=0.8';
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...((init?.headers as Record<string, string>) || {}) };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept-Language': acceptLanguageHeader(),
+    ...((init?.headers as Record<string, string>) || {}),
+  };
   const tok = getToken();
   if (tok && !headers['Authorization']) headers['Authorization'] = `Bearer ${tok}`;
   const res = await fetch(BASE + path, { ...init, headers });
