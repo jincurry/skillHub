@@ -115,7 +115,7 @@ export function CreateSkillModal() {
               <TemplateChip
                 id=""
                 title={text('Blank', '空白')}
-                desc="SKILL.md + skill.yaml"
+                desc={text('SKILL.md only', '仅 SKILL.md')}
                 selected={templateId === ''}
                 onSelect={() => setTemplateId('')}
               />

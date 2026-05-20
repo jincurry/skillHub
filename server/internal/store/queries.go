@@ -137,9 +137,9 @@ func (s *Store) CreateSkill(req model.CreateSkillRequest, author string) (*model
 	_, _ = s.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
 		author, "create_draft", req.Namespace+"/"+req.Name, "v0.1.0", "127.0.0.1")
 	// Seed the bundle. With a templateId, render the named template; otherwise
-	// fall back to the default SKILL.md / skill.yaml pair. Both
-	// paths are best-effort: a seeding error doesn't block skill creation
-	// since the row is already committed.
+	// fall back to the default bare SKILL.md scaffold. Both paths are
+	// best-effort: a seeding error doesn't block skill creation since the row
+	// is already committed.
 	if req.TemplateID != "" {
 		if tpl := templates.Get(req.TemplateID); tpl != nil {
 			rendered := tpl.Render(templates.Vars{Name: req.Name, Description: req.Description})

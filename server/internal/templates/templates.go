@@ -1,6 +1,6 @@
 // Package templates provides built-in skill scaffolds. A template is a
 // named bundle of files (path → content) that the new-skill flow seeds
-// instead of the bare SKILL.md / skill.yaml pair. Every
+// instead of the bare SKILL.md scaffold. Every
 // template gets variable substitution so authors land on a draft that
 // already mentions their skill name and description.
 //

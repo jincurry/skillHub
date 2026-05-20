@@ -579,6 +579,12 @@ table.tbl tbody tr:hover { background: var(--bg-hover); cursor: pointer; }
 .readme ul { padding-left: 22px; color: var(--text-muted); }
 .readme li { margin: 4px 0; }
 .readme blockquote { border-left: 3px solid var(--primary); background: var(--primary-50); padding: 8px 14px; margin: 14px 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--text); font-size: 13.5px; }
+.readme table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; display: block; overflow-x: auto; }
+.readme table thead th { background: var(--bg-muted); font-weight: 600; text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+.readme table tbody td { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); vertical-align: top; }
+.readme table tbody tr:last-child td { border-bottom: none; }
+.readme table tbody tr:nth-child(even) td { background: color-mix(in oklab, var(--bg-muted) 40%, transparent); }
+.readme table code { background: var(--bg); }
 
 .meta-list { display: flex; flex-direction: column; gap: 12px; }
 .meta-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; align-items: center; }

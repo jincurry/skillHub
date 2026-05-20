@@ -307,8 +307,8 @@ type CreateSkillRequest struct {
 	Classification string   `json:"classification" binding:"required,oneof=L1 L2 L3"`
 	Tags           []string `json:"tags"`
 	// TemplateID seeds the new skill's bundle from a built-in template
-	// (see internal/templates). Empty = the default SKILL.md / skill.yaml /
-	// skill.yaml pair produced by SeedDefaultFiles.
+	// (see internal/templates). Empty = the default bare SKILL.md scaffold
+	// produced by SeedDefaultFiles.
 	TemplateID string `json:"templateId"`
 }
 

@@ -171,9 +171,13 @@ func (s *Store) RenameSkillFile(ns, name, fromPath, toPath, updatedBy string) (*
 }
 
 // SeedDefaultFiles bootstraps a freshly-created skill with the canonical
-// SKILL.md plus skill.yaml so the editor opens to a meaningful bundle that
-// already nods to the recommended layout (SKILL.md + scripts/ + references/ +
-// assets/). No-op if the skill already has any files.
+// SKILL.md so the editor opens to a meaningful bundle that already nods to
+// the recommended layout (SKILL.md + scripts/ + references/ + assets/).
+// No-op if the skill already has any files.
+//
+// SKILL.md is the only file we seed by default — it's the bundle's canonical
+// entry point and the validate pass treats its absence as a blocker. Authors
+// can add skill.yaml or anything else from the New File dialog if they want.
 func (s *Store) SeedDefaultFiles(ns, name, description, author string) error {
 	var existing int
 	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM skill_files WHERE ns = ? AND skill_name = ?`, ns, name).Scan(&existing); err != nil {
@@ -183,9 +187,6 @@ func (s *Store) SeedDefaultFiles(ns, name, description, author string) error {
 		return nil
 	}
 	if _, err := s.PutSkillFile(ns, name, "SKILL.md", buildSkillMD(name, description), author); err != nil {
-		return err
-	}
-	if _, err := s.PutSkillFile(ns, name, "skill.yaml", buildSkillYaml(ns, name, description), author); err != nil {
 		return err
 	}
 	return nil
@@ -225,7 +226,3 @@ func firstLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func buildSkillYaml(ns, name, description string) string {
-	return "name: " + name + "\nversion: \"0.1.0\"\nnamespace: " + ns + "\nclassification: L2\n\ndescription: |\n  " +
-		strings.ReplaceAll(description, "\n", "\n  ") + "\n\nruntime:\n  image: \"alpine:3.19\"\n  timeout: 60s\n  memory: \"512Mi\"\n\ntags: []\n\ninputs: []\n"
-}

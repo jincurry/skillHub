@@ -17,12 +17,13 @@ import {
   AUTOSAVE_MS, REQUIRED_FILES, SEMVER_RE, STD_DIRS, TEMPLATE_GROUPS,
   type StdDirKey,
 } from './editor/constants';
-import { bumpVersion, draftKeyFor, iconFor, seedFileForDir, type SemverBump } from './editor/helpers';
+import { bumpVersion, draftKeyFor, iconFor, type SemverBump } from './editor/helpers';
 import { bodyForPreview, parseFrontmatter, setFrontmatter } from './editor/frontmatter';
 import { computeDiff } from './editor/diff';
 import { FrontmatterField, TagsField } from './editor/FrontmatterField';
 import { FilePicker } from './editor/FilePicker';
 import { FileTree, buildTree } from './editor/FileTree';
+import { buildSubmitPreflight } from './editor/preflight';
 import { useLocaleText } from '../i18n/useLocaleText';
 
 
@@ -604,15 +605,13 @@ export function Editor() {
   // Used both to colour the submit button and to render the checklist at
   // the top of the submit modal.
   const preflight = useMemo(() => {
-    const checks = validation.data?.checks ?? [];
-    const blockers = checks.filter((c) => c.severity === 'err');
-    const warnings = checks.filter((c) => c.severity === 'warn');
-    return {
-      blockers,
-      warnings,
-      ready: validation.data != null && blockers.length === 0,
-    };
-  }, [validation.data]);
+    return buildSubmitPreflight({
+      validation: validation.data,
+      policy: policy.data,
+      isHotfix: submitHotfix,
+      text,
+    });
+  }, [policy.data, submitHotfix, text, validation.data]);
 
   useEffect(() => {
     if (showSubmit) setSubmitVersion((v) => v || nextVersion);
@@ -803,25 +802,14 @@ export function Editor() {
     }
   }
 
-  // Quick-create a missing recommended dir by writing an index.md into it.
-  // The directory then shows up in the file tree like any other; the file
-  // doubles as guidance for what should go in the dir.
-  async function createStdDir(dir: StdDirKey) {
-    const seed = seedFileForDir(dir, dir);
-    if ((files.data ?? []).some((f) => f.path === seed.path)) {
-      openFile(seed.path);
-      return;
-    }
-    try {
-      const f = await api.putFile(ns, name, seed.path, seed.content);
-      setBuffers((b) => ({ ...b, [seed.path]: { content: f.content ?? seed.content, dirty: false } }));
-      files.reload();
-      validation.reload();
-      openFile(seed.path);
-      setMsg(text(`Created ${dir}/ directory`, `已创建 ${dir}/ 目录`));
-    } catch (e) {
-      setMsg(text(`Failed to create ${dir}/: ${(e as Error).message}`, `创建 ${dir}/ 失败: ${(e as Error).message}`));
-    }
+  // Quick-create the first file in a missing recommended dir. The backend has
+  // no concept of empty directories, so the dir only "exists" once a file is
+  // written under it. We open the New File dialog with the directory prefix
+  // prefilled so the user picks the actual file name and extension (.py / .sh
+  // / .json / .png / etc.) — we deliberately don't seed a placeholder
+  // index.md anymore.
+  function createStdDir(dir: StdDirKey) {
+    openNewFileDialog({ path: `${dir}/` });
   }
 
   async function deleteFile(p: string) {
@@ -1331,6 +1319,14 @@ export function Editor() {
                   {(policy.data.suggested ?? []).length > 0 && (
                     <> · {text('Suggested reviewers', '建议审批人')} {(policy.data.suggested ?? []).map((u) => `@${u}`).join(', ')}</>
                   )}
+                  {(policy.data.suggested ?? []).length === 0 && (
+                    <div style={{ color: 'var(--red-text)', fontSize: 11.5, marginTop: 6 }}>
+                      {text(
+                        'No eligible reviewers are available for this policy.',
+                        '当前策略下没有可用审批人。',
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               {/* Dirty file preview — saves the reviewer (and the author!)
@@ -1575,8 +1571,9 @@ export function Editor() {
             />
           )}
           {/* Placeholder rows for recommended dirs that don't exist yet.
-              Clicking "+" seeds the dir with an index.md so it shows up in the
-              tree (the backend has no concept of empty dirs). */}
+              Clicking "+" opens the New File dialog with the directory prefix
+              prefilled so the user picks the actual file name and extension —
+              the dir then materialises once that first file is written. */}
           {canEdit && files.data && bundleStatus.missingStdDirs.length > 0 && (
             <div style={{ margin: '6px 4px 0', paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
               <div style={{ fontSize: 10.5, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '2px 8px 4px' }}>
@@ -1917,7 +1914,7 @@ export function Editor() {
                         className="btn sm ghost"
                         style={{ padding: '0 6px', height: 20, fontSize: 11 }}
                         onClick={() => createStdDir(d.key)}
-                        title={text(`Create the ${d.label}/ directory with a placeholder index.md`, `一键创建 ${d.label}/ 目录（写入 index.md 占位）`)}
+                        title={text(`Create the first file under ${d.label}/`, `在 ${d.label}/ 下创建第一个文件`)}
                       >+ {text('Create', '创建')}</button>
                     )}
                   </div>
@@ -1994,7 +1991,9 @@ export function Editor() {
                     <span key={u} className="tag" style={{ fontSize: 11 }}>@{u}</span>
                   ))}
                   {(!policy.data.suggested || policy.data.suggested.length === 0) && (
-                    <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>{text('No available reviewers', '无可用审批人')}</span>
+                    <span style={{ color: 'var(--red-text)', fontSize: 11 }}>
+                      {text('No available reviewers. Add another eligible namespace member before submitting.', '无可用审批人。请先添加另一个符合策略的命名空间成员。')}
+                    </span>
                   )}
                 </div>
               </div>
