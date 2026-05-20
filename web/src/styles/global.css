@@ -265,6 +265,14 @@ a { color: inherit; text-decoration: none; }
 .page-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 4px; color: var(--text); }
 .page-subtitle { font-size: 13.5px; color: var(--text-subtle); margin: 0; }
 .page-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.editor-actions .btn { color: var(--text); }
+.editor-actions .btn[data-active="true"] { background: var(--bg-muted); border-color: var(--border-strong); color: var(--text); }
+.editor-actions .state-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.editor-actions .state-dot.on { background: var(--green); box-shadow: 0 0 0 3px color-mix(in oklab, var(--green) 14%, transparent); }
+.editor-actions .state-dot.off { background: var(--text-faint); }
+.editor-actions .submit-badge { min-width: 18px; height: 18px; padding: 0 6px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; line-height: 1; }
+.editor-actions .submit-badge.error { background: color-mix(in oklab, var(--red) 22%, var(--bg)); color: var(--red-text); }
+.editor-actions .submit-badge.warn { background: color-mix(in oklab, var(--amber) 24%, var(--bg)); color: var(--amber-text); }
 
 /* Buttons */
 .btn {

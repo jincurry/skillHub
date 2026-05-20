@@ -2,8 +2,9 @@ import { useMemo } from 'react';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { TrendChart } from './TrendChart';
-import { AUDIT_ACTION_COLOR, AUDIT_ACTION_LABEL } from '../lib/audit';
+import { AUDIT_ACTION_COLOR, auditActionLabel } from '../lib/audit';
 import { fmtRelative } from '../lib/notify';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 /**
  * AdminOverview is the dashboard on the admin page's 概览 tab. It fans out a
@@ -18,6 +19,7 @@ import { fmtRelative } from '../lib/notify';
  * other state so a `reload()` gives a fresh snapshot.
  */
 export function AdminOverview() {
+  const { text, isEnglish } = useLocaleText();
   const m = useAsync(() => api.adminMetrics(), []);
   const data = m.data;
 
@@ -27,38 +29,38 @@ export function AdminOverview() {
     if (!data) return null;
     return [
       {
-        label: '平台用户',
+        label: isEnglish ? 'Platform Users' : '平台用户',
         value: data.users.toLocaleString(),
         color: 'var(--primary)',
       },
       {
-        label: '命名空间',
+        label: isEnglish ? 'Namespaces' : '命名空间',
         value: data.namespaces.toLocaleString(),
         color: '#10b981',
       },
       {
-        label: 'Skills 总数',
+        label: isEnglish ? 'Total Skills' : 'Skills 总数',
         value: data.totalSkills.toLocaleString(),
-        sub: skillsBreakdown(data.skillsByStatus),
+        sub: skillsBreakdown(data.skillsByStatus, isEnglish),
         color: '#6366f1',
       },
       {
-        label: '审批总数',
+        label: isEnglish ? 'Total Reviews' : '审批总数',
         value: data.totalReviews.toLocaleString(),
-        sub: reviewsBreakdown(data.reviewsByStatus, data.overdue),
+        sub: reviewsBreakdown(data.reviewsByStatus, data.overdue, isEnglish),
         color: '#f59e0b',
       },
     ];
-  }, [data]);
+  }, [data, isEnglish]);
 
   if (m.loading) {
-    return <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>加载平台指标...</div></div>;
+    return <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>{text('Loading platform metrics...', '加载平台指标...')}</div></div>;
   }
   if (m.error || !data) {
     return (
       <div className="card">
         <div className="card-body" style={{ color: 'var(--red-text)', fontSize: 13 }}>
-          加载失败：{m.error?.message ?? '未知错误'}
+          {text('Load failed: ', '加载失败：')}{m.error?.message ?? text('Unknown error', '未知错误')}
         </div>
       </div>
     );
@@ -85,15 +87,17 @@ export function AdminOverview() {
         <div className="card">
           <div className="card-header">
             <h3 className="card-title">
-              平台激活趋势
-              <span style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 400, marginLeft: 6 }}>近 30 天 · UTC</span>
+              {isEnglish ? 'Platform Activation Trend' : '平台激活趋势'}
+              <span style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 400, marginLeft: 6 }}>
+                {isEnglish ? 'Last 30 days · UTC' : '近 30 天 · UTC'}
+              </span>
             </h3>
             <span className="num" style={{ fontSize: 13, color: 'var(--text-subtle)' }}>
-              合计 <b style={{ color: 'var(--text)', fontWeight: 600 }}>{data.activations30d.toLocaleString()}</b>
+              {isEnglish ? 'Total' : '合计'} <b style={{ color: 'var(--text)', fontWeight: 600 }}>{data.activations30d.toLocaleString()}</b>
             </span>
           </div>
           <div className="card-body">
-            <TrendChart data={data.activationsTrend} height={220} label="激活" />
+            <TrendChart data={data.activationsTrend} height={220} label={isEnglish ? 'Activations' : '激活'} />
           </div>
         </div>
 
@@ -102,22 +106,22 @@ export function AdminOverview() {
           {/* SLA card */}
           <div className="card">
             <div className="card-header">
-              <h3 className="card-title">审批 SLA</h3>
+              <h3 className="card-title">{text('Review SLA', '审批 SLA')}</h3>
             </div>
             <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <MiniRow
-                label="达成率"
+                label={isEnglish ? 'Compliance' : '达成率'}
                 value={data.slaComplianceRate > 0
                   ? `${data.slaComplianceRate.toFixed(1)}%`
                   : '—'}
                 tone={slaTone(data.slaComplianceRate)}
               />
               <MiniRow
-                label="平均耗时"
-                value={data.avgDecisionHours >= 0 ? fmtHours(data.avgDecisionHours) : '—'}
+                label={isEnglish ? 'Average Time' : '平均耗时'}
+                value={data.avgDecisionHours >= 0 ? fmtHours(data.avgDecisionHours, isEnglish) : '—'}
               />
               <MiniRow
-                label="超时中"
+                label={isEnglish ? 'Overdue' : '超时中'}
                 value={data.overdue.toLocaleString()}
                 tone={data.overdue > 0 ? 'red' : 'green'}
               />
@@ -127,17 +131,17 @@ export function AdminOverview() {
           {/* AI card */}
           <div className="card">
             <div className="card-header">
-              <h3 className="card-title">AI 模型</h3>
+              <h3 className="card-title">{isEnglish ? 'AI Models' : 'AI 模型'}</h3>
             </div>
             <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <MiniRow label="已配置" value={data.aiProviders.total.toLocaleString()} />
+              <MiniRow label={isEnglish ? 'Configured' : '已配置'} value={data.aiProviders.total.toLocaleString()} />
               <MiniRow
-                label="启用中"
+                label={isEnglish ? 'Enabled' : '启用中'}
                 value={data.aiProviders.enabled.toLocaleString()}
                 tone={data.aiProviders.enabled > 0 ? 'green' : undefined}
               />
               <MiniRow
-                label="已填 Key"
+                label={isEnglish ? 'Keys Set' : '已填 Key'}
                 value={data.aiProviders.withKey.toLocaleString()}
                 tone={data.aiProviders.withKey < data.aiProviders.total ? 'amber' : undefined}
               />
@@ -149,19 +153,19 @@ export function AdminOverview() {
       {/* Recent audit feed ----------------------------------------------- */}
       <div className="card">
         <div className="card-header">
-          <h3 className="card-title">最近操作 <span style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 400, marginLeft: 6 }}>Top 10</span></h3>
+          <h3 className="card-title">{text('Recent Activity', '最近操作')} <span style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 400, marginLeft: 6 }}>Top 10</span></h3>
         </div>
         <div className="card-body flush table-wrap">
           {data.recentAudit.length === 0 ? (
-            <div style={{ padding: 16, fontSize: 12, color: 'var(--text-subtle)' }}>暂无记录</div>
+            <div style={{ padding: 16, fontSize: 12, color: 'var(--text-subtle)' }}>{text('No records', '暂无记录')}</div>
           ) : (
             <table className="tbl">
               <thead>
                 <tr>
-                  <th style={{ width: 120 }}>时间</th>
-                  <th style={{ width: 140 }}>操作</th>
-                  <th style={{ width: 120 }}>用户</th>
-                  <th>目标</th>
+                  <th style={{ width: 120 }}>{text('Time', '时间')}</th>
+                  <th style={{ width: 140 }}>{text('Action', '操作')}</th>
+                  <th style={{ width: 120 }}>{text('User', '用户')}</th>
+                  <th>{text('Target', '目标')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -172,7 +176,7 @@ export function AdminOverview() {
                       <td style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{fmtRelative(a.createdAt)}</td>
                       <td>
                         <span className={`tag ${color || 'slate'}`} style={{ fontSize: 10.5 }}>
-                          {AUDIT_ACTION_LABEL[a.action] ?? a.action}
+                          {auditActionLabel(a.action, isEnglish)}
                         </span>
                       </td>
                       <td><span className="mono" style={{ fontSize: 12.5 }}>@{a.actor}</span></td>
@@ -218,27 +222,27 @@ function slaTone(pct: number): 'green' | 'amber' | 'red' | undefined {
   return 'red';
 }
 
-function skillsBreakdown(by: Record<string, number>): string {
+function skillsBreakdown(by: Record<string, number>, isEnglish: boolean): string {
   const parts: string[] = [];
-  if (by.published) parts.push(`${by.published} 已发布`);
-  if (by.review) parts.push(`${by.review} 审批中`);
-  if (by.draft) parts.push(`${by.draft} 草稿`);
-  if (by.yanked) parts.push(`${by.yanked} 撤回`);
+  if (by.published) parts.push(`${by.published} ${isEnglish ? 'Published' : '已发布'}`);
+  if (by.review) parts.push(`${by.review} ${isEnglish ? 'In Review' : '审批中'}`);
+  if (by.draft) parts.push(`${by.draft} ${isEnglish ? 'Drafts' : '草稿'}`);
+  if (by.yanked) parts.push(`${by.yanked} ${isEnglish ? 'Yanked' : '撤回'}`);
   return parts.join(' · ');
 }
 
-function reviewsBreakdown(by: Record<string, number>, overdue: number): string {
+function reviewsBreakdown(by: Record<string, number>, overdue: number, isEnglish: boolean): string {
   const parts: string[] = [];
-  if (by.pending) parts.push(`${by.pending} 待审`);
-  if (overdue > 0) parts.push(`${overdue} 超时`);
-  if (by.approved) parts.push(`${by.approved} 通过`);
-  if (by.rejected) parts.push(`${by.rejected} 驳回`);
+  if (by.pending) parts.push(`${by.pending} ${isEnglish ? 'Pending' : '待审'}`);
+  if (overdue > 0) parts.push(`${overdue} ${isEnglish ? 'Overdue' : '超时'}`);
+  if (by.approved) parts.push(`${by.approved} ${isEnglish ? 'Approved' : '通过'}`);
+  if (by.rejected) parts.push(`${by.rejected} ${isEnglish ? 'Rejected' : '驳回'}`);
   return parts.join(' · ');
 }
 
-function fmtHours(h: number): string {
+function fmtHours(h: number, isEnglish: boolean): string {
   if (h < 0) return '—';
-  if (h < 1) return `${Math.round(h * 60)} 分钟`;
-  if (h < 24) return `${h.toFixed(1)} 小时`;
-  return `${(h / 24).toFixed(1)} 天`;
+  if (h < 1) return `${Math.round(h * 60)} ${isEnglish ? 'min' : '分钟'}`;
+  if (h < 24) return `${h.toFixed(1)} ${isEnglish ? 'h' : '小时'}`;
+  return `${(h / 24).toFixed(1)} ${isEnglish ? 'd' : '天'}`;
 }

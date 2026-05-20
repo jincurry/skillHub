@@ -3,9 +3,8 @@
 export const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
 // Only SKILL.md is pinned — it's the bundle's canonical entry point and the
-// validate pass treats its absence as a blocker. skill.yaml / README.md are
-// useful defaults but the author can delete them if they want a different
-// structure.
+// validate pass treats its absence as a blocker. skill.yaml is a useful
+// default but the author can delete it if they want a different structure.
 export const REQUIRED_FILES = new Set(['SKILL.md']);
 
 // Recommended skill-bundle layout (matches the Anthropic skill spec).
@@ -40,7 +39,6 @@ export const TEMPLATE_GROUPS: { title: string; items: FileTemplate[] }[] = [
           '---\nname: my-skill\ndescription: (一句话描述)\nlicense: Apache-2.0\n---\n\n' +
           '# my-skill\n\n## 何时使用\n\n- \n\n## 使用方式\n\n## 脚本\n\n## 参考资料\n\n## 资源\n',
       },
-      { path: 'README.md', desc: '中文 README' },
     ],
   },
   {

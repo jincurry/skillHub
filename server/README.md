@@ -125,8 +125,8 @@ GET    /api/v1/namespaces/:ns/policy?classification=L2
 GET    /api/v1/skills                    filters: ns, classification, status, q, limit, offset
 POST   /api/v1/skills                    create draft (ns member)
 GET    /api/v1/skills/:ns/:name
-PATCH  /api/v1/skills/:ns/:name          {description?, classification?, version?,
-                                          tags?, icon?, iconClass?, longDesc?}
+PATCH  /api/v1/skills/:ns/:name          {description?, classification?, tags?,
+                                          icon?, iconClass?, longDesc?}
                                          author or ns owner/maintainer
 DELETE /api/v1/skills/:ns/:name          author only; draft status only
 GET    /api/v1/skills/:ns/:name/validate

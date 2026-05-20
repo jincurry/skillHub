@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { TrendPoint } from '../api/types';
 
 interface Props {
@@ -23,6 +24,9 @@ interface Props {
  *   from hover state don't recompute the path.
  */
 export function TrendChart({ data, height = 200, color = 'var(--primary)', label = '激活' }: Props) {
+  const { i18n } = useTranslation();
+  const isEnglish = (i18n.resolvedLanguage ?? i18n.language ?? '').startsWith('en');
+  const displayLabel = isEnglish && label === '激活' ? 'Activations' : label;
   // Internal pixel coordinate space. The SVG is later stretched via
   // preserveAspectRatio so this is purely virtual.
   const VIEW_W = 600;
@@ -74,7 +78,7 @@ export function TrendChart({ data, height = 200, color = 'var(--primary)', label
   if (data.length === 0) {
     return (
       <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-faint)', fontSize: 12 }}>
-        暂无数据
+        {isEnglish ? 'No data yet' : '暂无数据'}
       </div>
     );
   }
@@ -205,7 +209,7 @@ export function TrendChart({ data, height = 200, color = 'var(--primary)', label
             {hoverPoint.day}
           </div>
           <div style={{ marginTop: 2, fontWeight: 600 }}>
-            {label} <span className="num" style={{ color: 'var(--text)' }}>{hoverPoint.v.toLocaleString()}</span>
+            {displayLabel} <span className="num" style={{ color: 'var(--text)' }}>{hoverPoint.v.toLocaleString()}</span>
           </div>
         </div>
       )}
@@ -215,8 +219,8 @@ export function TrendChart({ data, height = 200, color = 'var(--primary)', label
         display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
         marginTop: 8, fontSize: 11.5, color: 'var(--text-subtle)',
       }}>
-        <span>30 天合计 <span className="num" style={{ fontWeight: 600, color: 'var(--text)' }}>{total.toLocaleString()}</span></span>
-        <span>日均 <span className="num" style={{ fontWeight: 600, color: 'var(--text)' }}>{Math.round(avg).toLocaleString()}</span></span>
+        <span>{isEnglish ? '30-day total' : '30 天合计'} <span className="num" style={{ fontWeight: 600, color: 'var(--text)' }}>{total.toLocaleString()}</span></span>
+        <span>{isEnglish ? 'Daily avg' : '日均'} <span className="num" style={{ fontWeight: 600, color: 'var(--text)' }}>{Math.round(avg).toLocaleString()}</span></span>
       </div>
     </div>
   );

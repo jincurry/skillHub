@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { SkillFile } from '../../api/types';
 import { iconFor } from './helpers';
+import { useLocaleText } from '../../i18n/useLocaleText';
 
 function FilePickerImpl({
   files,
@@ -11,6 +12,7 @@ function FilePickerImpl({
   onPick: (path: string) => void;
   onClose: () => void;
 }) {
+  const { text } = useLocaleText();
   const [query, setQuery] = useState('');
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -61,7 +63,7 @@ function FilePickerImpl({
           ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="输入文件名快速跳转…"
+          placeholder={text('Type a file name to jump...', '输入文件名快速跳转…')}
           style={{
             width: '100%', padding: '12px 16px', fontSize: 14, border: 'none',
             borderBottom: '1px solid var(--border)', background: 'var(--bg)',
@@ -70,7 +72,7 @@ function FilePickerImpl({
         />
         <div style={{ maxHeight: 320, overflowY: 'auto' }}>
           {filtered.length === 0 && (
-            <div style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-faint)' }}>没有匹配文件</div>
+            <div style={{ padding: '14px 16px', fontSize: 13, color: 'var(--text-faint)' }}>{text('No matching files', '没有匹配文件')}</div>
           )}
           {filtered.map((f, i) => (
             <div
@@ -95,7 +97,7 @@ function FilePickerImpl({
           padding: '7px 16px', borderTop: '1px solid var(--border)',
           fontSize: 11, color: 'var(--text-faint)', display: 'flex', gap: 14,
         }}>
-          <span>↑↓ 移动</span><span>↵ 打开</span><span>Esc 关闭</span>
+          <span>↑↓ {text('Move', '移动')}</span><span>↵ {text('Open', '打开')}</span><span>Esc {text('Close', '关闭')}</span>
         </div>
       </div>
     </div>

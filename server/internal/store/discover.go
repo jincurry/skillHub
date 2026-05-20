@@ -80,7 +80,7 @@ func (s *Store) Achievements(username string) ([]model.Achievement, error) {
 			Rare: distinctNs >= 5,
 		},
 		{
-			ID: "documenter", Name: "文档大师", Desc: "至少一个 skill 有完整 README", Icon: "📜",
+			ID: "documenter", Name: "文档大师", Desc: "至少一个 skill 有完整文档", Icon: "📜",
 			Earned: docCount >= 1, Progress: progress(docCount, 1),
 		},
 		{

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import type { Namespace, NamespaceMember } from '../api/types';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 const ROLES: NamespaceMember['role'][] = ['owner', 'maintainer', 'reviewer', 'member'];
 
@@ -31,6 +32,7 @@ export function MembersPanel({
   onChangeNs: (next: string) => void;
   members: ReturnType<typeof useAsync<NamespaceMember[]>>;
 }) {
+  const { text } = useLocaleText();
   const [busyOn, setBusyOn] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [addUser, setAddUser] = useState('');
@@ -51,7 +53,7 @@ export function MembersPanel({
   }
 
   async function remove(username: string) {
-    if (!window.confirm(`确认把 @${username} 从 ${ns} 移除？`)) return;
+    if (!window.confirm(text(`Remove @${username} from ${ns}?`, `确认把 @${username} 从 ${ns} 移除？`))) return;
     setBusyOn(username);
     setErr(null);
     try {
@@ -66,7 +68,7 @@ export function MembersPanel({
 
   async function add() {
     const username = addUser.trim().replace(/^@/, '');
-    if (!username) { setErr('请输入用户名'); return; }
+    if (!username) { setErr(text('Enter a username', '请输入用户名')); return; }
     setAdding(true);
     setErr(null);
     try {
@@ -84,7 +86,7 @@ export function MembersPanel({
   return (
     <div className="card">
       <div className="card-header" style={{ alignItems: 'center', gap: 10 }}>
-        <h3 className="card-title">命名空间成员 &amp; 角色</h3>
+        <h3 className="card-title">{text('Namespace Members & Roles', '命名空间成员 & 角色')}</h3>
         <select
           value={ns}
           onChange={(e) => onChangeNs(e.target.value)}
@@ -103,14 +105,14 @@ export function MembersPanel({
       )}
 
       <div className="card-body flush table-wrap">
-        {members.loading && <div style={{ padding: 16, fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
+        {members.loading && <div style={{ padding: 16, fontSize: 12, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>}
         {members.error && <div style={{ padding: 16, fontSize: 12, color: 'var(--red-text)' }}>{members.error.message}</div>}
         {members.data && (
           <table className="tbl">
             <thead>
               <tr>
-                <th>用户</th>
-                <th>角色</th>
+                <th>{text('User', '用户')}</th>
+                <th>{text('Role', '角色')}</th>
                 <th style={{ width: 60 }}></th>
               </tr>
             </thead>
@@ -142,7 +144,7 @@ export function MembersPanel({
                       <button
                         className="btn sm ghost"
                         disabled={busy}
-                        title={`移除 @${m.username}`}
+                        title={text(`Remove @${m.username}`, `移除 @${m.username}`)}
                         onClick={() => remove(m.username)}
                         style={{
                           padding: '2px 6px', minWidth: 24, color: 'var(--text-faint)',
@@ -156,7 +158,7 @@ export function MembersPanel({
                 );
               })}
               {members.data.length === 0 && (
-                <tr><td colSpan={3} style={{ color: 'var(--text-faint)', fontSize: 12, padding: 12 }}>无成员</td></tr>
+                <tr><td colSpan={3} style={{ color: 'var(--text-faint)', fontSize: 12, padding: 12 }}>{text('No members', '无成员')}</td></tr>
               )}
             </tbody>
           </table>
@@ -167,11 +169,11 @@ export function MembersPanel({
         padding: '12px 16px', borderTop: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
       }}>
-        <div style={{ fontSize: 12, color: 'var(--text-subtle)', flexShrink: 0 }}>添加成员</div>
+        <div style={{ fontSize: 12, color: 'var(--text-subtle)', flexShrink: 0 }}>{text('Add Member', '添加成员')}</div>
         <input
           value={addUser}
           onChange={(e) => setAddUser(e.target.value)}
-          placeholder="用户名"
+          placeholder={text('Username', '用户名')}
           disabled={adding}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void add(); } }}
           style={{
@@ -189,7 +191,7 @@ export function MembersPanel({
           {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
         <button className="btn sm primary" onClick={add} disabled={adding || !addUser.trim()}>
-          {adding ? '添加中...' : '添加'}
+          {adding ? text('Adding...', '添加中...') : text('Add', '添加')}
         </button>
       </div>
     </div>

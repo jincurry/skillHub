@@ -3,6 +3,7 @@ import { IconStar } from './Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import type { RatingsResponse } from '../api/types';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 function Stars({ value, onPick, size = 18, interactive = false }: {
   value: number; onPick?: (n: number) => void; size?: number; interactive?: boolean;
@@ -25,6 +26,7 @@ function Stars({ value, onPick, size = 18, interactive = false }: {
 }
 
 export function RatingsPanel({ ns, name }: { ns: string; name: string }) {
+  const { text, locale } = useLocaleText();
   const ratings = useAsync<RatingsResponse>(() => api.listRatings(ns, name), [ns, name]);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
@@ -50,7 +52,7 @@ export function RatingsPanel({ ns, name }: { ns: string; name: string }) {
   return (
     <div className="card" style={{ marginTop: 'var(--gap)' }}>
       <div className="card-header">
-        <h3 className="card-title">用户评分 <span className="count-pill" style={{ marginLeft: 6 }}>{summary?.count ?? 0}</span></h3>
+        <h3 className="card-title">{text('User Rating', '用户评分')} <span className="count-pill" style={{ marginLeft: 6 }}>{summary?.count ?? 0}</span></h3>
         {summary && summary.count > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
             <Stars value={Math.round(summary.average)} size={14} />
@@ -62,22 +64,26 @@ export function RatingsPanel({ ns, name }: { ns: string; name: string }) {
       <div className="card-body">
         <div style={{ padding: '8px 0 14px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>
-            {mine > 0 ? <>你已评分 <strong>{mine}</strong> 星 — 重新选择以更新</> : <>给这个 skill 评分:</>}
+            {mine > 0 ? (
+              <>{text('You rated this ', '你已评分 ')}<strong>{mine}</strong>{text(' stars - choose again to update', ' 星 — 重新选择以更新')}</>
+            ) : (
+              <>{text('Rate this skill:', '给这个 skill 评分:')}</>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
             <Stars value={mine} onPick={submit} size={22} interactive />
-            <input className="input" placeholder="可选评论..." value={comment}
+            <input className="input" placeholder={text('Optional comment...', '可选评论...')} value={comment}
               onChange={(e) => setComment(e.target.value)}
               style={{ flex: 1, minWidth: 200 }} />
           </div>
-          {busy && <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 6 }}>提交中...</div>}
+          {busy && <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 6 }}>{text('Submitting...', '提交中...')}</div>}
           {err && <div style={{ fontSize: 12, color: 'var(--red-text)', marginTop: 6 }}>{err}</div>}
         </div>
 
         <div style={{ paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {ratings.loading && <div style={{ color: 'var(--text-subtle)', fontSize: 13 }}>加载中...</div>}
+          {ratings.loading && <div style={{ color: 'var(--text-subtle)', fontSize: 13 }}>{text('Loading...', '加载中...')}</div>}
           {!ratings.loading && items.length === 0 && (
-            <div style={{ color: 'var(--text-subtle)', fontSize: 13 }}>还没有用户评论 — 成为第一个吧</div>
+            <div style={{ color: 'var(--text-subtle)', fontSize: 13 }}>{text('No comments yet - be the first', '还没有用户评论 — 成为第一个吧')}</div>
           )}
           {items.map((r, i) => (
             <div key={r.username + r.createdAt} style={{ display: 'flex', gap: 10 }}>
@@ -88,7 +94,7 @@ export function RatingsPanel({ ns, name }: { ns: string; name: string }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
                   <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>@{r.username}</span>
                   <Stars value={r.stars} size={11} />
-                  <span style={{ color: 'var(--text-faint)', fontSize: 11.5 }}>· {new Date(r.createdAt).toLocaleString()}</span>
+                  <span style={{ color: 'var(--text-faint)', fontSize: 11.5 }}>· {new Date(r.createdAt).toLocaleString(locale)}</span>
                 </div>
                 {r.comment && (
                   <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5 }}>{r.comment}</div>

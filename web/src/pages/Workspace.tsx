@@ -14,6 +14,7 @@ import { markAllReadOptimistic, markOneReadOptimistic, useNotifSelector } from '
 import { useEffect, useRef, useState, useMemo } from 'react';
 import type { Notification, Review, Skill, ValidationReport } from '../api/types';
 import { SkillIcon } from '../components/SkillIcon';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 const DRAFT_CHECKS_FALLBACK = [
   { severity: 'ok' as const, label: 'Schema' },
@@ -63,6 +64,7 @@ function DraftCard({ d, meName, onChanged }: {
   meName: string;
   onChanged: () => void;
 }) {
+  const { text, locale } = useLocaleText();
   const navigate = useNavigate();
   const v = useAsync<ValidationReport>(() => api.validate(d.ns, d.name), [d.ns, d.name]);
   const checks = v.data?.checks ?? DRAFT_CHECKS_FALLBACK;
@@ -109,19 +111,22 @@ function DraftCard({ d, meName, onChanged }: {
 
   async function downloadBundle() {
     try { await api.downloadBundle(d.ns, d.name); }
-    catch (e) { window.alert('下载失败: ' + (e as Error).message); }
+    catch (e) { window.alert(text('Download failed: ', '下载失败: ') + (e as Error).message); }
   }
 
   async function deleteDraft() {
     if (!isAuthor) return;
     if (!window.confirm(
-      `确定删除草稿 ${d.ns}/${d.name}?\n\n该操作会同时清掉文件、版本、评论、通知等附属数据,且无法恢复。`,
+      text(
+        `Delete draft ${d.ns}/${d.name}?\n\nThis will also remove files, versions, comments, notifications, and related data. It cannot be undone.`,
+        `确定删除草稿 ${d.ns}/${d.name}?\n\n该操作会同时清掉文件、版本、评论、通知等附属数据,且无法恢复。`,
+      ),
     )) return;
     try {
       await api.deleteDraftSkill(d.ns, d.name);
       onChanged();
     } catch (e) {
-      window.alert('删除失败: ' + (e as Error).message);
+      window.alert(text('Delete failed: ', '删除失败: ') + (e as Error).message);
     }
   }
 
@@ -135,7 +140,7 @@ function DraftCard({ d, meName, onChanged }: {
             <div className="draft-card-meta" style={{ margin: 0, marginTop: 2 }}>
               <span className="mono">v{d.version}</span>
               <span className="sep">·</span>
-              <span>{new Date(d.updatedAt).toLocaleDateString()}</span>
+              <span>{new Date(d.updatedAt).toLocaleDateString(locale)}</span>
               <span className="sep">·</span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <span className="status-pill draft"><span className="swatch"></span>Draft</span>
@@ -148,7 +153,7 @@ function DraftCard({ d, meName, onChanged }: {
             className="icon-btn"
             style={{ width: 28, height: 28 }}
             onClick={() => setMenuOpen((o) => !o)}
-            aria-label="更多操作"
+            aria-label={text('More actions', '更多操作')}
             aria-expanded={menuOpen}
           ><IconMore size={16} /></button>
           {menuOpen && (
@@ -164,32 +169,32 @@ function DraftCard({ d, meName, onChanged }: {
               {/* Every action self-closes the popover via `pick()` so the
                   user doesn't have to click elsewhere to dismiss. */}
               <DraftMenuItem onClick={() => { setMenuOpen(false); navigate(`/skills/${d.ns}/${d.name}`); }}>
-                预览公开页
+                {text('Preview public page', '预览公开页')}
               </DraftMenuItem>
               <DraftMenuItem onClick={() => { setMenuOpen(false); navigate(editPath); }}>
-                继续编辑
+                {text('Continue editing', '继续编辑')}
               </DraftMenuItem>
               <DraftMenuDivider />
               <DraftMenuItem onClick={() => { setMenuOpen(false); void copyRef(); }}>
-                复制 ns/name
+                {text('Copy ns/name', '复制 ns/name')}
               </DraftMenuItem>
               <DraftMenuItem onClick={() => { setMenuOpen(false); void downloadBundle(); }}>
-                下载 bundle
+                {text('Download bundle', '下载 bundle')}
               </DraftMenuItem>
               <DraftMenuItem
                 onClick={() => { setMenuOpen(false); v.reload(); }}
                 disabled={v.loading}
               >
-                {v.loading ? '校验中…' : '重新校验'}
+                {v.loading ? text('Validating...', '校验中…') : text('Re-validate', '重新校验')}
               </DraftMenuItem>
               <DraftMenuDivider />
               <DraftMenuItem
                 onClick={() => { setMenuOpen(false); void deleteDraft(); }}
                 disabled={!isAuthor}
-                title={isAuthor ? '永久删除此草稿' : '只有作者可以删除自己的草稿'}
+                title={isAuthor ? text('Permanently delete this draft', '永久删除此草稿') : text('Only the author can delete their draft', '只有作者可以删除自己的草稿')}
                 danger
               >
-                🗑 删除草稿
+                {text('Delete draft', '🗑 删除草稿')}
               </DraftMenuItem>
             </div>
           )}
@@ -215,18 +220,18 @@ function DraftCard({ d, meName, onChanged }: {
       </div>
       <div className="draft-actions">
         <button className="btn sm" onClick={() => navigate(editPath)}>
-          <IconCode size={13} /> 继续编辑
+          <IconCode size={13} /> {text('Continue editing', '继续编辑')}
         </button>
         <button className="btn sm" onClick={() => v.reload()} disabled={v.loading}>
-          <IconCheckCircle size={13} /> {v.loading ? '验证中...' : 'Validate'}
+          <IconCheckCircle size={13} /> {v.loading ? text('Validating...', '验证中...') : 'Validate'}
         </button>
         <button
           className="btn sm primary"
           disabled={blocked}
-          title={blocked ? '存在错误，先到编辑器修复' : undefined}
+          title={blocked ? text('Errors exist. Fix them in the editor first.', '存在错误，先到编辑器修复') : undefined}
           onClick={() => navigate(editPath)}
         >
-          <IconRocket size={13} /> 提交审批
+          <IconRocket size={13} /> {text('Submit Review', '提交审批')}
         </button>
       </div>
     </div>
@@ -245,13 +250,14 @@ function NotificationItem({ n, onClick, onMarkRead }: {
   onClick: (n: Notification) => void;
   onMarkRead: (n: Notification) => void;
 }) {
+  const { text, locale } = useLocaleText();
   const ic = NOTIF_ICON[n.kind] ?? NOTIF_ICON.comment;
   const url = notifTargetUrl(n);
   return (
     <div
       className={`feed-item ${n.unread ? 'unread' : ''}`}
       onClick={() => onClick(n)}
-      title={url ? `点击打开 ${url}` : undefined}
+      title={url ? text(`Open ${url}`, `点击打开 ${url}`) : undefined}
       style={{
         cursor: url ? 'pointer' : 'default',
         position: 'relative',
@@ -266,12 +272,12 @@ function NotificationItem({ n, onClick, onMarkRead }: {
       <div className="feed-icon" style={{ background: ic.bg, color: ic.color }}>{ic.el}</div>
       <div className="feed-content">
         <div style={{ fontWeight: n.unread ? 600 : 400 }}>{n.body}</div>
-        <div className="feed-time" title={new Date(n.createdAt).toLocaleString()}>{fmtRelative(n.createdAt)}</div>
+        <div className="feed-time" title={new Date(n.createdAt).toLocaleString(locale)}>{fmtRelative(n.createdAt)}</div>
       </div>
       {n.unread && (
         <button
           onClick={(e) => { e.stopPropagation(); onMarkRead(n); }}
-          title="标为已读"
+          title={text('Mark as read', '标为已读')}
           style={{
             border: 'none', background: 'transparent', cursor: 'pointer',
             color: 'var(--text-faint)', fontSize: 11, padding: '2px 6px',
@@ -285,14 +291,17 @@ function NotificationItem({ n, onClick, onMarkRead }: {
   );
 }
 
-const FILTER_LABELS: Record<NotifFilter, string> = {
-  all: '全部',
-  unread: '未读',
-  review: '审批',
-  comment: '评论',
-};
+function notifFilterLabel(f: NotifFilter, text: (en: string, zh: string) => string): string {
+  switch (f) {
+    case 'unread': return text('Unread', '未读');
+    case 'review': return text('Reviews', '审批');
+    case 'comment': return text('Comments', '评论');
+    default: return text('All', '全部');
+  }
+}
 
 function NotificationFeed() {
+  const { text } = useLocaleText();
   const items = useNotifSelector(state => state.items);
   const loading = useNotifSelector(state => state.loading);
   const error = useNotifSelector(state => state.error);
@@ -311,7 +320,7 @@ function NotificationFeed() {
       <div className="card-header" style={{ padding: '12px 16px' }}>
         <h3 className="card-title">
           <IconBell size={14} />
-          需要我关注
+          {text('Needs Attention', '需要我关注')}
           {unreadCount > 0 && (
             <span className="count-pill" style={{ marginLeft: 4 }}>{unreadCount}</span>
           )}
@@ -319,10 +328,10 @@ function NotificationFeed() {
         <a
           style={{ fontSize: 12, color: unreadCount > 0 ? 'var(--primary)' : 'var(--text-faint)', cursor: unreadCount > 0 ? 'pointer' : 'default' }}
           onClick={() => void markAllReadOptimistic()}
-        >全部已读</a>
+        >{text('Mark all read', '全部已读')}</a>
       </div>
       <div style={{ display: 'flex', gap: 6, padding: '8px 16px 10px', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
-        {(Object.keys(FILTER_LABELS) as NotifFilter[]).map((f) => {
+        {(['all', 'unread', 'review', 'comment'] as NotifFilter[]).map((f) => {
           const isActive = notifFilter === f;
           return (
             <button
@@ -336,13 +345,13 @@ function NotificationFeed() {
                 cursor: 'pointer', fontWeight: isActive ? 500 : 400,
                 transition: 'all 0.12s',
               }}
-            >{FILTER_LABELS[f]}</button>
+            >{notifFilterLabel(f, text)}</button>
           );
         })}
       </div>
       <div className="card-body flush feed">
         {loading && items.length === 0 && (
-          <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>加载中...</div>
+          <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>
         )}
         {error && (
           <div style={{ padding: 14, fontSize: 13, color: 'var(--red-text)' }}>{error}</div>
@@ -352,7 +361,9 @@ function NotificationFeed() {
         ))}
         {!loading && filteredNotifs.length === 0 && (
           <div style={{ padding: '28px 16px', fontSize: 13, color: 'var(--text-subtle)', textAlign: 'center' }}>
-            {notifFilter === 'all' ? '🎉 你现在没有待办，好棒' : `暂无${FILTER_LABELS[notifFilter]}通知`}
+            {notifFilter === 'all'
+              ? text('No tasks right now. Nice work.', '🎉 你现在没有待办，好棒')
+              : text(`No ${notifFilterLabel(notifFilter, text).toLowerCase()} notifications`, `暂无${notifFilterLabel(notifFilter, text)}通知`)}
           </div>
         )}
       </div>
@@ -363,6 +374,7 @@ function NotificationFeed() {
 const MemoizedNotificationFeed = React.memo(NotificationFeed);
 
 function PendingReviewItem({ r }: { r: Review }) {
+  const { text } = useLocaleText();
   const navigate = useNavigate();
   const ucol = ({
     overdue: { color: 'var(--red-text)', dot: 'var(--red)' },
@@ -387,7 +399,7 @@ function PendingReviewItem({ r }: { r: Review }) {
             <span
               className="tag"
               style={{ background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 10, fontWeight: 600 }}
-              title={`Hotfix: ${r.hotfixReason || '未填写原因'}`}
+              title={`Hotfix: ${r.hotfixReason || text('No reason provided', '未填写原因')}`}
             >
               ⚡ HOTFIX
             </span>
@@ -404,6 +416,7 @@ function PendingReviewItem({ r }: { r: Review }) {
 
 export function Workspace() {
   const navigate = useNavigate();
+  const { text, isEnglish, locale } = useLocaleText();
   const me = useAsync(() => api.me(), []);
   const drafts = useAsync(() => api.myDrafts(), []);
   const mySkills = useAsync(async () => {
@@ -439,8 +452,13 @@ export function Workspace() {
   const draftCount = drafts.data?.length ?? 0;
   const pendingCount = myPendingReviews.length;
   const hour = new Date().getHours();
-  const greetWord = hour < 5 ? '夜深了' : hour < 12 ? '早上好' : hour < 14 ? '中午好' : hour < 18 ? '下午好' : '晚上好';
-  const greeting = me.data ? `${greetWord},${me.data.display.split(' ')[0]} 👋` : `${greetWord} 👋`;
+  const greetWord = isEnglish
+    ? hour < 5 ? 'Good evening' : hour < 12 ? 'Good morning' : hour < 14 ? 'Good afternoon' : hour < 18 ? 'Good afternoon' : 'Good evening'
+    : hour < 5 ? '夜深了' : hour < 12 ? '早上好' : hour < 14 ? '中午好' : hour < 18 ? '下午好' : '晚上好';
+  const displayName = me.data?.display.split(' ')[0];
+  const greeting = displayName
+    ? isEnglish ? `${greetWord}, ${displayName} 👋` : `${greetWord},${displayName} 👋`
+    : `${greetWord} 👋`;
 
   // Live KPIs derived from data we already have. No fabricated numbers.
   const myPublished = (mySkills.data ?? []).filter((s) => s.status === 'published');
@@ -457,54 +475,54 @@ export function Workspace() {
         <div>
           <h1 className="page-title">{greeting}</h1>
           <p className="page-subtitle">
-            你有 <strong style={{ color: 'var(--text)' }}>{draftCount} 个 draft</strong> 待处理,
-            <strong style={{ color: 'var(--primary)' }}> {pendingCount} 项审批</strong> 等你确认。
+            {text('You have ', '你有 ')}<strong style={{ color: 'var(--text)' }}>{text(`${draftCount} drafts`, `${draftCount} 个 draft`)}</strong>{text(' to handle, and ', ' 待处理,')}
+            <strong style={{ color: 'var(--primary)' }}> {text(`${pendingCount} reviews`, `${pendingCount} 项审批`)}</strong>{text(' awaiting your decision.', ' 等你确认。')}
           </p>
         </div>
         <div className="page-actions">
-          <button className="btn primary" onClick={openCreateSkill}><IconPlus size={14} /> 创建 Skill</button>
+          <button className="btn primary" onClick={openCreateSkill}><IconPlus size={14} /> {text('Create Skill', '创建 Skill')}</button>
         </div>
       </div>
 
       <div className="stat-strip">
         <div className="stat">
-          <div className="stat-label">我的激活/周</div>
+          <div className="stat-label">{text('My Activations / Week', '我的激活/周')}</div>
           <div>
             <span className="stat-value num">{totalActivations.toLocaleString()}</span>
             <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 8 }}>
-              横跨 {myPublished.length} 个 published
+              {text(`Across ${myPublished.length} published`, `横跨 ${myPublished.length} 个 published`)}
             </span>
           </div>
         </div>
         <div className="stat">
-          <div className="stat-label">我的草稿</div>
+          <div className="stat-label">{text('My Drafts', '我的草稿')}</div>
           <div>
             <span className="stat-value num">{draftCount}</span>
             {draftCount > 0 && (
-              <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 8 }}>待提交</span>
+              <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 8 }}>{text('Pending submission', '待提交')}</span>
             )}
           </div>
         </div>
         <div className="stat">
-          <div className="stat-label">待我审批</div>
+          <div className="stat-label">{text('Assigned Reviews', '待我审批')}</div>
           <div>
             <span className="stat-value num" style={{ color: overdueReviews ? 'var(--red)' : undefined }}>
               {pendingCount}
             </span>
             {overdueReviews > 0 && (
               <span className="stat-delta down" style={{ marginLeft: 8 }}>
-                <IconArrowDown size={11} />{overdueReviews} 超时
+                <IconArrowDown size={11} />{text(`${overdueReviews} overdue`, `${overdueReviews} 超时`)}
               </span>
             )}
           </div>
         </div>
         <div className="stat">
-          <div className="stat-label">平均评分</div>
+          <div className="stat-label">{text('Average Rating', '平均评分')}</div>
           <div>
             <span className="stat-value num">{avgRating > 0 ? avgRating.toFixed(1) : '—'}</span>
             {ratedSkills.length > 0 && (
               <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 8 }}>
-                / 5 · {ratedSkills.length} 个 skill
+                / 5 · {text(`${ratedSkills.length} skills`, `${ratedSkills.length} 个 skill`)}
               </span>
             )}
           </div>
@@ -515,11 +533,11 @@ export function Workspace() {
         <div>
           <div style={{ marginBottom: 'var(--gap)' }}>
             <div className="sec-title">
-              <span>我的 Drafts <span style={{ color: 'var(--text-faint)', fontWeight: 500, marginLeft: 4 }}>{draftCount}</span></span>
+              <span>{text('My Drafts', '我的 Drafts')} <span style={{ color: 'var(--text-faint)', fontWeight: 500, marginLeft: 4 }}>{draftCount}</span></span>
             </div>
-            {drafts.loading && <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>加载中...</div></div>}
-            {drafts.error && <div className="card"><div className="card-body" style={{ color: 'var(--red-text)' }}>加载失败: {drafts.error.message}</div></div>}
-            {drafts.data?.length === 0 && <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>暂无草稿</div></div>}
+            {drafts.loading && <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div></div>}
+            {drafts.error && <div className="card"><div className="card-body" style={{ color: 'var(--red-text)' }}>{text('Load failed: ', '加载失败: ')}{drafts.error.message}</div></div>}
+            {drafts.data?.length === 0 && <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>{text('No drafts', '暂无草稿')}</div></div>}
             {drafts.data?.map((d) => (
               <DraftCard
                 key={d.id}
@@ -532,17 +550,17 @@ export function Workspace() {
 
           <div className="card">
             <div className="card-header">
-              <h3 className="card-title">我发布的 Skills <span className="count-pill" style={{ marginLeft: 6 }}>{mySkills.data?.length ?? 0}</span></h3>
+              <h3 className="card-title">{text('My Published Skills', '我发布的 Skills')} <span className="count-pill" style={{ marginLeft: 6 }}>{mySkills.data?.length ?? 0}</span></h3>
             </div>
             <div className="card-body flush table-wrap">
               <table className="tbl">
                 <thead>
                   <tr>
-                    <th>Skill</th><th>状态</th>
-                    <th style={{ textAlign: 'right' }}>当前版本</th>
-                    <th style={{ textAlign: 'right' }}>激活/周</th>
-                    <th style={{ textAlign: 'right' }}>趋势</th>
-                    <th style={{ textAlign: 'right' }}>更新时间</th>
+                    <th>Skill</th><th>{text('Status', '状态')}</th>
+                    <th style={{ textAlign: 'right' }}>{text('Current Version', '当前版本')}</th>
+                    <th style={{ textAlign: 'right' }}>{text('Activations / Week', '激活/周')}</th>
+                    <th style={{ textAlign: 'right' }}>{text('Trend', '趋势')}</th>
+                    <th style={{ textAlign: 'right' }}>{text('Updated', '更新时间')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -567,7 +585,7 @@ export function Workspace() {
                           </span>
                         ) : <span style={{ color: 'var(--text-faint)' }}>—</span>}
                       </td>
-                      <td style={{ textAlign: 'right', color: 'var(--text-subtle)', fontSize: 12.5 }}>{new Date(s.updatedAt).toLocaleDateString()}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--text-subtle)', fontSize: 12.5 }}>{new Date(s.updatedAt).toLocaleDateString(locale)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -578,11 +596,14 @@ export function Workspace() {
           <div className="quick-actions-row">
             <div className="quick-action" onClick={openCreateSkill}>
               <div className="qa-icon"><IconPlus size={16} /></div>
-              <div className="qa-text"><span className="qa-title">创建新 Skill</span><span className="qa-desc">从空白开始</span></div>
+              <div className="qa-text"><span className="qa-title">{text('Create New Skill', '创建新 Skill')}</span><span className="qa-desc">{text('Start from blank', '从空白开始')}</span></div>
             </div>
             <div className="quick-action" onClick={() => navigate('/skills')}>
               <div className="qa-icon" style={{ background: 'var(--green-bg)', color: 'var(--green-text)' }}><IconRocket size={16} /></div>
-              <div className="qa-text"><span className="qa-title">浏览现有 Skills</span><span className="qa-desc">查看全部 {draftCount > 0 ? '可参考' : ''} skill</span></div>
+              <div className="qa-text">
+                <span className="qa-title">{text('Browse Skills', '浏览现有 Skills')}</span>
+                <span className="qa-desc">{text('View all skills', `查看全部 ${draftCount > 0 ? '可参考' : ''} skill`)}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -592,15 +613,15 @@ export function Workspace() {
             <div className="card-header" style={{ padding: '12px 16px' }}>
               <h3 className="card-title">
                 <IconCheck size={14} stroke={2} />
-                待我审批
+                {text('Assigned Reviews', '待我审批')}
                 <span className="tag indigo" style={{ marginLeft: 4 }}>{pendingCount}</span>
               </h3>
-              <a style={{ fontSize: 12, color: 'var(--primary)', cursor: 'pointer' }} onClick={() => navigate('/reviews')}>全部 →</a>
+              <a style={{ fontSize: 12, color: 'var(--primary)', cursor: 'pointer' }} onClick={() => navigate('/reviews')}>{text('All ->', '全部 →')}</a>
             </div>
             <div className="card-body flush">
               {myPendingReviews.length === 0 && (
                 <div style={{ padding: 18, fontSize: 13, color: 'var(--text-subtle)', textAlign: 'center' }}>
-                  暂无待你处理的审批 🎉
+                  {text('No reviews waiting for you.', '暂无待你处理的审批 🎉')}
                 </div>
               )}
               {myPendingReviews.map((r) => <PendingReviewItem key={r.id} r={r} />)}

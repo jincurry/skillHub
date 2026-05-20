@@ -10,13 +10,29 @@ import { useAsync } from '../api/useAsync';
 import { openCreateSkill } from '../components/CreateSkillModal';
 import type { Skill } from '../api/types';
 import { SkillIcon } from '../components/SkillIcon';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 type SortKey = 'updated' | 'activations' | 'rating';
-const SORT_LABELS: Record<SortKey, string> = {
-  updated: '最近更新',
-  activations: '激活量',
-  rating: '评分',
-};
+
+function sortLabel(key: SortKey, text: (en: string, zh: string) => string): string {
+  switch (key) {
+    case 'activations': return text('Activations', '激活量');
+    case 'rating': return text('Rating', '评分');
+    case 'updated':
+    default: return text('Recently Updated', '最近更新');
+  }
+}
+
+function statusLabel(status: string, text: (en: string, zh: string) => string): string {
+  switch (status) {
+    case 'published': return text('Published', '已发布');
+    case 'review': return text('In Review', '审批中');
+    case 'deprecated': return text('Deprecated', '已废弃');
+    case 'yanked': return text('Yanked', '已撤回');
+    case 'draft': return text('Draft', '草稿');
+    default: return status;
+  }
+}
 
 function FilterCheckbox({ checked, onChange, label, count }: {
   checked: boolean; onChange: (next: boolean) => void; label: ReactNode; count?: number;
@@ -37,6 +53,7 @@ function FilterCheckbox({ checked, onChange, label, count }: {
 }
 
 function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
+  const { text, locale } = useLocaleText();
   return (
     <div className="skill-card" onClick={() => onOpen(s)}>
       <div className="skill-card-head">
@@ -63,22 +80,22 @@ function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
             <span style={{ color: 'var(--text-faint)' }}>({s.ratings})</span>
           </span>
         ) : (
-          <span className="stat-mini" style={{ color: 'var(--text-faint)' }}><IconStar size={13} /> 暂无评分</span>
+          <span className="stat-mini" style={{ color: 'var(--text-faint)' }}><IconStar size={13} /> {text('No ratings yet', '暂无评分')}</span>
         )}
         {s.activations > 0 ? (
           <span className="stat-mini">
             <IconFire size={13} /> <strong style={{ color: 'var(--text)' }}>{s.activations.toLocaleString()}</strong>
-            <span style={{ color: 'var(--text-subtle)' }}>/周</span>
+            <span style={{ color: 'var(--text-subtle)' }}>{text('/week', '/周')}</span>
           </span>
         ) : (
-          <span className="stat-mini" style={{ color: 'var(--text-faint)' }}><IconFire size={13} /> 暂无激活</span>
+          <span className="stat-mini" style={{ color: 'var(--text-faint)' }}><IconFire size={13} /> {text('No activations yet', '暂无激活')}</span>
         )}
       </div>
 
       <div className="skill-card-meta">
         <span className="mono">v{s.version}</span>
         <span style={{ color: 'var(--text-faint)' }}>·</span>
-        <span>{new Date(s.updatedAt).toLocaleDateString()}</span>
+        <span>{new Date(s.updatedAt).toLocaleDateString(locale)}</span>
         <span style={{ color: 'var(--text-faint)' }}>·</span>
         <span className="mono">@{s.author}</span>
       </div>
@@ -89,13 +106,14 @@ function SkillCard({ s, onOpen }: { s: Skill; onOpen: (s: Skill) => void }) {
       </div>
 
       <div className="skill-card-actions" onClick={(e) => e.stopPropagation()}>
-        <button className="btn sm primary" onClick={() => onOpen(s)}>查看详情</button>
+        <button className="btn sm primary" onClick={() => onOpen(s)}>{text('View details', '查看详情')}</button>
       </div>
     </div>
   );
 }
 
 export function Browse() {
+  const { text, locale } = useLocaleText();
   const navigate = useNavigate();
   // URL is the source of truth for namespace filter so the global search /
   // sidebar quick-jump (/skills?ns=foo) lands on a pre-filtered view.
@@ -218,41 +236,46 @@ export function Browse() {
     <div className="content-inner">
       <div className="page-header">
         <div>
-          <h1 className="page-title">浏览 Skills</h1>
-          <p className="page-subtitle">在公司内部 {skills.data?.length ?? '...'} 个 skill 中找到你需要的能力 — 按命名空间、密级、标签筛选。</p>
+          <h1 className="page-title">{text('Browse Skills', '浏览 Skills')}</h1>
+          <p className="page-subtitle">
+            {text(
+              `Find the capability you need across ${skills.data?.length ?? '...'} internal skills - filter by namespace, classification, and tags.`,
+              `在公司内部 ${skills.data?.length ?? '...'} 个 skill 中找到你需要的能力 — 按命名空间、密级、标签筛选。`,
+            )}
+          </p>
         </div>
         <div className="page-actions">
-          <button className="btn primary" onClick={openCreateSkill}><IconPlus size={14} /> 创建 Skill</button>
+          <button className="btn primary" onClick={openCreateSkill}><IconPlus size={14} /> {text('Create Skill', '创建 Skill')}</button>
         </div>
       </div>
 
       <div className="browse-grid">
         <aside>
           <div className="filter-group">
-            <h4 className="filter-group-title">命名空间</h4>
+            <h4 className="filter-group-title">{text('Namespaces', '命名空间')}</h4>
             {namespaces.data?.map((ns) => (
               <FilterCheckbox key={ns.id} checked={selectedNs.has(ns.id)} onChange={() => toggle(selectedNs, setSelectedNs, ns.id)} label={ns.id} count={ns.count} />
             ))}
           </div>
 
           <div className="filter-group">
-            <h4 className="filter-group-title">密级</h4>
-            <FilterCheckbox checked={selectedClass.has('L1')} onChange={() => toggle(selectedClass, setSelectedClass, 'L1')} label={<><span className="tag blue" style={{ marginRight: 6 }}>L1</span>公开</>} count={counts.byClass.L1} />
-            <FilterCheckbox checked={selectedClass.has('L2')} onChange={() => toggle(selectedClass, setSelectedClass, 'L2')} label={<><span className="tag indigo" style={{ marginRight: 6 }}>L2</span>内部</>} count={counts.byClass.L2} />
-            <FilterCheckbox checked={selectedClass.has('L3')} onChange={() => toggle(selectedClass, setSelectedClass, 'L3')} label={<><span className="tag orange" style={{ marginRight: 6 }}>L3</span>敏感</>} count={counts.byClass.L3} />
+            <h4 className="filter-group-title">{text('Classification', '密级')}</h4>
+            <FilterCheckbox checked={selectedClass.has('L1')} onChange={() => toggle(selectedClass, setSelectedClass, 'L1')} label={<><span className="tag blue" style={{ marginRight: 6 }}>L1</span>{text('Public', '公开')}</>} count={counts.byClass.L1} />
+            <FilterCheckbox checked={selectedClass.has('L2')} onChange={() => toggle(selectedClass, setSelectedClass, 'L2')} label={<><span className="tag indigo" style={{ marginRight: 6 }}>L2</span>{text('Internal', '内部')}</>} count={counts.byClass.L2} />
+            <FilterCheckbox checked={selectedClass.has('L3')} onChange={() => toggle(selectedClass, setSelectedClass, 'L3')} label={<><span className="tag orange" style={{ marginRight: 6 }}>L3</span>{text('Sensitive', '敏感')}</>} count={counts.byClass.L3} />
           </div>
 
           <div className="filter-group">
-            <h4 className="filter-group-title">状态</h4>
+            <h4 className="filter-group-title">{text('Status', '状态')}</h4>
             {(['published', 'review', 'deprecated', 'yanked', 'draft'] as const).map((st) => (
-              <FilterCheckbox key={st} checked={selectedStatus.has(st)} onChange={() => toggle(selectedStatus, setSelectedStatus, st)} label={st} count={counts.byStatus[st] || 0} />
+              <FilterCheckbox key={st} checked={selectedStatus.has(st)} onChange={() => toggle(selectedStatus, setSelectedStatus, st)} label={statusLabel(st, text)} count={counts.byStatus[st] || 0} />
             ))}
           </div>
 
           <div className="filter-group">
-            <h4 className="filter-group-title">标签</h4>
+            <h4 className="filter-group-title">{text('Tags', '标签')}</h4>
             {counts.tags.length === 0 && (
-              <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: '4px 0' }}>暂无</div>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: '4px 0' }}>{text('None', '暂无')}</div>
             )}
             {counts.tags.map((t) => (
               <FilterCheckbox
@@ -269,7 +292,7 @@ export function Browse() {
             <button className="btn" style={{ width: '100%' }} onClick={() => {
               setSelectedNs(new Set()); setSelectedClass(new Set()); setSelectedStatus(new Set()); setSelectedTags(new Set()); setSearchInput(''); setSearch('');
               clearAuthor();
-            }}>清空所有过滤</button>
+            }}>{text('Clear all filters', '清空所有过滤')}</button>
           </div>
         </aside>
 
@@ -283,10 +306,10 @@ export function Browse() {
               borderRadius: 999, fontSize: 12, fontWeight: 500,
               border: '1px solid var(--primary-200, rgba(79,70,229,0.18))',
             }}>
-              <span>作者: <span className="mono">@{authorFilter}</span></span>
+              <span>{text('Author:', '作者:')} <span className="mono">@{authorFilter}</span></span>
               <button
                 onClick={clearAuthor}
-                title="清除作者过滤"
+                title={text('Clear author filter', '清除作者过滤')}
                 style={{
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   width: 18, height: 18, padding: 0, border: 'none',
@@ -299,44 +322,44 @@ export function Browse() {
           <div className="browse-toolbar">
             <div className="input-wrap">
               <span className="icon-left"><IconSearch size={15} /></span>
-              <input className="input with-icon" placeholder="搜索 skill 名称、描述、标签..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+              <input className="input with-icon" placeholder={text('Search skill name, description, tags...', '搜索 skill 名称、描述、标签...')} value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
             </div>
             <div style={{ position: 'relative' }}>
               <button className="dropdown" style={{ height: 36 }} onClick={() => setSortOpen((v) => !v)}>
-                排序: <strong style={{ color: 'var(--text)' }}>{SORT_LABELS[sort]}</strong> <IconChevronDown size={12} />
+                {text('Sort:', '排序:')} <strong style={{ color: 'var(--text)' }}>{sortLabel(sort, text)}</strong> <IconChevronDown size={12} />
               </button>
               {sortOpen && (
                 <>
                   <div onClick={() => setSortOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 49 }} />
                   <div style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 50, minWidth: 160, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 8px 20px rgba(15,23,42,0.12)', overflow: 'hidden' }}>
-                    {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+                    {(['updated', 'activations', 'rating'] as SortKey[]).map((k) => (
                       <div key={k} onClick={() => { setSort(k); setSortOpen(false); }} style={{
                         padding: '8px 12px', fontSize: 13, cursor: 'pointer',
                         background: sort === k ? 'var(--primary-50, rgba(79,70,229,0.08))' : 'transparent',
                         color: sort === k ? 'var(--primary-700, var(--primary))' : 'var(--text)',
-                      }}>{SORT_LABELS[k]}</div>
+                      }}>{sortLabel(k, text)}</div>
                     ))}
                   </div>
                 </>
               )}
             </div>
             <div className="seg">
-              <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')}><IconGrid size={13} /> 网格</button>
-              <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><IconList size={13} /> 列表</button>
+              <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')}><IconGrid size={13} /> {text('Grid', '网格')}</button>
+              <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><IconList size={13} /> {text('List', '列表')}</button>
             </div>
           </div>
 
           <div className="browse-meta">
-            <span>共 <strong style={{ color: 'var(--text)' }} className="num">{filtered.length}</strong> 个 skill</span>
+            <span>{text('Total ', '共 ')}<strong style={{ color: 'var(--text)' }} className="num">{filtered.length}</strong>{text(' skills', ' 个 skill')}</span>
             {totalPages > 1 && (
               <span style={{ marginLeft: 8, color: 'var(--text-subtle)', fontSize: 12 }}>
-                第 {page + 1} / {totalPages} 页
+                {text(`Page ${page + 1} / ${totalPages}`, `第 ${page + 1} / ${totalPages} 页`)}
               </span>
             )}
           </div>
 
-          {skills.loading && <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>加载中...</div></div>}
-          {skills.error && <div className="card"><div className="card-body" style={{ color: 'var(--red-text)' }}>加载失败: {skills.error.message}</div></div>}
+          {skills.loading && <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div></div>}
+          {skills.error && <div className="card"><div className="card-body" style={{ color: 'var(--red-text)' }}>{text('Load failed: ', '加载失败: ')}{skills.error.message}</div></div>}
 
           {!skills.loading && view === 'grid' && (
             <div className="skills-grid">
@@ -349,11 +372,11 @@ export function Browse() {
                 <table className="tbl">
                   <thead>
                     <tr>
-                      <th>Skill</th><th>密级</th><th>状态</th>
-                      <th style={{ textAlign: 'right' }}>评分</th>
-                      <th style={{ textAlign: 'right' }}>激活/周</th>
-                      <th style={{ textAlign: 'right' }}>版本</th>
-                      <th>更新</th>
+                      <th>Skill</th><th>{text('Classification', '密级')}</th><th>{text('Status', '状态')}</th>
+                      <th style={{ textAlign: 'right' }}>{text('Rating', '评分')}</th>
+                      <th style={{ textAlign: 'right' }}>{text('Activations / Week', '激活/周')}</th>
+                      <th style={{ textAlign: 'right' }}>{text('Version', '版本')}</th>
+                      <th>{text('Updated', '更新')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -373,7 +396,7 @@ export function Browse() {
                         <td style={{ textAlign: 'right' }} className="num">{s.rating > 0 ? <><IconStar size={11} /> {s.rating}</> : <span style={{ color: 'var(--text-faint)' }}>—</span>}</td>
                         <td className="num" style={{ textAlign: 'right', fontWeight: 500 }}>{s.activations.toLocaleString()}</td>
                         <td style={{ textAlign: 'right' }}><span className="mono">v{s.version}</span></td>
-                        <td style={{ color: 'var(--text-subtle)', fontSize: 12.5 }}>{new Date(s.updatedAt).toLocaleDateString()}</td>
+                        <td style={{ color: 'var(--text-subtle)', fontSize: 12.5 }}>{new Date(s.updatedAt).toLocaleDateString(locale)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -384,11 +407,11 @@ export function Browse() {
           {!skills.loading && totalPages > 1 && (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8 }}>
               <button className="btn sm" disabled={page === 0} onClick={() => setPage(0)}>«</button>
-              <button className="btn sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>‹ 上一页</button>
+              <button className="btn sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>‹ {text('Previous', '上一页')}</button>
               <span style={{ fontSize: 12.5, color: 'var(--text-subtle)', minWidth: 80, textAlign: 'center' }}>
                 {page + 1} / {totalPages}
               </span>
-              <button className="btn sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>下一页 ›</button>
+              <button className="btn sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>{text('Next', '下一页')} ›</button>
               <button className="btn sm" disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>»</button>
             </div>
           )}

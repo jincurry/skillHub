@@ -505,7 +505,6 @@ export interface UpdateSkillMetaRequest {
   icon?: string;
   iconClass?: string;
   classification?: 'L1' | 'L2' | 'L3';
-  version?: string;
   tags?: string[];
 }
 

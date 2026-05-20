@@ -13,6 +13,8 @@ import { Admin } from './pages/Admin';
 import { Profile } from './pages/Profile';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+import i18n from './i18n';
+import { isEnglishLanguage } from './i18n/useLocaleText';
 
 // Editor pulls in @monaco-editor/react (~2MB) and the markdown preview
 // pipeline. Lazy-load it so users browsing skills, reviewing, or doing admin
@@ -23,9 +25,12 @@ function EditorFallback() {
   // We can't use useTranslation here because i18next may not have finished
   // loading when Suspense first kicks in. Use a hardcoded fallback string —
   // the editor chunk loads in <100ms so this is barely ever visible anyway.
+  const loadingText = isEnglishLanguage(i18n.resolvedLanguage ?? i18n.language)
+    ? 'Loading editor...'
+    : '正在加载编辑器...';
   return (
     <div style={{ padding: 32, color: 'var(--text-subtle)', fontSize: 13 }}>
-      Loading editor… / 正在加载编辑器…
+      {loadingText}
     </div>
   );
 }

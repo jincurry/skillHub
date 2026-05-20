@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import type { Me } from '../api/types';
 import { COVER_PRESETS, isHexColor, resolveCover } from '../lib/profile';
 import { IconX } from './Icons';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 interface Props {
   open: boolean;
@@ -14,6 +15,7 @@ interface Props {
 type Mode = 'preset' | 'custom';
 
 export function CoverPicker({ open, me, onClose, onUpdated }: Props) {
+  const { text } = useLocaleText();
   const initialMode: Mode = me.coverFrom && me.coverTo ? 'custom' : 'preset';
   const [mode, setMode] = useState<Mode>(initialMode);
   const [presetId, setPresetId] = useState<string>(me.coverPreset || 'sunset');
@@ -50,7 +52,7 @@ export function CoverPicker({ open, me, onClose, onUpdated }: Props) {
     setErr(null);
     if (mode === 'custom') {
       if (!isHexColor(from) || !isHexColor(to)) {
-        setErr('颜色必须是合法的 hex（例：#4f46e5）');
+        setErr(text('Colors must be valid hex (example: #4f46e5)', '颜色必须是合法的 hex（例：#4f46e5）'));
         return;
       }
     }
@@ -80,8 +82,8 @@ export function CoverPicker({ open, me, onClose, onUpdated }: Props) {
         boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)',
       }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>修改封面</h3>
-          <button className="btn sm ghost" onClick={onClose} disabled={busy} title="关闭"><IconX size={14} /></button>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{text('Change Cover', '修改封面')}</h3>
+          <button className="btn sm ghost" onClick={onClose} disabled={busy} title={text('Close', '关闭')}><IconX size={14} /></button>
         </div>
 
         <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -98,12 +100,12 @@ export function CoverPicker({ open, me, onClose, onUpdated }: Props) {
               type="button"
               className={mode === 'preset' ? 'btn primary sm' : 'btn sm'}
               onClick={() => setMode('preset')}
-            >预设</button>
+            >{text('Presets', '预设')}</button>
             <button
               type="button"
               className={mode === 'custom' ? 'btn primary sm' : 'btn sm'}
               onClick={() => setMode('custom')}
-            >自定义</button>
+            >{text('Custom', '自定义')}</button>
           </div>
 
           {mode === 'preset' && (
@@ -121,7 +123,7 @@ export function CoverPicker({ open, me, onClose, onUpdated }: Props) {
                       background: 'transparent',
                       transition: 'all 0.12s', position: 'relative',
                     }}
-                    title={p.label}
+                    title={coverPresetLabel(p.id, text)}
                   >
                     <div style={{
                       height: 56, background: `linear-gradient(135deg, ${p.from} 0%, ${p.to} 100%)`,
@@ -130,7 +132,7 @@ export function CoverPicker({ open, me, onClose, onUpdated }: Props) {
                       padding: '4px 6px', fontSize: 11, fontWeight: 500,
                       background: 'var(--bg)', color: isActive ? 'var(--primary)' : 'var(--text-subtle)',
                     }}>
-                      {p.label}
+                      {coverPresetLabel(p.id, text)}
                     </div>
                   </button>
                 );
@@ -140,8 +142,8 @@ export function CoverPicker({ open, me, onClose, onUpdated }: Props) {
 
           {mode === 'custom' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <ColorField label="起始色" value={from} onChange={setFrom} />
-              <ColorField label="结束色" value={to} onChange={setTo} />
+              <ColorField label={text('Start Color', '起始色')} value={from} onChange={setFrom} />
+              <ColorField label={text('End Color', '结束色')} value={to} onChange={setTo} />
             </div>
           )}
 
@@ -149,9 +151,9 @@ export function CoverPicker({ open, me, onClose, onUpdated }: Props) {
         </div>
 
         <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn" onClick={onClose} disabled={busy}>取消</button>
+          <button className="btn" onClick={onClose} disabled={busy}>{text('Cancel', '取消')}</button>
           <button className="btn primary" disabled={busy} onClick={submit}>
-            {busy ? '保存中...' : '保存'}
+            {busy ? text('Saving...', '保存中...') : text('Save', '保存')}
           </button>
         </div>
       </div>
@@ -164,6 +166,7 @@ function ColorField({ label, value, onChange }: {
   value: string;
   onChange: (v: string) => void;
 }) {
+  const { text } = useLocaleText();
   const ok = isHexColor(value);
   return (
     <label style={{ display: 'block' }}>
@@ -183,7 +186,21 @@ function ColorField({ label, value, onChange }: {
           style={{ flex: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
         />
       </div>
-      {!ok && value && <div style={{ fontSize: 11, color: 'var(--red-text)', marginTop: 4 }}>需要 hex 格式（如 #4f46e5）</div>}
+      {!ok && value && <div style={{ fontSize: 11, color: 'var(--red-text)', marginTop: 4 }}>{text('Hex format required (example: #4f46e5)', '需要 hex 格式（如 #4f46e5）')}</div>}
     </label>
   );
+}
+
+function coverPresetLabel(id: string, text: (en: string, zh: string) => string): string {
+  switch (id) {
+    case 'sunset': return text('Sunset', '日落');
+    case 'aurora': return text('Aurora', '极光');
+    case 'ocean': return text('Ocean', '海洋');
+    case 'forest': return text('Forest', '森林');
+    case 'cyber': return text('Cyber', '赛博');
+    case 'peach': return text('Peach', '蜜桃');
+    case 'slate': return text('Slate', '深灰');
+    case 'mono': return text('Mono', '墨黑');
+    default: return id;
+  }
 }

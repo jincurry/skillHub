@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   IconSettings, IconRocket, IconCheckCircle,
   IconStar, IconCode, IconAlertTriangle, IconUsers,
@@ -95,24 +96,61 @@ const ACTIVITY_META: Record<string, { icon: ReactNode; color: string; verb: stri
   rate:              { icon: <IconStar size={14} />,           color: 'amber',  verb: '评分了' },
 };
 
-function fmtRelative(iso: string): string {
+const ACTIVITY_VERBS_EN: Record<string, string> = {
+  publish: 'published',
+  yank: 'yanked',
+  deprecated: 'deprecated',
+  approve_review: 'approved review for',
+  reject_review: 'rejected review for',
+  request_changes: 'requested changes for',
+  submit_review: 'submitted review for',
+  create_draft: 'created draft',
+  create_namespace: 'created namespace',
+  add_maintainer: 'added maintainer to',
+  remove_maintainer: 'removed maintainer from',
+  activate: 'activated',
+  update_settings: 'updated settings for',
+  rotate_key: 'rotated key for',
+  update_profile: 'updated profile',
+  rate: 'rated',
+};
+
+const ACHIEVEMENT_COPY: Record<string, { name: string; desc: string; hint?: string }> = {
+  first_publish: {
+    name: 'First Publish',
+    desc: 'Published your first skill',
+    hint: 'Create and submit your first skill from Skills',
+  },
+  hundred_activations: { name: '100 Activations', desc: 'A single skill reached 100 weekly activations' },
+  thousand_activations: { name: 'Teacher of Thousands', desc: 'Total activations reached 1,000' },
+  million_activations: { name: 'Million Activations', desc: 'Total activations reached 1,000,000' },
+  reviewer_10: { name: 'Review Pro', desc: 'Completed at least 10 reviews' },
+  star_collector: { name: 'Community Star', desc: 'Received 100+ stars' },
+  polyglot: { name: 'Multi-namespace Maintainer', desc: 'Maintains skills in more than 3 namespaces' },
+  documenter: { name: 'Documentation Master', desc: 'At least one skill has complete documentation' },
+  security_clearance: { name: 'Security Mindset', desc: 'Published an L3-classified skill' },
+  no_zombie: { name: 'Well Maintained', desc: 'All your published skills are online (no deprecated/yanked skills)' },
+};
+
+function fmtRelative(iso: string, isEnglish: boolean): string {
   const t = new Date(iso).getTime();
   if (!t) return '';
   const diffMs = Date.now() - t;
   const min = Math.floor(diffMs / 60000);
-  if (min < 1) return '刚刚';
-  if (min < 60) return `${min} 分钟前`;
+  if (min < 1) return isEnglish ? 'just now' : '刚刚';
+  if (min < 60) return isEnglish ? `${min} min ago` : `${min} 分钟前`;
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr} 小时前`;
+  if (hr < 24) return isEnglish ? `${hr} hr ago` : `${hr} 小时前`;
   const day = Math.floor(hr / 24);
-  if (day < 30) return `${day} 天前`;
-  return new Date(iso).toLocaleDateString();
+  if (day < 30) return isEnglish ? `${day} day${day === 1 ? '' : 's'} ago` : `${day} 天前`;
+  return new Date(iso).toLocaleDateString(isEnglish ? 'en-US' : 'zh-CN');
 }
 
-function ActivityRow({ entry }: { entry: AuditLog }) {
+function ActivityRow({ entry, isEnglish }: { entry: AuditLog; isEnglish: boolean }) {
   const meta = ACTIVITY_META[entry.action] ?? {
     icon: <IconCode size={14} />, color: 'blue', verb: entry.action,
   };
+  const verb = isEnglish ? (ACTIVITY_VERBS_EN[entry.action] ?? entry.action) : meta.verb;
   const target = entry.target || '—';
   return (
     <div style={{ display: 'flex', gap: 10, padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
@@ -123,20 +161,20 @@ function ActivityRow({ entry }: { entry: AuditLog }) {
       }}>{meta.icon}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, lineHeight: 1.45 }}>
-          {meta.verb} <strong>{target}</strong>
+          {verb} <strong>{target}</strong>
           {entry.version && <> <span className="mono" style={{ color: 'var(--text-subtle)' }}>v{entry.version}</span></>}
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 3 }}>
-          {fmtRelative(entry.createdAt)}
+          {fmtRelative(entry.createdAt, isEnglish)}
         </div>
       </div>
     </div>
   );
 }
 
-function Achievement({ icon, name, desc, earned, rare, progress, hint }: {
+function Achievement({ icon, name, desc, earned, rare, progress, hint, isEnglish }: {
   icon: string; name: string; desc: string; earned?: boolean; rare?: boolean;
-  progress?: number; hint?: string;
+  progress?: number; hint?: string; isEnglish?: boolean;
 }) {
   const pct = Math.max(0, Math.min(1, progress ?? (earned ? 1 : 0)));
   return (
@@ -161,7 +199,7 @@ function Achievement({ icon, name, desc, earned, rare, progress, hint }: {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
           {name}
-          {rare && earned && <span className="tag amber" style={{ fontSize: 10 }}>稀有</span>}
+          {rare && earned && <span className="tag amber" style={{ fontSize: 10 }}>{isEnglish ? 'Rare' : '稀有'}</span>}
           {!earned && pct > 0 && (
             <span className="num" style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 500, marginLeft: 'auto' }}>
               {Math.round(pct * 100)}%
@@ -188,6 +226,9 @@ function Achievement({ icon, name, desc, earned, rare, progress, hint }: {
 // ---------------------------------------------------------------------------
 
 export function Profile() {
+  const { i18n } = useTranslation();
+  const isEnglish = (i18n.resolvedLanguage ?? i18n.language ?? '').startsWith('en');
+  const text = (en: string, zh: string) => (isEnglish ? en : zh);
   const navigate = useNavigate();
   const [tab, setTab] = useState<'overview' | 'skills' | 'subscriptions' | 'activity' | 'achievements' | 'settings' | 'tokens'>('overview');
   const subs = useAsync(() => api.listMySubscriptions(), []);
@@ -215,12 +256,12 @@ export function Profile() {
         <div className="card" style={{ maxWidth: 560, margin: '40px auto' }}>
           <div className="card-body" style={{ padding: 24 }}>
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--red-text)', marginBottom: 8 }}>
-              载入个人信息失败
+              {text('Failed to load profile', '载入个人信息失败')}
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55, marginBottom: 12 }}>
               <code className="mono" style={{ background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>{me.error.message}</code>
             </div>
-            <button className="btn sm" onClick={() => me.reload()}>重试</button>
+            <button className="btn sm" onClick={() => me.reload()}>{text('Retry', '重试')}</button>
           </div>
         </div>
       </div>
@@ -262,7 +303,7 @@ export function Profile() {
         {me.data && (
           <button
             onClick={() => setCoverOpen(true)}
-            title="修改封面"
+            title={text('Change cover', '修改封面')}
             style={{
               position: 'absolute', top: 10, right: 10,
               padding: '6px 10px', fontSize: 12, fontWeight: 500,
@@ -274,7 +315,7 @@ export function Profile() {
             onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.55)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.35)'; }}
           >
-            <IconImage size={13} /> 修改封面
+            <IconImage size={13} /> {text('Change cover', '修改封面')}
           </button>
         )}
       </div>
@@ -296,7 +337,7 @@ export function Profile() {
           {me.data && (
             <button
               onClick={() => setAvatarOpen(true)}
-              title="修改头像"
+              title={text('Change avatar', '修改头像')}
               style={{
                 position: 'absolute', bottom: 2, right: 2,
                 width: 30, height: 30, borderRadius: '50%',
@@ -326,7 +367,7 @@ export function Profile() {
               {joinedAt && (
                 <>
                   <span style={{ color: 'var(--text-faint)' }}>·</span>
-                  <span>加入于 {new Date(joinedAt).toLocaleDateString()}</span>
+                  <span>{text('Joined ', '加入于 ')}{new Date(joinedAt).toLocaleDateString(isEnglish ? 'en-US' : 'zh-CN')}</span>
                 </>
               )}
             </div>
@@ -337,7 +378,7 @@ export function Profile() {
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <button className="btn primary" onClick={() => setEditing(true)}><IconSettings size={14} /> 编辑资料</button>
+            <button className="btn primary" onClick={() => setEditing(true)}><IconSettings size={14} /> {text('Edit Profile', '编辑资料')}</button>
           </div>
         </div>
       </div>
@@ -345,32 +386,32 @@ export function Profile() {
       {/* stat strip ----------------------------------------------------- */}
       <div style={{ display: 'flex', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden', marginBottom: 'var(--gap)' }}>
         <ProfileStat
-          label="发布的 Skills"
+          label={text('Published Skills', '发布的 Skills')}
           value={String(stats.data?.published ?? '—')}
-          sub={stats.data?.drafts ? `${stats.data.drafts} 个 draft` : undefined}
+          sub={stats.data?.drafts ? text(`${stats.data.drafts} drafts`, `${stats.data.drafts} 个 draft`) : undefined}
           onClick={() => setTab('skills')}
           onSubClick={stats.data?.drafts ? () => navigate('/workspace') : undefined}
         />
         <ProfileStat
-          label="累计激活"
+          label={text('Total Activations', '累计激活')}
           value={(stats.data?.activations ?? 0).toLocaleString()}
           color="#10b981"
         />
         <ProfileStat
-          label="完成审批"
+          label={text('Completed Reviews', '完成审批')}
           value={String(stats.data?.reviewsCompleted ?? '—')}
-          sub={stats.data?.pendingReviews ? `${stats.data.pendingReviews} 个待我审` : undefined}
+          sub={stats.data?.pendingReviews ? text(`${stats.data.pendingReviews} assigned`, `${stats.data.pendingReviews} 个待我审`) : undefined}
           color="#f59e0b"
           onClick={() => navigate('/reviews?status=approved&mine=1')}
           onSubClick={stats.data?.pendingReviews ? () => navigate('/reviews?status=pending&mine=1') : undefined}
         />
         <ProfileStat
-          label="收到的 ⭐"
+          label={text('Stars Received', '收到的 ⭐')}
           value={String(stats.data?.ratingsReceived ?? '—')}
-          sub={stats.data && stats.data.avgRating > 0 ? `平均 ${stats.data.avgRating.toFixed(1)}` : undefined}
+          sub={stats.data && stats.data.avgRating > 0 ? text(`Avg ${stats.data.avgRating.toFixed(1)}`, `平均 ${stats.data.avgRating.toFixed(1)}`) : undefined}
         />
         <ProfileStat
-          label="待我审批"
+          label={text('Assigned Reviews', '待我审批')}
           value={String(stats.data?.pendingReviews ?? '—')}
           color="#dc2626"
           onClick={() => navigate('/reviews?status=pending&mine=1')}
@@ -380,12 +421,12 @@ export function Profile() {
       {/* tabs ----------------------------------------------------------- */}
       <div style={{ display: 'flex', gap: 24, borderBottom: '1px solid var(--border)', marginBottom: 'var(--gap)' }}>
         {([
-          { id: 'overview', label: '概览' },
+          { id: 'overview', label: text('Overview', '概览') },
           { id: 'skills', label: 'Skills', count: mySkills.length },
-          { id: 'subscriptions', label: '关注', count: subs.data?.length ?? 0 },
-          { id: 'activity', label: '动态', count: activity.data?.length ?? 0 },
-          { id: 'achievements', label: '成就', count: achievements.data?.length ?? 0 },
-          { id: 'settings', label: '设置' },
+          { id: 'subscriptions', label: text('Following', '关注'), count: subs.data?.length ?? 0 },
+          { id: 'activity', label: text('Activity', '动态'), count: activity.data?.length ?? 0 },
+          { id: 'achievements', label: text('Achievements', '成就'), count: achievements.data?.length ?? 0 },
+          { id: 'settings', label: text('Settings', '设置') },
           { id: 'tokens', label: 'API Token' },
         ] as const).map((it) => (
           <div key={it.id} onClick={() => setTab(it.id)} style={{
@@ -408,20 +449,20 @@ export function Profile() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--gap)' }}>
           <div className="card">
             <div className="card-header">
-              <h3 className="card-title">📌 我的 Skills</h3>
+              <h3 className="card-title">📌 {text('My Skills', '我的 Skills')}</h3>
               {mySkills.length > 4 && (
-                <span style={{ fontSize: 12, color: 'var(--primary)', cursor: 'pointer' }} onClick={() => setTab('skills')}>查看全部 →</span>
+                <span style={{ fontSize: 12, color: 'var(--primary)', cursor: 'pointer' }} onClick={() => setTab('skills')}>{text('View all ->', '查看全部 →')}</span>
               )}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--border)' }}>
               {allSkills.loading && (
                 <div style={{ padding: 18, background: 'var(--bg-elevated)', gridColumn: '1 / -1', fontSize: 12, color: 'var(--text-subtle)' }}>
-                  加载中...
+                  {text('Loading...', '加载中...')}
                 </div>
               )}
               {!allSkills.loading && mySkills.length === 0 && (
                 <div style={{ padding: 18, background: 'var(--bg-elevated)', gridColumn: '1 / -1', fontSize: 12, color: 'var(--text-subtle)' }}>
-                  你还没有作为作者发布的 skill。
+                  {text('You have not published any skills as author yet.', '你还没有作为作者发布的 skill。')}
                 </div>
               )}
               {mySkills.slice(0, 4).map((s) => (
@@ -441,7 +482,7 @@ export function Profile() {
                         {s.activations > 0 && (
                           <>
                             <span>·</span>
-                            <span>{s.activations.toLocaleString()} 激活/周</span>
+                            <span>{text(`${s.activations.toLocaleString()} activations/week`, `${s.activations.toLocaleString()} 激活/周`)}</span>
                           </>
                         )}
                       </div>
@@ -454,22 +495,22 @@ export function Profile() {
 
           <div className="card">
             <div className="card-header">
-              <h3 className="card-title">🕒 最近动态</h3>
+              <h3 className="card-title">🕒 {text('Recent Activity', '最近动态')}</h3>
               {(activity.data?.length ?? 0) > 4 && (
-                <span style={{ fontSize: 12, color: 'var(--primary)', cursor: 'pointer' }} onClick={() => setTab('activity')}>查看全部 →</span>
+                <span style={{ fontSize: 12, color: 'var(--primary)', cursor: 'pointer' }} onClick={() => setTab('activity')}>{text('View all ->', '查看全部 →')}</span>
               )}
             </div>
             <div className="card-body flush">
               {activity.loading && (
-                <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>加载中...</div>
+                <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>
               )}
               {activity.error && (
                 <div style={{ padding: 14, fontSize: 13, color: 'var(--red-text)' }}>{activity.error.message}</div>
               )}
               {!activity.loading && !activity.error && (activity.data?.length ?? 0) === 0 && (
-                <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>暂无动态</div>
+                <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>{text('No activity yet', '暂无动态')}</div>
               )}
-              {(activity.data ?? []).slice(0, 4).map((a) => <ActivityRow key={a.id} entry={a} />)}
+              {(activity.data ?? []).slice(0, 4).map((a) => <ActivityRow key={a.id} entry={a} isEnglish={isEnglish} />)}
             </div>
           </div>
         </div>
@@ -480,16 +521,16 @@ export function Profile() {
         <div className="card">
           <div className="card-body flush table-wrap">
             {allSkills.loading && (
-              <div style={{ padding: 16, fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>
+              <div style={{ padding: 16, fontSize: 12, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>
             )}
             {!allSkills.loading && mySkills.length === 0 && (
               <div style={{ padding: 16, fontSize: 13, color: 'var(--text-subtle)' }}>
-                你还没有作为作者发布的 skill。
+                {text('You have not published any skills as author yet.', '你还没有作为作者发布的 skill。')}
               </div>
             )}
             {mySkills.length > 0 && (
               <table className="tbl">
-                <thead><tr><th>Skill</th><th>状态</th><th style={{ textAlign: 'right' }}>当前版本</th><th style={{ textAlign: 'right' }}>激活/周</th></tr></thead>
+                <thead><tr><th>Skill</th><th>{text('Status', '状态')}</th><th style={{ textAlign: 'right' }}>{text('Current Version', '当前版本')}</th><th style={{ textAlign: 'right' }}>{text('Activations / Week', '激活/周')}</th></tr></thead>
                 <tbody>
                   {mySkills.map((s) => (
                     <tr key={s.id} onClick={() => navigate(`/skills/${s.ns}/${s.name}`)}>
@@ -515,18 +556,18 @@ export function Profile() {
       {tab === 'subscriptions' && (
         <div className="card">
           <div className="card-body flush">
-            {subs.loading && <div style={{ padding: 16, fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
+            {subs.loading && <div style={{ padding: 16, fontSize: 12, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>}
             {!subs.loading && (subs.data?.length ?? 0) === 0 && (
               <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-subtle)' }}>
-                <div style={{ fontSize: 14, marginBottom: 6 }}>还没有关注的 Skill</div>
+                <div style={{ fontSize: 14, marginBottom: 6 }}>{text('No followed skills yet', '还没有关注的 Skill')}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-                  在任意 skill 详情页点击 + 关注,新版本发布时会推送站内通知。
+                  {text('Click + Follow on any skill detail page to receive in-app notifications for new releases.', '在任意 skill 详情页点击 + 关注,新版本发布时会推送站内通知。')}
                 </div>
               </div>
             )}
             {(subs.data?.length ?? 0) > 0 && (
               <table className="tbl">
-                <thead><tr><th>Skill</th><th style={{ textAlign: 'right' }}>关注于</th></tr></thead>
+                <thead><tr><th>Skill</th><th style={{ textAlign: 'right' }}>{text('Followed On', '关注于')}</th></tr></thead>
                 <tbody>
                   {subs.data!.map((s) => (
                     <tr
@@ -539,7 +580,7 @@ export function Profile() {
                         <span style={{ fontWeight: 500 }}>{s.name}</span>
                       </td>
                       <td style={{ textAlign: 'right', color: 'var(--text-subtle)', fontSize: 12.5 }}>
-                        {new Date(s.createdAt).toLocaleDateString()}
+                        {new Date(s.createdAt).toLocaleDateString(isEnglish ? 'en-US' : 'zh-CN')}
                       </td>
                     </tr>
                   ))}
@@ -555,15 +596,15 @@ export function Profile() {
         <div className="card">
           <div className="card-body flush">
             {activity.loading && (
-              <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>加载中...</div>
+              <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>
             )}
             {activity.error && (
               <div style={{ padding: 14, fontSize: 13, color: 'var(--red-text)' }}>{activity.error.message}</div>
             )}
             {!activity.loading && !activity.error && (activity.data?.length ?? 0) === 0 && (
-              <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>暂无动态</div>
+              <div style={{ padding: 14, fontSize: 13, color: 'var(--text-subtle)' }}>{text('No activity yet', '暂无动态')}</div>
             )}
-            {(activity.data ?? []).map((a) => <ActivityRow key={a.id} entry={a} />)}
+            {(activity.data ?? []).map((a) => <ActivityRow key={a.id} entry={a} isEnglish={isEnglish} />)}
           </div>
         </div>
       )}
@@ -571,7 +612,7 @@ export function Profile() {
       {/* achievements tab ---------------------------------------------- */}
       {tab === 'achievements' && (
         <div>
-          {achievements.loading && <div style={{ color: 'var(--text-subtle)' }}>加载中...</div>}
+          {achievements.loading && <div style={{ color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>}
           {achievements.error && <div style={{ color: 'var(--red-text)' }}>{achievements.error.message}</div>}
           {achievements.data && (
             <>
@@ -581,23 +622,31 @@ export function Profile() {
                 const pct = total > 0 ? Math.round((earned / total) * 100) : 0;
                 return (
                   <div style={{ fontSize: 13, color: 'var(--text-subtle)', marginBottom: 14 }}>
-                    已解锁 <strong style={{ color: 'var(--text)' }}>{earned}</strong> / {total} 个成就 · 完成度 {pct}%
+                    {isEnglish ? (
+                      <>Unlocked <strong style={{ color: 'var(--text)' }}>{earned}</strong> / {total} achievements · {pct}% complete</>
+                    ) : (
+                      <>已解锁 <strong style={{ color: 'var(--text)' }}>{earned}</strong> / {total} 个成就 · 完成度 {pct}%</>
+                    )}
                   </div>
                 );
               })()}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-                {achievements.data.map((a) => (
-                  <Achievement
-                    key={a.id}
-                    icon={a.icon}
-                    name={a.name}
-                    desc={a.desc}
-                    earned={a.earned}
-                    rare={a.rare}
-                    progress={a.progress}
-                    hint={a.hint}
-                  />
-                ))}
+                {achievements.data.map((a) => {
+                  const copy = isEnglish ? ACHIEVEMENT_COPY[a.id] : undefined;
+                  return (
+                    <Achievement
+                      key={a.id}
+                      icon={a.icon}
+                      name={copy?.name ?? a.name}
+                      desc={copy?.desc ?? a.desc}
+                      earned={a.earned}
+                      rare={a.rare}
+                      progress={a.progress}
+                      hint={copy?.hint ?? a.hint}
+                      isEnglish={isEnglish}
+                    />
+                  );
+                })}
               </div>
             </>
           )}
@@ -609,19 +658,19 @@ export function Profile() {
         <div style={{ maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card">
             <div className="card-header">
-              <h3 className="card-title">基本信息</h3>
+              <h3 className="card-title">{text('Basic Information', '基本信息')}</h3>
               <button className="btn sm" onClick={() => setEditing(true)}>
-                <IconSettings size={12} /> 编辑
+                <IconSettings size={12} /> {text('Edit', '编辑')}
               </button>
             </div>
             <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {[
-                { label: '显示名', value: display },
-                { label: '用户名', value: `@${username ?? ''}` },
-                { label: '邮箱', value: email || '—' },
-                { label: '主要团队', value: team || '—' },
-                { label: '所在地', value: location || '—' },
-                { label: '简介', value: bio || '—' },
+                { label: text('Display Name', '显示名'), value: display },
+                { label: text('Username', '用户名'), value: `@${username ?? ''}` },
+                { label: text('Email', '邮箱'), value: email || '—' },
+                { label: text('Primary Team', '主要团队'), value: team || '—' },
+                { label: text('Location', '所在地'), value: location || '—' },
+                { label: text('Bio', '简介'), value: bio || '—' },
               ].map((f) => (
                 <div key={f.label}>
                   <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>{f.label}</div>
@@ -687,6 +736,9 @@ function EditProfileModal({
   onClose: () => void;
   onSaved: (m: import('../api/types').Me) => void;
 }) {
+  const { i18n } = useTranslation();
+  const isEnglish = (i18n.resolvedLanguage ?? i18n.language ?? '').startsWith('en');
+  const text = (en: string, zh: string) => (isEnglish ? en : zh);
   const [display, setDisplay] = useState(initial.display);
   const [email, setEmail] = useState(initial.email);
   const [bio, setBio] = useState(initial.bio);
@@ -712,14 +764,14 @@ function EditProfileModal({
   }
 
   const initialChar = display.trim().charAt(0).toUpperCase() || '?';
-  const joinedDate = readonly.joinedAt ? new Date(readonly.joinedAt).toLocaleDateString() : '—';
+  const joinedDate = readonly.joinedAt ? new Date(readonly.joinedAt).toLocaleDateString(isEnglish ? 'en-US' : 'zh-CN') : '—';
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgb(15 23 42 / 0.55)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg-elevated)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)', width: '100%', maxWidth: 560, maxHeight: 'calc(100vh - 60px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ padding: '16px 22px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>编辑资料</div>
-            <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 2 }}>保存后会立即对所有人可见</div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>{text('Edit Profile', '编辑资料')}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 2 }}>{text('Changes are visible to everyone immediately after saving', '保存后会立即对所有人可见')}</div>
           </div>
           <button className="btn sm ghost" onClick={onClose} style={{ fontSize: 18, padding: '2px 10px' }}>×</button>
         </div>
@@ -727,36 +779,36 @@ function EditProfileModal({
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(135deg,#f59e0b,#ec4899)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 700, flexShrink: 0 }}>{initialChar}</div>
             <div style={{ flex: 1, fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.5 }}>
-              下方 4 项可以随时修改。用户名、角色、主要团队、加入时间由管理员维护，不能在这里修改。
+              {text('The 4 fields below can be updated at any time. Username, role, primary team, and join date are maintained by admins and cannot be changed here.', '下方 4 项可以随时修改。用户名、角色、主要团队、加入时间由管理员维护，不能在这里修改。')}
             </div>
           </div>
 
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 4 }}>可修改字段</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 4 }}>{text('Editable Fields', '可修改字段')}</div>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>显示名称</div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>{text('Display Name', '显示名称')}</div>
             <input className="input" value={display} onChange={(e) => setDisplay(e.target.value)} style={{ width: '100%' }} />
           </div>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>邮箱</div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>{text('Email', '邮箱')}</div>
             <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: '100%' }} />
           </div>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>所在地</div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>{text('Location', '所在地')}</div>
             <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Shanghai · UTC+8" style={{ width: '100%' }} />
           </div>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>个人简介</div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>{text('Bio', '个人简介')}</div>
             <textarea className="input" rows={4} value={bio} onChange={(e) => setBio(e.target.value)} style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
-            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>纯文本 · 最多 500 字符</div>
+            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>{text('Plain text · 500 characters max', '纯文本 · 最多 500 字符')}</div>
           </div>
 
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 8 }}>管理员维护 · 仅可读</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 8 }}>{text('Admin Managed · Read Only', '管理员维护 · 仅可读')}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             {[
-              { label: '用户名', value: `@${readonly.username}`, mono: true },
-              { label: '角色', value: readonly.role || '—' },
-              { label: '主要团队', value: readonly.team || '—' },
-              { label: '加入时间', value: joinedDate },
+              { label: text('Username', '用户名'), value: `@${readonly.username}`, mono: true },
+              { label: text('Role', '角色'), value: readonly.role || '—' },
+              { label: text('Primary Team', '主要团队'), value: readonly.team || '—' },
+              { label: text('Joined', '加入时间'), value: joinedDate },
             ].map((f) => (
               <div key={f.label}>
                 <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>{f.label}</div>
@@ -767,9 +819,9 @@ function EditProfileModal({
           {err && <div style={{ color: 'var(--red-text)', fontSize: 12.5 }}>{err}</div>}
         </div>
         <div style={{ padding: '14px 22px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8, background: 'var(--bg-soft)' }}>
-          <button className="btn" onClick={onClose} disabled={busy}>取消</button>
+          <button className="btn" onClick={onClose} disabled={busy}>{text('Cancel', '取消')}</button>
           <button className="btn primary" onClick={save} disabled={busy}>
-            {busy ? '保存中...' : '保存修改'}
+            {busy ? text('Saving...', '保存中...') : text('Save Changes', '保存修改')}
           </button>
         </div>
       </div>
@@ -781,6 +833,9 @@ function EditProfileModal({
 // Password change card (shown in settings tab, max-width 560)
 // ---------------------------------------------------------------------------
 function ChangePasswordCard() {
+  const { i18n } = useTranslation();
+  const isEnglish = (i18n.resolvedLanguage ?? i18n.language ?? '').startsWith('en');
+  const text = (en: string, zh: string) => (isEnglish ? en : zh);
   const [oldPwd, setOldPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -789,8 +844,8 @@ function ChangePasswordCard() {
   const [ok, setOk] = useState(false);
 
   async function submit() {
-    if (newPwd.length < 6) { setErr('新密码至少 6 位'); return; }
-    if (newPwd !== confirm) { setErr('两次输入的新密码不一致'); return; }
+    if (newPwd.length < 6) { setErr(text('New password must be at least 6 characters', '新密码至少 6 位')); return; }
+    if (newPwd !== confirm) { setErr(text('New passwords do not match', '两次输入的新密码不一致')); return; }
     setBusy(true); setErr(null); setOk(false);
     try {
       await api.changePassword(oldPwd, newPwd);
@@ -806,13 +861,13 @@ function ChangePasswordCard() {
   return (
     <div className="card" style={{ maxWidth: 560 }}>
       <div className="card-header">
-        <h3 className="card-title">修改密码</h3>
+        <h3 className="card-title">{text('Change Password', '修改密码')}</h3>
       </div>
       <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {[
-          { label: '当前密码', value: oldPwd, set: setOldPwd },
-          { label: '新密码（至少 6 位）', value: newPwd, set: setNewPwd },
-          { label: '确认新密码', value: confirm, set: setConfirm },
+          { label: text('Current Password', '当前密码'), value: oldPwd, set: setOldPwd },
+          { label: text('New Password (at least 6 characters)', '新密码（至少 6 位）'), value: newPwd, set: setNewPwd },
+          { label: text('Confirm New Password', '确认新密码'), value: confirm, set: setConfirm },
         ].map((f) => (
           <div key={f.label}>
             <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>{f.label}</div>
@@ -827,10 +882,10 @@ function ChangePasswordCard() {
           </div>
         ))}
         {err && <div style={{ color: 'var(--red-text)', fontSize: 12.5 }}>{err}</div>}
-        {ok && <div style={{ color: 'var(--green-text)', fontSize: 12.5 }}>密码已修改成功</div>}
+        {ok && <div style={{ color: 'var(--green-text)', fontSize: 12.5 }}>{text('Password changed successfully', '密码已修改成功')}</div>}
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button className="btn primary" onClick={submit} disabled={busy || !oldPwd || !newPwd || !confirm}>
-            {busy ? '保存中...' : '保存新密码'}
+            {busy ? text('Saving...', '保存中...') : text('Save New Password', '保存新密码')}
           </button>
         </div>
       </div>

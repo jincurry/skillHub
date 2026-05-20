@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { IconXCircle, IconAlertTriangle } from './Icons';
@@ -33,6 +34,9 @@ type Row = {
  * the admin can retry by reopening the modal after a refresh.
  */
 export function CleanNamespaceModal({ ns, onClose, onDeleted }: Props) {
+  const { i18n } = useTranslation();
+  const isEnglish = (i18n.resolvedLanguage ?? i18n.language ?? '').startsWith('en');
+  const text = (en: string, zh: string) => (isEnglish ? en : zh);
   const skills = useAsync(
     () => api.listSkills({ ns }),
     [ns],
@@ -93,7 +97,7 @@ export function CleanNamespaceModal({ ns, onClose, onDeleted }: Props) {
     }
 
     if (anyFailed) {
-      setGlobalError('部分 Skill 删除失败，请排查后重试。');
+      setGlobalError(text('Some skills could not be deleted. Please investigate and retry.', '部分 Skill 删除失败，请排查后重试。'));
       setBusy(false);
       return;
     }
@@ -106,7 +110,7 @@ export function CleanNamespaceModal({ ns, onClose, onDeleted }: Props) {
       // Close after a short delay so the admin sees the success state.
       window.setTimeout(onDeleted, 900);
     } catch (e) {
-      setGlobalError('命名空间删除失败：' + (e as Error).message);
+      setGlobalError(text('Namespace delete failed: ', '命名空间删除失败：') + (e as Error).message);
       setBusy(false);
     }
   }
@@ -130,7 +134,7 @@ export function CleanNamespaceModal({ ns, onClose, onDeleted }: Props) {
         {/* Header ----------------------------------------------------- */}
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
-            清空并删除命名空间 <span className="mono" style={{ marginLeft: 6, color: 'var(--red-text)' }}>{ns}</span>
+            {text('Clean and delete namespace', '清空并删除命名空间')} <span className="mono" style={{ marginLeft: 6, color: 'var(--red-text)' }}>{ns}</span>
           </h3>
           <button className="btn sm ghost" onClick={onClose} disabled={busy}>
             <IconXCircle size={14} />
@@ -141,22 +145,25 @@ export function CleanNamespaceModal({ ns, onClose, onDeleted }: Props) {
         <div style={{ padding: '12px 18px', background: 'var(--red-bg)', color: 'var(--red-text)', display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 12.5, lineHeight: 1.55 }}>
           <IconAlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
           <div>
-            此操作将 <b>永久删除</b> 选中的 Skill 及其所有版本、文件、评分、审批请求、评论、审批文件快照、每日指标、相关通知。
-            audit_logs 会保留，以便事后追查。
+            {isEnglish ? (
+              <>This will <b>permanently delete</b> the selected skills and all versions, files, ratings, review requests, comments, review snapshots, daily metrics, and related notifications. audit_logs are kept for later investigation.</>
+            ) : (
+              <>此操作将 <b>永久删除</b> 选中的 Skill 及其所有版本、文件、评分、审批请求、评论、审批文件快照、每日指标、相关通知。audit_logs 会保留，以便事后追查。</>
+            )}
           </div>
         </div>
 
         {/* Skill list ------------------------------------------------ */}
         <div style={{ flex: 1, overflow: 'auto', padding: '12px 18px' }}>
           {skills.loading && (
-            <div style={{ color: 'var(--text-subtle)', fontSize: 13 }}>加载 Skill 列表...</div>
+            <div style={{ color: 'var(--text-subtle)', fontSize: 13 }}>{text('Loading skill list...', '加载 Skill 列表...')}</div>
           )}
           {skills.error && (
             <div style={{ color: 'var(--red-text)', fontSize: 13 }}>{skills.error.message}</div>
           )}
           {!skills.loading && list.length === 0 && (
             <div style={{ color: 'var(--text-subtle)', fontSize: 13 }}>
-              命名空间已经空了，可以直接执行下方"确认"即可删除它。
+              {text('This namespace is already empty. You can confirm below to delete it.', '命名空间已经空了，可以直接执行下方"确认"即可删除它。')}
             </div>
           )}
           {list.length > 0 && (
@@ -174,7 +181,7 @@ export function CleanNamespaceModal({ ns, onClose, onDeleted }: Props) {
                       setChecked(next);
                     }}
                   />
-                  <span>全选 <span className="num" style={{ color: 'var(--text-subtle)' }}>({selected.length}/{list.length})</span></span>
+                  <span>{text('Select all', '全选')} <span className="num" style={{ color: 'var(--text-subtle)' }}>({selected.length}/{list.length})</span></span>
                 </label>
               </div>
               <div style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
@@ -203,7 +210,7 @@ export function CleanNamespaceModal({ ns, onClose, onDeleted }: Props) {
                       <span className="mono" style={{ flex: 1, fontSize: 12.5, fontWeight: 500 }}>{s.name}</span>
                       <StatusPill status={s.status} />
                       <span style={{ fontSize: 11, color: 'var(--text-faint)', width: 70, textAlign: 'right' }}>
-                        {statusLabel(row?.status)}
+                        {statusLabel(row?.status, isEnglish)}
                       </span>
                     </label>
                   );
@@ -223,9 +230,9 @@ export function CleanNamespaceModal({ ns, onClose, onDeleted }: Props) {
         <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <label style={{ fontSize: 12, color: 'var(--text-subtle)', display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span>
-              继续前，请输入命名空间 id
+              {text('Before continuing, enter namespace id', '继续前，请输入命名空间 id')}
               <span className="mono" style={{ margin: '0 4px', color: 'var(--red-text)' }}>{ns}</span>
-              以确认：
+              {text('to confirm:', '以确认：')}
             </span>
             <input
               className="input"
@@ -242,18 +249,22 @@ export function CleanNamespaceModal({ ns, onClose, onDeleted }: Props) {
           )}
           {allDone && (
             <div style={{ fontSize: 12.5, color: 'var(--green-text)' }}>
-              ✓ 命名空间已清空并删除。即将关闭...
+              {text('✓ Namespace cleaned and deleted. Closing soon...', '✓ 命名空间已清空并删除。即将关闭...')}
             </div>
           )}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <button className="btn" onClick={onClose} disabled={busy}>取消</button>
+            <button className="btn" onClick={onClose} disabled={busy}>{text('Cancel', '取消')}</button>
             <button
               className="btn"
               disabled={!canSubmit}
               style={canSubmit ? { background: 'var(--red)', color: '#fff', borderColor: 'var(--red)' } : undefined}
               onClick={submit}
             >
-              {busy ? '处理中...' : list.length === 0 ? '删除命名空间' : `删除 ${selected.length} 个 Skill 并移除命名空间`}
+              {busy
+                ? text('Processing...', '处理中...')
+                : list.length === 0
+                  ? text('Delete Namespace', '删除命名空间')
+                  : text(`Delete ${selected.length} skills and remove namespace`, `删除 ${selected.length} 个 Skill 并移除命名空间`)}
             </button>
           </div>
         </div>
@@ -262,11 +273,11 @@ export function CleanNamespaceModal({ ns, onClose, onDeleted }: Props) {
   );
 }
 
-function statusLabel(s?: Row['status']): string {
+function statusLabel(s: Row['status'] | undefined, isEnglish: boolean): string {
   switch (s) {
-    case 'running': return '删除中...';
-    case 'done': return '✓ 已删除';
-    case 'failed': return '✗ 失败';
+    case 'running': return isEnglish ? 'Deleting...' : '删除中...';
+    case 'done': return isEnglish ? '✓ Deleted' : '✓ 已删除';
+    case 'failed': return isEnglish ? '✗ Failed' : '✗ 失败';
     default: return '';
   }
 }

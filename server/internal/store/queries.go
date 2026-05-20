@@ -137,7 +137,7 @@ func (s *Store) CreateSkill(req model.CreateSkillRequest, author string) (*model
 	_, _ = s.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
 		author, "create_draft", req.Namespace+"/"+req.Name, "v0.1.0", "127.0.0.1")
 	// Seed the bundle. With a templateId, render the named template; otherwise
-	// fall back to the default SKILL.md / skill.yaml / README.md trio. Both
+	// fall back to the default SKILL.md / skill.yaml pair. Both
 	// paths are best-effort: a seeding error doesn't block skill creation
 	// since the row is already committed.
 	if req.TemplateID != "" {
@@ -904,7 +904,7 @@ func snapshotReviewFiles(tx *sql.Tx, reviewID int64, ns, name string) error {
 	}
 	prevContents := map[string]string{}
 	if prevID != 0 {
-		rows, err := tx.Query(`SELECT path, new_content FROM review_files WHERE review_id = ?`, prevID)
+		rows, err := tx.Query(`SELECT path, new_content FROM review_files WHERE review_id = ? AND lower(path) <> 'readme.md'`, prevID)
 		if err != nil {
 			return err
 		}
@@ -920,7 +920,7 @@ func snapshotReviewFiles(tx *sql.Tx, reviewID int64, ns, name string) error {
 	}
 
 	// Step 2: pull every file currently in the bundle.
-	curRows, err := tx.Query(`SELECT path, content FROM skill_files WHERE ns = ? AND skill_name = ?`, ns, name)
+	curRows, err := tx.Query(`SELECT path, content FROM skill_files WHERE ns = ? AND skill_name = ? AND lower(path) <> 'readme.md'`, ns, name)
 	if err != nil {
 		return err
 	}
@@ -971,7 +971,9 @@ func snapshotReviewFiles(tx *sql.Tx, reviewID int64, ns, name string) error {
 // existed).
 func (s *Store) ListReviewFiles(reviewID int64) ([]model.ReviewFile, error) {
 	rows, err := s.DB.Query(`SELECT path, base_content, new_content, change_kind
-		FROM review_files WHERE review_id = ? ORDER BY path`, reviewID)
+		FROM review_files
+		WHERE review_id = ? AND lower(path) <> 'readme.md'
+		ORDER BY path`, reviewID)
 	if err != nil {
 		return nil, err
 	}
@@ -994,11 +996,11 @@ func (s *Store) ListReviewFiles(reviewID int64) ([]model.ReviewFile, error) {
 // synchronously on page load.
 func (s *Store) GetPlatformMetrics() (*model.PlatformMetrics, error) {
 	m := &model.PlatformMetrics{
-		SkillsByStatus:    map[string]int{},
-		ReviewsByStatus:   map[string]int{},
-		ActivationsTrend:  []model.TrendPoint{},
-		RecentAudit:       []model.AuditLog{},
-		AvgDecisionHours:  -1,
+		SkillsByStatus:   map[string]int{},
+		ReviewsByStatus:  map[string]int{},
+		ActivationsTrend: []model.TrendPoint{},
+		RecentAudit:      []model.AuditLog{},
+		AvgDecisionHours: -1,
 	}
 
 	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&m.Users)

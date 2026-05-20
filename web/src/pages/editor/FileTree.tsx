@@ -3,6 +3,7 @@ import { IconChevronDown, IconChevronRight, IconPencil } from '../../components/
 import type { SkillFile } from '../../api/types';
 import { REQUIRED_FILES, STD_DIRS, STD_DIR_KEYS } from './constants';
 import { dirIconFor, iconFor } from './helpers';
+import { useLocaleText } from '../../i18n/useLocaleText';
 
 export interface TreeNode {
   name: string;
@@ -62,6 +63,7 @@ function FileTreeImpl({
   onRename: (oldPath: string, newPath: string) => Promise<boolean>;
   canEdit: boolean;
 }) {
+  const { text } = useLocaleText();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Path currently being inline-renamed (null = none).
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -120,7 +122,9 @@ function FileTreeImpl({
               className="file-row dir"
               style={{ paddingLeft: 8 + depth * 16, color: isStdDir ? 'var(--primary)' : undefined }}
               onClick={() => toggle(n.path)}
-              title={isStdDir ? `推荐目录 · ${STD_DIRS.find((d) => d.key === n.name)?.desc ?? ''}` : n.path}
+              title={isStdDir
+                ? text(`Recommended directory · ${n.name}/`, `推荐目录 · ${STD_DIRS.find((d) => d.key === n.name)?.desc ?? ''}`)
+                : n.path}
             >
               {isOpen ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
               <span style={{ marginRight: 2 }}>{dirIconFor(n.name)}</span>
@@ -171,7 +175,7 @@ function FileTreeImpl({
               style={{ height: 22, padding: '0 6px', fontSize: 11 }}
               disabled={renameBusy}
               onClick={(e) => { e.stopPropagation(); cancelRename(); }}
-            >取消</button>
+            >{text('Cancel', '取消')}</button>
           </div>
           {renameErr && (
             <div style={{ marginTop: 4, fontSize: 11, color: 'var(--red-text, #b91c1c)' }}>{renameErr}</div>
@@ -191,19 +195,19 @@ function FileTreeImpl({
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {n.name}
         </span>
-        {dirty && <span className="file-status M" title="未保存">M</span>}
+        {dirty && <span className="file-status M" title={text('Unsaved', '未保存')}>M</span>}
         {canEdit && !required && (
           <>
             <button
               className="btn sm ghost"
               style={{ padding: '0 4px', height: 18, minWidth: 0, opacity: 0.5 }}
-              title={`重命名 ${n.path}`}
+              title={text(`Rename ${n.path}`, `重命名 ${n.path}`)}
               onClick={(e) => { e.stopPropagation(); startRename(n.path); }}
             ><IconPencil size={11} /></button>
             <button
               className="btn sm ghost"
               style={{ padding: '0 4px', height: 18, minWidth: 0, fontSize: 11, opacity: 0.5 }}
-              title={`删除 ${n.path}`}
+              title={text(`Delete ${n.path}`, `删除 ${n.path}`)}
               onClick={(e) => { e.stopPropagation(); onDelete(n.path); }}
             >×</button>
           </>

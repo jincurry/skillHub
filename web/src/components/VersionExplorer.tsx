@@ -4,9 +4,10 @@ import { DiffEditor } from '@monaco-editor/react';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import { renderMarkdown } from '../lib/markdown';
-import { languageFor } from '../lib/files';
+import { languageFor, shouldDisplaySkillFile } from '../lib/files';
 import type { SkillVersion } from '../api/types';
 import { IconXCircle, IconFile, IconChevronRight } from './Icons';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 interface Props {
   ns: string;
@@ -18,18 +19,19 @@ interface Props {
 // Status → tag color/label, mirrors the inline mapping that used to live in
 // SkillDetail. Keeping a single source of truth here so this component is
 // self-contained.
-function statusTag(s: string): { cls: string; label: string } {
+function statusTag(s: string, text: (en: string, zh: string) => string): { cls: string; label: string } {
   switch (s) {
-    case 'published':         return { cls: 'green',  label: '已发布' };
-    case 'review':            return { cls: 'amber',  label: '审批中' };
-    case 'changes_requested': return { cls: 'amber',  label: '需修改' };
-    case 'rejected':          return { cls: 'red',    label: '已驳回' };
-    case 'approved':          return { cls: 'green',  label: '已通过' };
+    case 'published':         return { cls: 'green',  label: text('Published', '已发布') };
+    case 'review':            return { cls: 'amber',  label: text('In Review', '审批中') };
+    case 'changes_requested': return { cls: 'amber',  label: text('Changes Requested', '需修改') };
+    case 'rejected':          return { cls: 'red',    label: text('Rejected', '已驳回') };
+    case 'approved':          return { cls: 'green',  label: text('Approved', '已通过') };
     default:                  return { cls: 'indigo', label: s };
   }
 }
 
 export function VersionExplorer({ ns, name, versions, latestVersion }: Props) {
+  const { text, locale } = useLocaleText();
   const navigate = useNavigate();
   const [mode, setMode] = useState<'list' | 'compare'>('list');
   // Compare-mode selection: at most 2 version ids in insertion order.
@@ -71,7 +73,7 @@ export function VersionExplorer({ ns, name, versions, latestVersion }: Props) {
     return (
       <div className="card">
         <div className="card-body" style={{ padding: 16, color: 'var(--text-subtle)', fontSize: 13 }}>
-          暂无版本记录
+          {text('No version records yet', '暂无版本记录')}
         </div>
       </div>
     );
@@ -88,14 +90,14 @@ export function VersionExplorer({ ns, name, versions, latestVersion }: Props) {
                 className={`btn sm ${mode === 'list' ? 'primary' : 'ghost'}`}
                 onClick={() => { setMode('list'); setSelected([]); }}
                 style={{ fontSize: 12 }}
-              >列表</button>
+              >{text('List', '列表')}</button>
               <button
                 type="button"
                 className={`btn sm ${mode === 'compare' ? 'primary' : 'ghost'}`}
                 onClick={() => { setMode('compare'); setSelected([]); }}
                 style={{ fontSize: 12 }}
-                title="勾选两个版本进行 diff 对比"
-              >对比</button>
+                title={text('Select two versions to compare the diff', '勾选两个版本进行 diff 对比')}
+              >{text('Compare', '对比')}</button>
             </div>
             {mode === 'compare' ? (
               <button
@@ -103,13 +105,13 @@ export function VersionExplorer({ ns, name, versions, latestVersion }: Props) {
                 className="btn sm primary"
                 disabled={selected.length !== 2}
                 onClick={openDiff}
-                title={selected.length === 2 ? '查看两个版本的 diff' : '请选择 2 个版本'}
+                title={selected.length === 2 ? text('View diff between two versions', '查看两个版本的 diff') : text('Select 2 versions', '请选择 2 个版本')}
               >
-                对比所选 ({selected.length}/2)
+                {text('Compare Selected', '对比所选')} ({selected.length}/2)
               </button>
             ) : (
               <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-                共 {versions.length} 个版本
+                {text(`${versions.length} versions total`, `共 ${versions.length} 个版本`)}
               </div>
             )}
           </div>
@@ -117,7 +119,7 @@ export function VersionExplorer({ ns, name, versions, latestVersion }: Props) {
           <div className="timeline">
             {versions.map((v) => {
               const isLatest = v.version === latestVersion;
-              const t = statusTag(v.status);
+              const t = statusTag(v.status, text);
               const canSnapshot = v.reviewId > 0;
               const isSelected = selected.includes(v.id);
               return (
@@ -134,7 +136,7 @@ export function VersionExplorer({ ns, name, versions, latestVersion }: Props) {
                           checked={isSelected}
                           disabled={!canSnapshot}
                           onChange={(e) => toggleSelect(v.id, e.target.checked)}
-                          title={canSnapshot ? '勾选以加入对比' : '此版本没有文件快照'}
+                          title={canSnapshot ? text('Select for comparison', '勾选以加入对比') : text('This version has no file snapshot', '此版本没有文件快照')}
                           style={{ marginRight: 2 }}
                         />
                       )}
@@ -146,7 +148,7 @@ export function VersionExplorer({ ns, name, versions, latestVersion }: Props) {
                           className="mono"
                           style={{ fontSize: 11, color: 'var(--primary)', cursor: 'pointer' }}
                           onClick={() => navigate(`/reviews/${v.reviewId}`)}
-                        >→ 审批 #{v.reviewId}</span>
+                        >→ {text('Review', '审批')} #{v.reviewId}</span>
                       )}
                       <div style={{ flex: 1 }} />
                       {mode === 'list' && (
@@ -155,13 +157,13 @@ export function VersionExplorer({ ns, name, versions, latestVersion }: Props) {
                           className="btn sm ghost"
                           disabled={!canSnapshot}
                           onClick={() => setViewing(v)}
-                          title={canSnapshot ? '查看此版本的文件快照' : '此版本没有文件快照'}
+                          title={canSnapshot ? text('View this version file snapshot', '查看此版本的文件快照') : text('This version has no file snapshot', '此版本没有文件快照')}
                           style={{ fontSize: 11, padding: '2px 10px' }}
-                        >查看文件</button>
+                        >{text('View Files', '查看文件')}</button>
                       )}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 2 }}>
-                      <span className="mono">@{v.author}</span> · {new Date(v.createdAt).toLocaleString()}
+                      <span className="mono">@{v.author}</span> · {new Date(v.createdAt).toLocaleString(locale)}
                     </div>
                     {v.note && (
                       <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>{v.note}</div>
@@ -194,39 +196,44 @@ function VersionFilesModal({
   name: string;
   onClose: () => void;
 }) {
+  const { text, locale } = useLocaleText();
   // The review_files snapshot is keyed by reviewId. We show new_content
   // (i.e. the bundle as it existed at that submission). base_content would
   // show the bundle *before* this submission and isn't useful here.
   const files = useAsync(() => api.listReviewFiles(version.reviewId), [version.reviewId]);
   const [activePath, setActivePath] = useState<string | null>(null);
+  const displayFiles = useMemo(
+    () => (files.data ?? []).filter((f) => shouldDisplaySkillFile(f.path)),
+    [files.data],
+  );
 
   // Pick a sensible default file once the listing comes back. SKILL.md is
   // the most useful read; otherwise the first path alphabetically.
   useEffect(() => {
-    if (!files.data || files.data.length === 0) return;
-    if (activePath && files.data.some((f) => f.path === activePath)) return;
-    const preferred = ['SKILL.md', 'README.md', 'skill.yaml'];
+    if (!files.data || displayFiles.length === 0) return;
+    if (activePath && displayFiles.some((f) => f.path === activePath)) return;
+    const preferred = ['SKILL.md', 'skill.yaml'];
     const pick =
-      preferred.find((p) => files.data!.some((f) => f.path === p)) ??
-      files.data.find((f) => f.changeKind !== 'deleted')?.path ??
-      files.data[0].path;
+      preferred.find((p) => displayFiles.some((f) => f.path === p)) ??
+      displayFiles.find((f) => f.changeKind !== 'deleted')?.path ??
+      displayFiles[0].path;
     setActivePath(pick);
-  }, [files.data, activePath]);
+  }, [files.data, displayFiles, activePath]);
 
-  const active = activePath ? files.data?.find((f) => f.path === activePath) ?? null : null;
-  const t = statusTag(version.status);
+  const active = activePath ? displayFiles.find((f) => f.path === activePath) ?? null : null;
+  const t = statusTag(version.status, text);
 
   return (
-    <ModalShell title={`v${version.version} · ${t.label}`} subtitle={`@${version.author} · ${new Date(version.createdAt).toLocaleString()}`} onClose={onClose} wide>
+    <ModalShell title={`v${version.version} · ${t.label}`} subtitle={`@${version.author} · ${new Date(version.createdAt).toLocaleString(locale)}`} onClose={onClose} wide>
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         {/* File list */}
         <div style={{ width: 240, borderRight: '1px solid var(--border)', overflow: 'auto', background: 'var(--bg-soft)' }}>
-          {files.loading && <div style={{ padding: 12, fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
+          {files.loading && <div style={{ padding: 12, fontSize: 12, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>}
           {files.error && <div style={{ padding: 12, fontSize: 12, color: 'var(--red-text)' }}>{files.error.message}</div>}
-          {files.data && files.data.length === 0 && (
-            <div style={{ padding: 12, fontSize: 12, color: 'var(--text-faint)' }}>此版本无文件快照</div>
+          {files.data && displayFiles.length === 0 && (
+            <div style={{ padding: 12, fontSize: 12, color: 'var(--text-faint)' }}>{text('This version has no file snapshot', '此版本无文件快照')}</div>
           )}
-          {(files.data ?? [])
+          {displayFiles
             .filter((f) => f.changeKind !== 'deleted')
             .map((f) => (
               <div
@@ -264,7 +271,7 @@ function VersionFilesModal({
             )
           ) : (
             <div style={{ color: 'var(--text-faint)', fontSize: 13, textAlign: 'center', paddingTop: 40 }}>
-              从左侧选择一个文件查看
+              {text('Select a file from the left to view', '从左侧选择一个文件查看')}
             </div>
           )}
         </div>
@@ -282,6 +289,7 @@ function VersionDiffModal({
   next: SkillVersion;
   onClose: () => void;
 }) {
+  const { text } = useLocaleText();
   // Fetch both versions in parallel. We only care about new_content from each
   // side; base_content (from review_files) is the previous-approved bundle,
   // which doesn't help us compare two arbitrary versions.
@@ -316,7 +324,10 @@ function VersionDiffModal({
       .map(([path, info]) => ({ path, ...info }));
   }, [baseFiles.data, nextFiles.data]);
 
-  const changedOnly = useMemo(() => merged.filter((m) => m.kind !== 'unchanged'), [merged]);
+  const changedOnly = useMemo(
+    () => merged.filter((m) => m.kind !== 'unchanged' && shouldDisplaySkillFile(m.path)),
+    [merged],
+  );
   const [activePath, setActivePath] = useState<string | null>(null);
 
   useEffect(() => {
@@ -325,7 +336,7 @@ function VersionDiffModal({
       setActivePath(null);
       return;
     }
-    const preferred = ['SKILL.md', 'README.md', 'skill.yaml'];
+    const preferred = ['SKILL.md', 'skill.yaml'];
     const pick = preferred.find((p) => changedOnly.some((m) => m.path === p)) ?? changedOnly[0].path;
     setActivePath(pick);
   }, [changedOnly, activePath]);
@@ -338,21 +349,21 @@ function VersionDiffModal({
     <ModalShell
       title={
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          对比 <span className="mono" style={{ color: 'var(--text-faint)' }}>v{base.version}</span>
+          {text('Compare', '对比')} <span className="mono" style={{ color: 'var(--text-faint)' }}>v{base.version}</span>
           <IconChevronRight size={12} />
           <span className="mono" style={{ color: 'var(--primary)' }}>v{next.version}</span>
         </span>
       }
-      subtitle={`${changedOnly.length} 个变更文件`}
+      subtitle={text(`${changedOnly.length} changed files`, `${changedOnly.length} 个变更文件`)}
       onClose={onClose}
       wide
     >
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div style={{ width: 260, borderRight: '1px solid var(--border)', overflow: 'auto', background: 'var(--bg-soft)' }}>
-          {loading && <div style={{ padding: 12, fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
+          {loading && <div style={{ padding: 12, fontSize: 12, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>}
           {err && <div style={{ padding: 12, fontSize: 12, color: 'var(--red-text)' }}>{err.message}</div>}
           {!loading && !err && changedOnly.length === 0 && (
-            <div style={{ padding: 12, fontSize: 12, color: 'var(--text-faint)' }}>两版本无差异</div>
+            <div style={{ padding: 12, fontSize: 12, color: 'var(--text-faint)' }}>{text('No differences between these versions', '两版本无差异')}</div>
           )}
           {changedOnly.map((m) => {
             const tag =
@@ -400,7 +411,7 @@ function VersionDiffModal({
             />
           ) : (
             <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-faint)' }}>
-              {loading ? '加载中...' : '选择左侧文件查看 diff'}
+              {loading ? text('Loading...', '加载中...') : text('Select a file on the left to view diff', '选择左侧文件查看 diff')}
             </div>
           )}
         </div>
@@ -420,6 +431,7 @@ function ModalShell({
   children: React.ReactNode;
   wide?: boolean;
 }) {
+  const { text } = useLocaleText();
   return (
     <div
       onClick={onClose}
@@ -456,7 +468,7 @@ function ModalShell({
           <button
             type="button"
             onClick={onClose}
-            title="关闭"
+            title={text('Close', '关闭')}
             style={{
               border: 'none', background: 'transparent',
               padding: 4, color: 'var(--text-muted)', cursor: 'pointer',

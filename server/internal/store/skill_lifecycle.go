@@ -45,6 +45,7 @@ func bumpedVersion(v string) string {
 // open a new editable draft. The current skill row is mutated in place:
 //   - status        → 'draft'
 //   - version       → newVersion (or auto-bumped if empty)
+//
 // The previous published version stays in skill_versions for audit/diff.
 //
 // Validation:
@@ -269,7 +270,9 @@ func (s *Store) ListSkillFilesAtVersion(ns, name, version string) ([]model.Skill
 		return nil, err
 	}
 	rows, err := s.DB.Query(`SELECT path, new_content
-		FROM review_files WHERE review_id = ? ORDER BY path`, reviewID)
+		FROM review_files
+		WHERE review_id = ? AND lower(path) <> 'readme.md'
+		ORDER BY path`, reviewID)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +294,9 @@ func (s *Store) ListSkillFilesAtVersion(ns, name, version string) ([]model.Skill
 // ListSkillFiles so directory traversal is deterministic.
 func (s *Store) ListSkillFilesWithContent(ns, name string) ([]model.SkillFile, error) {
 	rows, err := s.DB.Query(`SELECT path, content, size, updated_at, updated_by
-		FROM skill_files WHERE ns=? AND skill_name=? ORDER BY path`, ns, name)
+		FROM skill_files
+		WHERE ns=? AND skill_name=? AND lower(path) <> 'readme.md'
+		ORDER BY path`, ns, name)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +380,7 @@ func (s *Store) RollbackToVersion(ns, name, target, reason, actor string) (*mode
 	// Pull the snapshot from review_files. Use new_content (the body the
 	// author submitted at that review) as the canonical state of the file
 	// at that version.
-	rows, err := tx.Query(`SELECT path, new_content FROM review_files WHERE review_id = ?`, reviewID)
+	rows, err := tx.Query(`SELECT path, new_content FROM review_files WHERE review_id = ? AND lower(path) <> 'readme.md'`, reviewID)
 	if err != nil {
 		return nil, err
 	}

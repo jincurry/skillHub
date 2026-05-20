@@ -113,13 +113,12 @@ func (s *Store) seedIfEmpty() error {
 
 	type seedSkill struct {
 		ns, name, desc, longDesc, icon, iconClass, classification, status, version, author string
-		rating                                                                              float64
-		ratings, activations, delta                                                         int
-		hot                                                                                 bool
-		tags                                                                                []string
+		rating                                                                             float64
+		ratings, activations, delta                                                        int
+		hot                                                                                bool
+		tags                                                                               []string
 	}
 	const goReviewReadme = "## 概述\n\n`go-code-review` 在 PR 合并前对 Go 代码做静态检查 — 错误处理、并发安全、idiomatic 模式、Go 1.21+ generics 边界。\n\n## 何时使用\n\n- 想在 review 前自动捕获常见漏洞\n- 团队有明确的代码风格指引\n\n## 使用示例\n\n```bash\nskillhub run go-code-review --diff origin/main\n```\n\n## 注意事项\n\n* 不会跑测试,只做静态分析\n* 警告级别可在 `.skillhub/config.yaml` 调整\n"
-	const goReviewReadmeMD = "# go-code-review\n\nReview Go code for bugs, idiomatic patterns, error handling, and Go 1.21+ generics usage.\n\n## 用法\n\n```bash\nskillhub run go-code-review --diff origin/main\n```\n\n## 规则\n\n- error-wrap: 检查 error 返回是否带上下文\n- nil-deref: 检查指针解引用前的 nil 判断\n- generics-bounds: Go 1.21+ generics 类型约束\n"
 	const sqlExplainReadme = "## 概述\n\n解析 SQL 执行计划,标记慢查询、缺失索引、笛卡尔积,并给出改写建议。支持 PostgreSQL / MySQL / Snowflake。\n\n## 适用场景\n\n* DBA 复盘事故\n* 应用工程师在 PR 中带上 query plan 自检\n\n## 使用示例\n\n```sql\nEXPLAIN ANALYZE SELECT ...\n```\n"
 	skills := []seedSkill{
 		{"platform-team", "go-code-review", "Review Go code for bugs, idiomatic patterns, error handling, and Go 1.21+ generics usage.", goReviewReadme, "Go", "blue", "L2", "published", "1.2.3", "alice", 4.3, 87, 1234, 12, true, []string{"go", "review", "lint"}},
@@ -159,15 +158,13 @@ func (s *Store) seedIfEmpty() error {
 	}
 
 	// Seed bundle files for every skill so the editor opens to real content
-	// even on the freshly-seeded demo DB. Each gets skill.yaml + README.md;
-	// go-code-review additionally ships a small rules/ folder so the tree has
-	// a non-trivial shape.
+	// even on the freshly-seeded demo DB. go-code-review additionally ships a
+	// small rules/ folder so the tree has a non-trivial shape.
 	type seedFile struct {
 		ns, name, path, content string
 	}
 	files := []seedFile{
 		{"platform-team", "go-code-review", "skill.yaml", "name: go-code-review\nversion: \"1.2.3\"\nnamespace: platform-team\nclassification: L2\n\ndescription: |\n  Review Go code for bugs, idiomatic patterns, error handling, and Go 1.21+\n  generics usage.\n\nruntime:\n  image: \"alpine:3.19\"\n  timeout: 60s\n  memory: \"512Mi\"\n\ntags: [go, review, lint]\n\ninputs:\n  - name: diff\n    type: string\n    required: true\n"},
-		{"platform-team", "go-code-review", "README.md", goReviewReadmeMD},
 		{"platform-team", "go-code-review", "rules/error-wrap.go", "package rules\n\n// ErrorWrapRule flags errors returned without wrapping context.\nfunc ErrorWrapRule(node Node) []Issue {\n\t// TODO: walk return statements\n\treturn nil\n}\n"},
 		{"platform-team", "go-code-review", "rules/nil-deref.go", "package rules\n\n// NilDerefRule flags pointer dereferences without nil checks.\nfunc NilDerefRule(node Node) []Issue { return nil }\n"},
 		{"platform-team", "go-code-review", "tests/fixtures.go", "package rules\n\n// minimal test fixtures\nvar fixtures = []string{\n\t\"return err\",\n\t\"return nil\",\n}\n"},

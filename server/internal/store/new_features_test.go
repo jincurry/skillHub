@@ -256,6 +256,20 @@ func TestUpdateSkillMeta_Tags(t *testing.T) {
 	}
 }
 
+func TestUpdateSkillMeta_RejectsVersion(t *testing.T) {
+	s := newTestStore(t)
+	ns, name := seedBasicWorld(t, s)
+
+	version := "9.9.9"
+	_, err := s.UpdateSkillMeta(ns, name, model.UpdateSkillMetaRequest{Version: &version})
+	if err == nil {
+		t.Fatal("expected error for metadata version update, got nil")
+	}
+	if !strings.Contains(err.Error(), "version cannot be updated") {
+		t.Errorf("error = %q, want version rejection", err)
+	}
+}
+
 func TestUpdateSkillMeta_SkillNotFound(t *testing.T) {
 	s := newTestStore(t)
 	desc := "x"

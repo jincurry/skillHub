@@ -8,6 +8,7 @@ import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import type { Review } from '../api/types';
 import { SkillIcon } from '../components/SkillIcon';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 function csvEscape(s: string): string {
   if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
@@ -61,6 +62,7 @@ const URGENCY_BG: Record<Review['urgency'], { bg: string; color: string }> = {
 //   ?mine=1                                  (only reviews where I'm author or reviewer)
 // The page mirrors any UI changes back to the URL so refresh / back keep state.
 export function Reviews() {
+  const { text, locale } = useLocaleText();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -123,34 +125,34 @@ export function Reviews() {
     <div className="content-inner">
       <div className="page-header">
         <div>
-          <h1 className="page-title">审批中心</h1>
-          <p className="page-subtitle">作为 maintainer，你需要审核即将发布的 Skill 版本。SLA 按密级区分：L1 24h / L2 48h / L3 72h。</p>
+          <h1 className="page-title">{text('Review Center', '审批中心')}</h1>
+          <p className="page-subtitle">{text('As a maintainer, review Skill versions before release. SLA varies by classification: L1 24h / L2 48h / L3 72h.', '作为 maintainer，你需要审核即将发布的 Skill 版本。SLA 按密级区分：L1 24h / L2 48h / L3 72h。')}</p>
         </div>
         <div className="page-actions">
           <button
             className={`btn${mineOnly ? ' primary' : ''}`}
             onClick={() => setMineOnly((v) => !v)}
-            title={mineOnly ? '当前只显示与我相关的审批' : '只看作为作者或审批人的记录'}
+            title={mineOnly ? text('Currently showing only reviews related to me', '当前只显示与我相关的审批') : text('Show only records where I am author or reviewer', '只看作为作者或审批人的记录')}
           >
-            {mineOnly ? '✓ 我的视角' : '我的视角'}
+            {mineOnly ? text('✓ My View', '✓ 我的视角') : text('My View', '我的视角')}
           </button>
           <button
             className="btn"
             onClick={() => exportReviewsCSV(filtered)}
             disabled={filtered.length === 0}
           >
-            <IconDownload size={14} /> 导出当前视图 (CSV)
+            <IconDownload size={14} /> {text('Export Current View (CSV)', '导出当前视图 (CSV)')}
           </button>
         </div>
       </div>
 
       <div className="stat-strip" style={{ marginBottom: 'var(--gap)' }}>
         <div className="stat">
-          <div className="stat-label">总审批数</div>
+          <div className="stat-label">{text('Total Reviews', '总审批数')}</div>
           <div><span className="stat-value num">{stats.data?.total ?? counts.all}</span></div>
         </div>
         <div className="stat">
-          <div className="stat-label">平均审批耗时</div>
+          <div className="stat-label">{text('Avg. Review Time', '平均审批耗时')}</div>
           <div>
             <span className="stat-value num">
               {stats.data ? fmtHours(stats.data.avgDecisionHours) : '—'}
@@ -158,7 +160,7 @@ export function Reviews() {
           </div>
         </div>
         <div className="stat">
-          <div className="stat-label">SLA 达成率</div>
+          <div className="stat-label">{text('SLA Compliance', 'SLA 达成率')}</div>
           <div>
             <span className="stat-value num">
               {stats.data && (stats.data.approved + stats.data.rejected) > 0
@@ -168,7 +170,7 @@ export function Reviews() {
           </div>
         </div>
         <div className="stat">
-          <div className="stat-label">超时件数</div>
+          <div className="stat-label">{text('Overdue', '超时件数')}</div>
           <div>
             <span className="stat-value num" style={{ color: (stats.data?.overdue ?? 0) > 0 ? 'var(--red)' : undefined }}>
               {stats.data?.overdue ?? 0}
@@ -179,10 +181,10 @@ export function Reviews() {
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
         {([
-          { id: 'pending', label: '待审批', c: counts.pending },
-          { id: 'approved', label: '已批准', c: counts.approved },
-          { id: 'rejected', label: '已驳回', c: counts.rejected },
-          { id: 'all', label: '全部', c: counts.all },
+          { id: 'pending', label: text('Pending', '待审批'), c: counts.pending },
+          { id: 'approved', label: text('Approved', '已批准'), c: counts.approved },
+          { id: 'rejected', label: text('Rejected', '已驳回'), c: counts.rejected },
+          { id: 'all', label: text('All', '全部'), c: counts.all },
         ] as const).map((t) => (
           <button key={t.id} onClick={() => setFilter(t.id)} style={{
             padding: '6px 14px', height: 32,
@@ -208,12 +210,12 @@ export function Reviews() {
           <table className="tbl">
             <thead>
               <tr>
-                <th>Skill</th><th>密级</th><th>作者</th><th>Reviewers</th>
-                <th>提交时间</th><th>SLA</th><th></th>
+                <th>Skill</th><th>{text('Classification', '密级')}</th><th>{text('Author', '作者')}</th><th>Reviewers</th>
+                <th>{text('Submitted', '提交时间')}</th><th>SLA</th><th></th>
               </tr>
             </thead>
             <tbody>
-              {all.loading && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-subtle)' }}>加载中...</td></tr>}
+              {all.loading && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</td></tr>}
               {all.error && <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--red-text)' }}>{all.error.message}</td></tr>}
               {paginated.map((r) => (
                 <tr key={r.id} onClick={() => navigate(`/reviews/${r.id}`)}>
@@ -227,7 +229,7 @@ export function Reviews() {
                             <span
                               className="tag"
                               style={{ background: 'var(--red-bg)', color: 'var(--red-text)', fontSize: 10, fontWeight: 600 }}
-                              title={`Hotfix: ${r.hotfixReason || '未填写原因'}`}
+                              title={`Hotfix: ${r.hotfixReason || text('No reason provided', '未填写原因')}`}
                             >⚡ HOTFIX</span>
                           )}
                         </div>
@@ -242,7 +244,7 @@ export function Reviews() {
                       {r.reviewers.map((u, i) => <div key={u} className={`avatar sm bg-${(i % 5) + 1}`} title={u}>{u[0].toUpperCase()}</div>)}
                     </div>
                   </td>
-                  <td style={{ color: 'var(--text-subtle)', fontSize: 12.5 }}>{new Date(r.submittedAt).toLocaleString()}</td>
+                  <td style={{ color: 'var(--text-subtle)', fontSize: 12.5 }}>{new Date(r.submittedAt).toLocaleString(locale)}</td>
                   <td><span className="tag" style={{ background: URGENCY_BG[r.urgency].bg, color: URGENCY_BG[r.urgency].color }}>{r.sla}</span></td>
                   <td><IconChevronRight size={14} /></td>
                 </tr>
@@ -255,7 +257,7 @@ export function Reviews() {
             <button className="btn sm" disabled={page === 0} onClick={() => setPage(0)}>«</button>
             <button className="btn sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>‹</button>
             <span style={{ fontSize: 12.5, color: 'var(--text-subtle)', minWidth: 80, textAlign: 'center' }}>
-              {page + 1} / {totalPages}（共 {filtered.length} 条）
+              {text(`${page + 1} / ${totalPages} (${filtered.length} total)`, `${page + 1} / ${totalPages}（共 ${filtered.length} 条）`)}
             </span>
             <button className="btn sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>›</button>
             <button className="btn sm" disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>»</button>

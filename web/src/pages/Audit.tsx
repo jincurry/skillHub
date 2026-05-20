@@ -4,8 +4,9 @@ import {
   IconDownload, IconSearch, IconClock,
 } from '../components/Icons';
 import { api } from '../api/client';
-import { AUDIT_ACTION_COLOR } from '../lib/audit';
+import { AUDIT_ACTION_COLOR, auditActionLabel } from '../lib/audit';
 import type { AuditLog } from '../api/types';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 function csvEscape(s: string): string {
   if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
@@ -36,6 +37,7 @@ function exportCSV(rows: AuditLog[]) {
 }
 
 export function Audit() {
+  const { isEnglish, text, locale } = useLocaleText();
   const [params] = useSearchParams();
   const initialTarget = params.get('target') ?? '';
   const [q, setQ] = useState(initialTarget);
@@ -77,12 +79,12 @@ export function Audit() {
     <div className="content-inner">
       <div className="page-header">
         <div>
-          <h1 className="page-title">审计日志</h1>
-          <p className="page-subtitle">记录所有 skill 生命周期与审批动作，可按用户 / 动作 / 关键字检索。仅读，不可修改。</p>
+          <h1 className="page-title">{text('Audit Log', '审计日志')}</h1>
+          <p className="page-subtitle">{text('Records every skill lifecycle and review action. Search by user, action, or keyword. Read-only.', '记录所有 skill 生命周期与审批动作，可按用户 / 动作 / 关键字检索。仅读，不可修改。')}</p>
         </div>
         <div className="page-actions">
           <button className="btn" onClick={() => exportCSV(data)} disabled={data.length === 0}>
-            <IconDownload size={14} /> 导出 CSV
+            <IconDownload size={14} /> {text('Export CSV', '导出 CSV')}
           </button>
         </div>
       </div>
@@ -92,7 +94,7 @@ export function Audit() {
           <span className="icon-left"><IconSearch size={15} /></span>
           <input
             className="input with-icon"
-            placeholder="搜索 skill / 用户 / 动作..."
+            placeholder={text('Search skill / user / action...', '搜索 skill / 用户 / 动作...')}
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -103,8 +105,8 @@ export function Audit() {
           onChange={(e) => setAction(e.target.value)}
           style={{ height: 36, maxWidth: 200 }}
         >
-          <option value="">所有动作</option>
-          {actionOptions.map((a) => <option key={a} value={a}>{a}</option>)}
+          <option value="">{text('All actions', '所有动作')}</option>
+          {actionOptions.map((a) => <option key={a} value={a}>{auditActionLabel(a, isEnglish)}</option>)}
         </select>
         <select
           className="input"
@@ -112,39 +114,39 @@ export function Audit() {
           onChange={(e) => setActor(e.target.value)}
           style={{ height: 36, maxWidth: 200 }}
         >
-          <option value="">所有用户</option>
+          <option value="">{text('All users', '所有用户')}</option>
           {actorOptions.map((a) => <option key={a} value={a}>@{a}</option>)}
         </select>
         {(q || actor || action) && (
           <button
             className="btn sm ghost"
             onClick={() => { setQ(''); setActor(''); setAction(''); }}
-          >清空</button>
+          >{text('Clear', '清空')}</button>
         )}
         <span style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--text-subtle)' }}>
-          <IconClock size={12} /> {data.length} 条
+          <IconClock size={12} /> {text(`${data.length} rows`, `${data.length} 条`)}
         </span>
       </div>
 
       <div className="card">
         <div style={{ display: 'grid', gridTemplateColumns: '180px 110px 150px 1fr 130px', gap: 14, padding: '10px 16px', fontSize: 11, color: 'var(--text-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)', fontWeight: 500 }}>
-          <span>时间</span>
-          <span>用户</span>
-          <span>动作</span>
-          <span>对象</span>
-          <span style={{ textAlign: 'right' }}>来源 IP</span>
+          <span>{text('Time', '时间')}</span>
+          <span>{text('User', '用户')}</span>
+          <span>{text('Action', '动作')}</span>
+          <span>{text('Target', '对象')}</span>
+          <span style={{ textAlign: 'right' }}>{text('Source IP', '来源 IP')}</span>
         </div>
         <div className="card-body flush">
-          {loading && <div style={{ padding: 16, color: 'var(--text-subtle)' }}>加载中...</div>}
+          {loading && <div style={{ padding: 16, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>}
           {err && <div style={{ padding: 16, color: 'var(--red-text)' }}>{err}</div>}
           {!loading && !err && data.length === 0 && (
-            <div style={{ padding: 24, color: 'var(--text-subtle)', textAlign: 'center' }}>无匹配记录</div>
+            <div style={{ padding: 24, color: 'var(--text-subtle)', textAlign: 'center' }}>{text('No matching records', '无匹配记录')}</div>
           )}
           {data.map((e) => (
             <div key={e.id} className="log-row">
-              <span className="ts">{new Date(e.createdAt).toLocaleString()}</span>
+              <span className="ts">{new Date(e.createdAt).toLocaleString(locale)}</span>
               <span><span className="mono" style={{ fontSize: 11.5, color: e.actor === 'system' ? 'var(--text-faint)' : 'var(--primary)' }}>@{e.actor}</span></span>
-              <span><span className={`tag ${AUDIT_ACTION_COLOR[e.action] || ''}`}>{e.action}</span></span>
+              <span><span className={`tag ${AUDIT_ACTION_COLOR[e.action] || ''}`}>{auditActionLabel(e.action, isEnglish)}</span></span>
               <span><span className="target">{e.target}</span> <span className="mono" style={{ color: 'var(--text-faint)', fontSize: 11 }}>{e.version}</span></span>
               <span className="ip">{e.ip}</span>
             </div>

@@ -58,7 +58,9 @@ func ValidateFilePath(p string) (string, error) {
 // path so directories cluster together.
 func (s *Store) ListSkillFiles(ns, name string) ([]model.SkillFile, error) {
 	rows, err := s.DB.Query(`SELECT path, size, updated_at, updated_by
-		FROM skill_files WHERE ns = ? AND skill_name = ? ORDER BY path`, ns, name)
+		FROM skill_files
+		WHERE ns = ? AND skill_name = ? AND lower(path) <> 'readme.md'
+		ORDER BY path`, ns, name)
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +79,9 @@ func (s *Store) ListSkillFiles(ns, name string) ([]model.SkillFile, error) {
 // GetSkillFile fetches a single file with content. Returns (nil, nil) when not
 // found so the caller can return 404.
 func (s *Store) GetSkillFile(ns, name, p string) (*model.SkillFile, error) {
+	if strings.EqualFold(p, "README.md") {
+		return nil, nil
+	}
 	row := s.DB.QueryRow(`SELECT path, content, size, updated_at, updated_by
 		FROM skill_files WHERE ns = ? AND skill_name = ? AND path = ?`, ns, name, p)
 	var f model.SkillFile
@@ -93,6 +98,9 @@ func (s *Store) GetSkillFile(ns, name, p string) (*model.SkillFile, error) {
 func (s *Store) PutSkillFile(ns, name, p, content, updatedBy string) (*model.SkillFile, error) {
 	if len(content) > MaxFileBytes {
 		return nil, errors.New("file too large (max 1 MiB)")
+	}
+	if strings.EqualFold(p, "README.md") {
+		return nil, errors.New("root README.md is no longer used for skills; put documentation in SKILL.md")
 	}
 	if _, err := s.DB.Exec(`
 		INSERT INTO skill_files(ns, skill_name, path, content, size, updated_at, updated_by)
@@ -129,6 +137,9 @@ func (s *Store) RenameSkillFile(ns, name, fromPath, toPath, updatedBy string) (*
 	if fromPath == toPath {
 		return nil, errors.New("source and destination are identical")
 	}
+	if strings.EqualFold(toPath, "README.md") {
+		return nil, errors.New("root README.md is no longer used for skills; put documentation in SKILL.md")
+	}
 	// Bail out early if the target slot is taken — UPDATE would silently
 	// fail the UNIQUE(ns, skill_name, path) constraint and the user wouldn't
 	// know why.
@@ -160,10 +171,9 @@ func (s *Store) RenameSkillFile(ns, name, fromPath, toPath, updatedBy string) (*
 }
 
 // SeedDefaultFiles bootstraps a freshly-created skill with the canonical
-// SKILL.md plus skill.yaml / README.md so the editor opens to a meaningful
-// bundle that already nods to the recommended layout
-// (SKILL.md + scripts/ + references/ + assets/). No-op if the skill already
-// has any files.
+// SKILL.md plus skill.yaml so the editor opens to a meaningful bundle that
+// already nods to the recommended layout (SKILL.md + scripts/ + references/ +
+// assets/). No-op if the skill already has any files.
 func (s *Store) SeedDefaultFiles(ns, name, description, author string) error {
 	var existing int
 	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM skill_files WHERE ns = ? AND skill_name = ?`, ns, name).Scan(&existing); err != nil {
@@ -176,9 +186,6 @@ func (s *Store) SeedDefaultFiles(ns, name, description, author string) error {
 		return err
 	}
 	if _, err := s.PutSkillFile(ns, name, "skill.yaml", buildSkillYaml(ns, name, description), author); err != nil {
-		return err
-	}
-	if _, err := s.PutSkillFile(ns, name, "README.md", buildReadme(name, description), author); err != nil {
 		return err
 	}
 	return nil
@@ -221,8 +228,4 @@ func firstLine(s string) string {
 func buildSkillYaml(ns, name, description string) string {
 	return "name: " + name + "\nversion: \"0.1.0\"\nnamespace: " + ns + "\nclassification: L2\n\ndescription: |\n  " +
 		strings.ReplaceAll(description, "\n", "\n  ") + "\n\nruntime:\n  image: \"alpine:3.19\"\n  timeout: 60s\n  memory: \"512Mi\"\n\ntags: []\n\ninputs: []\n"
-}
-
-func buildReadme(name, description string) string {
-	return "# " + name + "\n\n" + description + "\n\n## 用法\n\n```bash\nskillhub run " + name + "\n```\n\n## 待补充\n\n- 详细的输入/输出说明\n- 失败模式与回退策略\n"
 }

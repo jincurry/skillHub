@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { Namespace, NamespacePolicy, PolicySlot } from '../api/types';
 import { IconPlus, IconXCircle } from './Icons';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 // Roles a slot can require. Mirrors the validation list in
 // server/internal/api/policies.go::upsertNamespacePolicy.
@@ -12,17 +13,24 @@ const ROLE_OPTIONS: { value: string; label: string }[] = [
   { value: 'member',     label: 'Member' },
 ];
 
-const CLS_HINT: Record<string, string> = {
-  L1: '通用 / 公开能力，最低门槛。',
-  L2: '业务团队内部能力，标准审批。',
-  L3: '高敏感 / 跨域能力，建议串行三审。',
-};
-
 const CLS_COLOR: Record<string, string> = {
   L1: 'var(--green-text)',
   L2: 'var(--amber-text)',
   L3: 'var(--red-text)',
 };
+
+function classificationHint(level: string, text: (en: string, zh: string) => string): string {
+  switch (level) {
+    case 'L1':
+      return text('General / public capabilities with the lowest review bar.', '通用 / 公开能力，最低门槛。');
+    case 'L2':
+      return text('Internal team capabilities with the standard review flow.', '业务团队内部能力，标准审批。');
+    case 'L3':
+      return text('Highly sensitive / cross-domain capabilities; serial three-step review is recommended.', '高敏感 / 跨域能力，建议串行三审。');
+    default:
+      return level;
+  }
+}
 
 interface Props {
   ns: string;
@@ -31,6 +39,7 @@ interface Props {
 }
 
 export function NamespacePoliciesPanel({ ns, namespaces, onChangeNs }: Props) {
+  const { text } = useLocaleText();
   // Single source of truth for the loaded policies. We lift it into state so
   // each PolicyCard can swap in fresh data after a save without re-fetching.
   const [policies, setPolicies] = useState<NamespacePolicy[] | null>(null);
@@ -56,7 +65,7 @@ export function NamespacePoliciesPanel({ ns, namespaces, onChangeNs }: Props) {
     return (
       <div className="card">
         <div className="card-body" style={{ padding: '40px 28px', textAlign: 'center', color: 'var(--text-subtle)' }}>
-          请先创建命名空间
+          {text('Create a namespace first', '请先创建命名空间')}
         </div>
       </div>
     );
@@ -66,7 +75,7 @@ export function NamespacePoliciesPanel({ ns, namespaces, onChangeNs }: Props) {
     <>
       <div className="card" style={{ marginBottom: 'var(--gap)' }}>
         <div className="card-header" style={{ alignItems: 'center', gap: 10 }}>
-          <h3 className="card-title">命名空间审批策略</h3>
+          <h3 className="card-title">{text('Namespace Review Policies', '命名空间审批策略')}</h3>
           <select
             value={ns}
             onChange={(e) => onChangeNs(e.target.value)}
@@ -78,13 +87,15 @@ export function NamespacePoliciesPanel({ ns, namespaces, onChangeNs }: Props) {
           </select>
         </div>
         <div className="card-body" style={{ fontSize: 13, color: 'var(--text-subtle)', lineHeight: 1.6 }}>
-          每个密级（L1 / L2 / L3）独立配置审批人槽位、SLA 和顺序。未保存覆盖时使用全局默认值。
-          修改不会影响已经在审批中的请求。
+          {text(
+            'Configure reviewer slots, SLA, and order independently for each classification (L1 / L2 / L3). Unsaved overrides use the global default. Changes do not affect requests that are already in review.',
+            '每个密级（L1 / L2 / L3）独立配置审批人槽位、SLA 和顺序。未保存覆盖时使用全局默认值。修改不会影响已经在审批中的请求。',
+          )}
         </div>
       </div>
 
       {loading && (
-        <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>加载中...</div></div>
+        <div className="card"><div className="card-body" style={{ color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div></div>
       )}
       {err && (
         <div className="card"><div className="card-body" style={{ color: 'var(--red-text)' }}>{err}</div></div>
@@ -111,6 +122,7 @@ interface PolicyCardProps {
 // PolicyCard owns its own draft state, so the user can edit freely without
 // each keystroke firing a network request. Save / Reset commit the change.
 function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
+  const { text } = useLocaleText();
   // Track the loaded server values so we can detect "no changes" and disable Save.
   const [draftMode, setDraftMode] = useState(policy.mode);
   const [draftSLA, setDraftSLA] = useState(String(policy.slaHours));
@@ -156,7 +168,7 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
   }
 
   async function reset() {
-    if (!confirm(`确定要把 ${policy.classification} 重置为全局默认吗？`)) return;
+    if (!confirm(text(`Reset ${policy.classification} to the global default?`, `确定要把 ${policy.classification} 重置为全局默认吗？`))) return;
     setBusy(true);
     setErrMsg(null);
     try {
@@ -179,13 +191,13 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
             background: 'var(--bg-muted)', color: CLS_COLOR[policy.classification],
             fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
           }}>{policy.classification}</span>
-          <span>{CLS_HINT[policy.classification]}</span>
+          <span>{classificationHint(policy.classification, text)}</span>
         </h3>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           {policy.isOverride ? (
-            <span className="tag amber" style={{ fontSize: 11 }}><span className="dot"></span>已自定义</span>
+            <span className="tag amber" style={{ fontSize: 11 }}><span className="dot"></span>{text('Customized', '已自定义')}</span>
           ) : (
-            <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>使用全局默认</span>
+            <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{text('Using global default', '使用全局默认')}</span>
           )}
         </div>
       </div>
@@ -194,7 +206,7 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>
-              SLA（小时）
+              {text('SLA (hours)', 'SLA（小时）')}
             </div>
             <input
               className="input"
@@ -206,12 +218,12 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
               style={{ width: '100%' }}
             />
             {slaInvalid && (
-              <div style={{ fontSize: 11, color: 'var(--red-text)', marginTop: 4 }}>1 ~ 720 小时</div>
+              <div style={{ fontSize: 11, color: 'var(--red-text)', marginTop: 4 }}>{text('1 to 720 hours', '1 ~ 720 小时')}</div>
             )}
           </div>
           <div>
             <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 5 }}>
-              审批模式
+              {text('Review Mode', '审批模式')}
             </div>
             <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
               {(['parallel', 'serial'] as const).map((m) => (
@@ -227,20 +239,22 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
                     borderLeft: m === 'serial' ? '1px solid var(--border)' : 'none',
                   }}
                 >
-                  {m === 'parallel' ? '并行' : '串行'}
+                  {m === 'parallel' ? text('Parallel', '并行') : text('Serial', '串行')}
                 </button>
               ))}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 5, lineHeight: 1.5 }}>
-              {draftMode === 'parallel' ? '所有 reviewer 可同时审批，凑够即可。' : '按 slot 顺序逐个审批。'}
+              {draftMode === 'parallel'
+                ? text('All reviewers can approve in parallel until the required count is met.', '所有 reviewer 可同时审批，凑够即可。')
+                : text('Reviewers approve one slot at a time in order.', '按 slot 顺序逐个审批。')}
             </div>
           </div>
           <div style={{
             padding: 10, background: 'var(--bg-soft)', borderRadius: 6,
             fontSize: 12, color: 'var(--text-subtle)',
           }}>
-            <div>共需 <span style={{ fontWeight: 600, color: 'var(--text)' }}>{totalReviewers}</span> 位 reviewer</div>
-            <div style={{ marginTop: 2, fontSize: 11 }}>{draftSlots.length} 个 slot</div>
+            <div>{text('Requires ', '共需 ')}<span style={{ fontWeight: 600, color: 'var(--text)' }}>{totalReviewers}</span>{text(' reviewers', ' 位 reviewer')}</div>
+            <div style={{ marginTop: 2, fontSize: 11 }}>{text(`${draftSlots.length} slots`, `${draftSlots.length} 个 slot`)}</div>
           </div>
         </div>
 
@@ -248,9 +262,9 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>
-              Reviewer 槽位
+              {text('Reviewer Slots', 'Reviewer 槽位')}
               <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-faint)', fontWeight: 400 }}>
-                按优先级匹配第一个可填的角色
+                {text('Match the first available role by priority', '按优先级匹配第一个可填的角色')}
               </span>
             </div>
             <button
@@ -259,7 +273,7 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
               onClick={() => setDraftSlots([...draftSlots, { Roles: ['reviewer'], Count: 1 }])}
               disabled={draftSlots.length >= 8}
             >
-              <IconPlus size={11} /> 新增 slot
+              <IconPlus size={11} /> {text('Add Slot', '新增 slot')}
             </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -279,7 +293,7 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
             ))}
             {draftSlots.length === 0 && (
               <div style={{ fontSize: 12, color: 'var(--red-text)', padding: '8px 0' }}>
-                至少需要 1 个 slot
+                {text('At least 1 slot is required', '至少需要 1 个 slot')}
               </div>
             )}
           </div>
@@ -305,7 +319,7 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
             disabled={busy}
             style={{ marginRight: 'auto', color: 'var(--text-muted)' }}
           >
-            重置为默认
+            {text('Reset to Default', '重置为默认')}
           </button>
         )}
         <button
@@ -315,7 +329,7 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
           disabled={!canSave}
           style={!canSave ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
         >
-          {busy ? '保存中...' : (dirty ? '保存' : '已是最新')}
+          {busy ? text('Saving...', '保存中...') : (dirty ? text('Save', '保存') : text('Up to Date', '已是最新'))}
         </button>
       </div>
     </div>
@@ -335,6 +349,7 @@ interface SlotRowProps {
 // the rest of the array. Order matters because the auto-pick logic walks
 // roles in priority order.
 function SlotRow({ index, slot, canDelete, onChange, onDelete }: SlotRowProps) {
+  const { text } = useLocaleText();
   function toggleRole(role: string) {
     const has = slot.Roles.includes(role);
     const nextRoles = has ? slot.Roles.filter((r) => r !== role) : [...slot.Roles, role];
@@ -392,7 +407,7 @@ function SlotRow({ index, slot, canDelete, onChange, onDelete }: SlotRowProps) {
         type="button"
         onClick={onDelete}
         disabled={!canDelete}
-        title={canDelete ? '删除此 slot' : '至少保留 1 个 slot'}
+        title={canDelete ? text('Delete this slot', '删除此 slot') : text('Keep at least 1 slot', '至少保留 1 个 slot')}
         style={{
           padding: 4, border: 'none', background: 'transparent',
           color: canDelete ? 'var(--text-faint)' : 'var(--text-faint)',

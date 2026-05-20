@@ -10,7 +10,7 @@ import { useAsync } from '../api/useAsync';
 import type { AIAssistAction, ValidationReport } from '../api/types';
 import { AIAssistDrawer, type EditorBridge } from '../components/AIAssistDrawer';
 import { runAssist, type AssistHandle } from '../lib/aiAssist';
-import { languageFor } from '../lib/files';
+import { isRootReadme, languageFor, shouldDisplaySkillFile } from '../lib/files';
 import { renderMarkdown } from '../lib/markdown';
 import { estimateTokens, fmtTokens } from '../lib/tokens';
 import {
@@ -23,6 +23,7 @@ import { computeDiff } from './editor/diff';
 import { FrontmatterField, TagsField } from './editor/FrontmatterField';
 import { FilePicker } from './editor/FilePicker';
 import { FileTree, buildTree } from './editor/FileTree';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 
 // --------- main page ------------------------------------------------------
@@ -30,11 +31,16 @@ import { FileTree, buildTree } from './editor/FileTree';
 export function Editor() {
   const { ns = 'platform-team', name = 'go-code-review' } = useParams();
   const navigate = useNavigate();
+  const { text, locale } = useLocaleText();
 
   const skill = useAsync(() => api.getSkill(ns, name), [ns, name]);
   const me = useAsync(() => api.me(), []);
   const members = useAsync(() => api.namespaceMembers(ns), [ns]);
   const files = useAsync(() => api.listFiles(ns, name), [ns, name]);
+  const displayFiles = useMemo(
+    () => (files.data ?? []).filter((f) => shouldDisplaySkillFile(f.path)),
+    [files.data],
+  );
   const validation = useAsync<ValidationReport>(() => api.validate(ns, name), [ns, name]);
   const policy = useAsync(
     () => api.namespacePolicy(ns, (skill.data?.classification ?? 'L2') as 'L1' | 'L2' | 'L3'),
@@ -57,7 +63,7 @@ export function Editor() {
 
   function closeFile(path: string) {
     const buf = buffers[path];
-    if (buf?.dirty && !window.confirm(`${path} 有未保存修改，关闭将丢失，是否确认?`)) return;
+    if (buf?.dirty && !window.confirm(text(`${path} has unsaved changes. Closing will discard them. Continue?`, `${path} 有未保存修改，关闭将丢失，是否确认?`))) return;
     const idx = openPaths.indexOf(path);
     const nextOpen = openPaths.filter((p) => p !== path);
     setOpenPaths(nextOpen);
@@ -183,15 +189,15 @@ export function Editor() {
   const draftRafRef = useRef<number | null>(null);
 
   // Pick a sensible default file once the listing comes back. SKILL.md is the
-  // primary authoring surface so it wins over skill.yaml / README.md.
+  // primary authoring surface so it wins over skill.yaml.
   useEffect(() => {
-    if (!files.data || files.data.length === 0) return;
-    if (activePath && files.data.some((f) => f.path === activePath)) return;
-    const preferred = ['SKILL.md', 'README.md', 'skill.yaml'];
-    const pick = preferred.find((p) => files.data!.some((f) => f.path === p)) ?? files.data[0].path;
+    if (!files.data || displayFiles.length === 0) return;
+    if (activePath && displayFiles.some((f) => f.path === activePath)) return;
+    const preferred = ['SKILL.md', 'skill.yaml'];
+    const pick = preferred.find((p) => displayFiles.some((f) => f.path === p)) ?? displayFiles[0].path;
     setActivePath(pick);
     setOpenPaths((prev) => prev.includes(pick) ? prev : [...prev, pick]);
-  }, [files.data, activePath]);
+  }, [files.data, displayFiles, activePath]);
 
   // Lazy-load file content on first activation. After the server responds
   // we also peek at the localStorage backup for the same path; if the
@@ -220,7 +226,7 @@ export function Editor() {
           }
         } catch { /* private mode / quota — ignore */ }
       })
-      .catch((e: Error) => setMsg(`加载 ${activePath} 失败: ${e.message}`))
+      .catch((e: Error) => setMsg(text(`Failed to load ${activePath}: ${e.message}`, `加载 ${activePath} 失败: ${e.message}`)))
       .finally(() => { inflight.current.delete(activePath); });
   }, [activePath, ns, name, buffers]);
 
@@ -278,19 +284,19 @@ export function Editor() {
       total += estimateTokens(b.content);
       counted.add(p);
     }
-    for (const f of (files.data ?? [])) {
+    for (const f of displayFiles) {
       if (!counted.has(f.path)) total += Math.ceil((f.size ?? 0) * 0.25);
     }
     return total;
-  }, [deferredBuffers, files.data]);
+  }, [deferredBuffers, displayFiles]);
 
-  const tree = useMemo(() => buildTree(files.data ?? []), [files.data]);
+  const tree = useMemo(() => buildTree(displayFiles), [displayFiles]);
   const activeBuf = activePath ? buffers[activePath] : undefined;
 
   // Whether the recommended layout is satisfied. Drives both the file-tree
   // placeholders and the Bundle Structure side card.
   const bundleStatus = useMemo(() => {
-    const paths = (files.data ?? []).map((f) => f.path);
+    const paths = displayFiles.map((f) => f.path);
     const hasSkillMD = paths.includes('SKILL.md');
     const dirsPresent = new Set<string>();
     for (const p of paths) {
@@ -301,7 +307,7 @@ export function Editor() {
       .filter((d) => !dirsPresent.has(d.key))
       .map((d) => d.key);
     return { hasSkillMD, missingStdDirs, dirsPresent };
-  }, [files.data]);
+  }, [displayFiles]);
 
   // Markdown outline for the currently-open SKILL.md (or any other .md). Used
   // by the side panel so users can jump to a heading inside long docs. We
@@ -469,14 +475,14 @@ export function Editor() {
   useEffect(() => {
     const m = monacoNsRef.current;
     if (!m || !files.data) return;
-    const alive = new Set(files.data.map((f) => f.path));
+    const alive = new Set(displayFiles.map((f) => f.path));
     for (const p of Array.from(modelsRef.current)) {
       if (alive.has(p)) continue;
       m.editor.getModel(modelUriFor(m, p))?.dispose();
       modelsRef.current.delete(p);
       viewStatesRef.current.delete(p);
     }
-  }, [files.data]);
+  }, [files.data, displayFiles]);
 
   // Final cleanup on unmount: drop every model we created so nothing leaks
   // into the global Monaco registry.
@@ -531,7 +537,7 @@ export function Editor() {
       const list = await api.listAIProviderRefs();
       const def = list.find((p) => p.isDefault) ?? list[0];
       if (!def) {
-        setDraftErr('未配置 AI 模型，请联系管理员');
+        setDraftErr(text('No AI model is configured. Contact an admin.', '未配置 AI 模型，请联系管理员'));
         return;
       }
       providerId = def.id;
@@ -615,13 +621,13 @@ export function Editor() {
   // ---- actions ----------------------------------------------------------
 
   async function runValidate() {
-    setMsg('验证中...');
+    setMsg(text('Validating...', '验证中...'));
     try {
       const r = await api.validate(ns, name);
       validation.reload();
-      setMsg(`验证完成 · 得分 ${r.score}/100 · ${r.summary}`);
+      setMsg(text(`Validation complete · score ${r.score}/100 · ${r.summary}`, `验证完成 · 得分 ${r.score}/100 · ${r.summary}`));
     } catch (e) {
-      setMsg(`验证失败: ${(e as Error).message}`);
+      setMsg(text(`Validation failed: ${(e as Error).message}`, `验证失败: ${(e as Error).message}`));
     }
   }
 
@@ -636,9 +642,9 @@ export function Editor() {
       // Re-run validation in the background so the side panel doesn't
       // lie about the state of the file the user just saved.
       validation.reload();
-      setMsg(`已保存 ${activePath} (${updated.size}B)`);
+      setMsg(text(`Saved ${activePath} (${updated.size}B)`, `已保存 ${activePath} (${updated.size}B)`));
     } catch (e) {
-      setMsg(`保存失败: ${(e as Error).message}`);
+      setMsg(text(`Save failed: ${(e as Error).message}`, `保存失败: ${(e as Error).message}`));
     } finally {
       setSaving(false);
     }
@@ -661,7 +667,9 @@ export function Editor() {
     files.reload();
     validation.reload();
     setSaving(false);
-    setMsg(lastErr ? `保存了 ${saved} 个,失败: ${lastErr.message}` : `已保存 ${saved} 个文件`);
+    setMsg(lastErr
+      ? text(`Saved ${saved}; failed: ${lastErr.message}`, `保存了 ${saved} 个,失败: ${lastErr.message}`)
+      : text(`Saved ${saved} files`, `已保存 ${saved} 个文件`));
   }
 
   // Keep the handler trampoline pointed at the latest closure on every
@@ -720,7 +728,7 @@ export function Editor() {
           // Don't trample an existing toast on every silent save.
           validation.reload();
         } catch (e) {
-          setMsg(`自动保存 ${p} 失败: ${(e as Error).message}`);
+          setMsg(text(`Autosave failed for ${p}: ${(e as Error).message}`, `自动保存 ${p} 失败: ${(e as Error).message}`));
         }
       }, AUTOSAVE_MS);
       autosaveTimers.current.set(p, timer);
@@ -762,15 +770,19 @@ export function Editor() {
   async function submitNewFile() {
     const path = newFilePath.trim();
     if (!path) {
-      setNewFileErr('路径不能为空');
+      setNewFileErr(text('Path is required', '路径不能为空'));
       return;
     }
     if (path.startsWith('/') || path.includes('..')) {
-      setNewFileErr('路径必须是相对路径，且不可包含 ..');
+      setNewFileErr(text('Path must be relative and cannot contain ..', '路径必须是相对路径，且不可包含 ..'));
+      return;
+    }
+    if (isRootReadme(path)) {
+      setNewFileErr(text('Root README.md is no longer used for skills. Put documentation in SKILL.md instead.', 'Skill 不再使用根目录 README.md，请把说明写在 SKILL.md 中。'));
       return;
     }
     if ((files.data ?? []).some((f) => f.path === path)) {
-      setNewFileErr(`文件 ${path} 已存在`);
+      setNewFileErr(text(`File ${path} already exists`, `文件 ${path} 已存在`));
       return;
     }
     setNewFileBusy(true);
@@ -780,7 +792,7 @@ export function Editor() {
       setBuffers((b) => ({ ...b, [path]: { content: f.content ?? newFileContent, dirty: false } }));
       files.reload();
       openFile(path);
-      setMsg(`已创建 ${path}`);
+      setMsg(text(`Created ${path}`, `已创建 ${path}`));
       setShowNewFile(false);
       setNewFilePath('');
       setNewFileContent('');
@@ -791,8 +803,8 @@ export function Editor() {
     }
   }
 
-  // Quick-create a missing recommended dir by writing a README.md into it.
-  // The directory then shows up in the file tree like any other; the README
+  // Quick-create a missing recommended dir by writing an index.md into it.
+  // The directory then shows up in the file tree like any other; the file
   // doubles as guidance for what should go in the dir.
   async function createStdDir(dir: StdDirKey) {
     const seed = seedFileForDir(dir, dir);
@@ -806,18 +818,18 @@ export function Editor() {
       files.reload();
       validation.reload();
       openFile(seed.path);
-      setMsg(`已创建 ${dir}/ 目录`);
+      setMsg(text(`Created ${dir}/ directory`, `已创建 ${dir}/ 目录`));
     } catch (e) {
-      setMsg(`创建 ${dir}/ 失败: ${(e as Error).message}`);
+      setMsg(text(`Failed to create ${dir}/: ${(e as Error).message}`, `创建 ${dir}/ 失败: ${(e as Error).message}`));
     }
   }
 
   async function deleteFile(p: string) {
     if (REQUIRED_FILES.has(p)) {
-      setMsg(`${p} 不可删除`);
+      setMsg(text(`${p} cannot be deleted`, `${p} 不可删除`));
       return;
     }
-    if (!window.confirm(`删除文件 ${p}? 此操作不可撤销。`)) return;
+    if (!window.confirm(text(`Delete file ${p}? This cannot be undone.`, `删除文件 ${p}? 此操作不可撤销。`))) return;
     try {
       await api.deleteFile(ns, name, p);
       setBuffers((b) => {
@@ -834,15 +846,15 @@ export function Editor() {
         }
       }
       files.reload();
-      setMsg(`已删除 ${p}`);
+      setMsg(text(`Deleted ${p}`, `已删除 ${p}`));
     } catch (e) {
-      setMsg(`删除失败: ${(e as Error).message}`);
+      setMsg(text(`Delete failed: ${(e as Error).message}`, `删除失败: ${(e as Error).message}`));
     }
   }
 
   async function discardAll() {
     if (dirtyPaths.size === 0) return;
-    if (!window.confirm(`放弃 ${dirtyPaths.size} 个文件的未保存修改？将恢复为上次保存状态。`)) return;
+    if (!window.confirm(text(`Discard unsaved changes in ${dirtyPaths.size} files? They will be restored to the last saved state.`, `放弃 ${dirtyPaths.size} 个文件的未保存修改？将恢复为上次保存状态。`))) return;
     const paths = Array.from(dirtyPaths);
     paths.forEach((p) => {
       try { localStorage.removeItem(draftKeyFor(ns, name, p)); } catch { /* ignore */ }
@@ -861,19 +873,23 @@ export function Editor() {
       setActivePath(null);
       setTimeout(() => setActivePath(cur), 0);
     }
-    setMsg(`已放弃 ${paths.length} 个文件的修改`);
+    setMsg(text(`Discarded changes in ${paths.length} files`, `已放弃 ${paths.length} 个文件的修改`));
   }
 
   async function uploadLocalFiles() {
-    if (uploadFiles.length === 0) { setUploadErr('请选择文件'); return; }
+    if (uploadFiles.length === 0) { setUploadErr(text('Choose files first', '请选择文件')); return; }
     setUploadBusy(true);
     setUploadErr(null);
     let created = 0;
     const errors: string[] = [];
     for (const file of uploadFiles) {
       const path = file.name;
+      if (isRootReadme(path)) {
+        errors.push(text('Root README.md is no longer used for skills', 'Skill 不再使用根目录 README.md'));
+        continue;
+      }
       if ((files.data ?? []).some((f) => f.path === path)) {
-        errors.push(`${path} 已存在`);
+        errors.push(text(`${path} already exists`, `${path} 已存在`));
         continue;
       }
       try {
@@ -893,7 +909,7 @@ export function Editor() {
       setNewFileMode('template');
     }
     if (created > 0) {
-      setMsg(`已上传 ${created} 个文件`);
+      setMsg(text(`Uploaded ${created} files`, `已上传 ${created} 个文件`));
       if (uploadFiles.length === 1) openFile(uploadFiles[0].name);
     }
     setUploadBusy(false);
@@ -906,10 +922,13 @@ export function Editor() {
    */
   async function renameFile(oldPath: string, newPath: string): Promise<boolean> {
     if (REQUIRED_FILES.has(oldPath)) {
-      throw new Error(`${oldPath} 不可重命名`);
+      throw new Error(text(`${oldPath} cannot be renamed`, `${oldPath} 不可重命名`));
+    }
+    if (isRootReadme(newPath)) {
+      throw new Error(text('Root README.md is no longer used for skills. Put documentation in SKILL.md instead.', 'Skill 不再使用根目录 README.md，请把说明写在 SKILL.md 中。'));
     }
     if ((files.data ?? []).some((f) => f.path === newPath)) {
-      throw new Error(`${newPath} 已存在`);
+      throw new Error(text(`${newPath} already exists`, `${newPath} 已存在`));
     }
     const buf = buffers[oldPath];
     // If the user has unsaved edits we'd lose them after the server
@@ -919,7 +938,7 @@ export function Editor() {
       try {
         await api.putFile(ns, name, oldPath, buf.content);
       } catch (e) {
-        throw new Error(`保存原文件失败: ${(e as Error).message}`);
+        throw new Error(text(`Failed to save original file: ${(e as Error).message}`, `保存原文件失败: ${(e as Error).message}`));
       }
     }
     await api.renameFile(ns, name, oldPath, newPath);
@@ -931,25 +950,25 @@ export function Editor() {
     setOpenPaths((prev) => prev.map((x) => (x === oldPath ? newPath : x)));
     setActivePath((cur) => (cur === oldPath ? newPath : cur));
     files.reload();
-    setMsg(`已重命名 ${oldPath} → ${newPath}`);
+    setMsg(text(`Renamed ${oldPath} -> ${newPath}`, `已重命名 ${oldPath} → ${newPath}`));
     return true;
   }
 
   async function submitForReview() {
     const ver = submitVersion.trim();
-    if (!ver) { setMsg('请填写新版本号'); return; }
-    if (!SEMVER_RE.test(ver)) { setMsg('版本号需符合 semver(如 1.2.3 / 1.2.3-beta.1)'); return; }
-    if (ver === currentVersion) { setMsg('新版本号与当前一致,请 bump'); return; }
+    if (!ver) { setMsg(text('Enter a new version number', '请填写新版本号')); return; }
+    if (!SEMVER_RE.test(ver)) { setMsg(text('Version must be valid semver, such as 1.2.3 or 1.2.3-beta.1', '版本号需符合 semver(如 1.2.3 / 1.2.3-beta.1)')); return; }
+    if (ver === currentVersion) { setMsg(text('New version matches the current one. Bump it first.', '新版本号与当前一致,请 bump')); return; }
     if (submitHotfix && !submitHotfixReason.trim()) {
-      setMsg('启用 Hotfix 通道时必须填写紧急原因'); return;
+      setMsg(text('Hotfix requires an emergency reason', '启用 Hotfix 通道时必须填写紧急原因')); return;
     }
     // If a draft is still streaming, stop it first so we submit what we have.
     if (draftingNote) stopDraft();
     if (anyDirty) {
-      if (!window.confirm('还有未保存的修改,要先保存全部再提交吗?')) return;
+      if (!window.confirm(text('There are unsaved changes. Save all before submitting?', '还有未保存的修改,要先保存全部再提交吗?'))) return;
       await saveAll();
       if (Object.values(buffers).some((b) => b.dirty)) {
-        setMsg('部分文件未能保存,提交已取消');
+        setMsg(text('Some files could not be saved. Submission canceled.', '部分文件未能保存,提交已取消'));
         return;
       }
     }
@@ -957,20 +976,20 @@ export function Editor() {
     try {
       const r = await api.submitForReview(ns, name, {
         version: ver,
-        note: submitNote.trim() || '请审批',
+        note: submitNote.trim() || text('Please review', '请审批'),
         isHotfix: submitHotfix,
         hotfixReason: submitHotfix ? submitHotfixReason.trim() : undefined,
       });
       setShowSubmit(false);
-      setMsg(`已提交 审批 #${r.id}`);
+      setMsg(text(`Submitted review #${r.id}`, `已提交 审批 #${r.id}`));
       setTimeout(() => navigate(`/reviews/${r.id}`), 600);
     } catch (e) {
       const m = (e as Error).message;
       if (m.includes('validation failed') || m.startsWith('422')) {
         validation.reload();
-        setMsg('提交被拦截:存在 validation 错误,请查看右侧面板修复后再提交。');
+        setMsg(text('Submission blocked: validation errors exist. Fix them in the right panel and submit again.', '提交被拦截:存在 validation 错误,请查看右侧面板修复后再提交。'));
       } else {
-        setMsg(`提交失败: ${m}`);
+        setMsg(text(`Submit failed: ${m}`, `提交失败: ${m}`));
       }
     } finally {
       setSubmitting(false);
@@ -1055,46 +1074,47 @@ export function Editor() {
             <span className="status-pill draft"><span className="swatch"></span>{skill.data?.status ?? 'Draft'}</span>
           </h1>
           <p className="page-subtitle">
-            {files.data ? `${files.data.length} 个文件` : '加载中...'}
-            {anyDirty && <span style={{ color: 'var(--amber-text)', marginLeft: 8 }}>· {dirtyPaths.size} 个未保存</span>}
+            {files.data ? text(`${files.data.length} files`, `${files.data.length} 个文件`) : text('Loading...', '加载中...')}
+            {anyDirty && <span style={{ color: 'var(--amber-text)', marginLeft: 8 }}>· {text(`${dirtyPaths.size} unsaved`, `${dirtyPaths.size} 个未保存`)}</span>}
             {!canEdit && skill.data && me.data && (
-              <span style={{ color: 'var(--text-faint)', marginLeft: 8 }}>· 只读 (你不是作者)</span>
+              <span style={{ color: 'var(--text-faint)', marginLeft: 8 }}>· {text('Read-only (you are not the author)', '只读 (你不是作者)')}</span>
             )}
             <span
               style={{ marginLeft: 8, color: 'var(--primary)', cursor: 'pointer' }}
               onClick={() => navigate(`/skills/${ns}/${name}`, { state: { tab: 'versions' } })}
-              title="在 skill 详情页查看所有历史版本"
-            >· 历史版本 →</span>
+              title={text('View all historical versions on the skill detail page', '在 skill 详情页查看所有历史版本')}
+            >· {text('Version History ->', '历史版本 →')}</span>
           </p>
         </div>
-        <div className="page-actions">
-            <button className="btn" onClick={runValidate} title="重新校验所有文件"><IconCheckCircle size={14} /> Validate</button>
+        <div className="page-actions editor-actions">
+          <button className="btn" onClick={runValidate} title={text('Re-validate all files', '重新校验所有文件')}><IconCheckCircle size={14} /> Validate</button>
           <button
-            className={`btn ${autosaveOn ? '' : 'ghost'}`}
+            className="btn"
             onClick={() => setAutosaveOn((v) => !v)}
-            title={autosaveOn ? '自动保存已开启 · 1.5 秒无输入后落盘' : '自动保存已关闭 · 仍会备份到本地以防丢失'}
-            style={autosaveOn ? { color: 'var(--green-text)', borderColor: 'var(--green)' } : { color: 'var(--text-faint)' }}
+            title={autosaveOn
+              ? text('Autosave is on · saved after 1.5 seconds without input', '自动保存已开启 · 1.5 秒无输入后落盘')
+              : text('Autosave is off · local backups are still kept to prevent loss', '自动保存已关闭 · 仍会备份到本地以防丢失')}
           >
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: autosaveOn ? 'var(--green)' : 'var(--text-faint)', display: 'inline-block', marginRight: 4 }} />
-            自动保存 {autosaveOn ? 'ON' : 'OFF'}
+            <span className={`state-dot ${autosaveOn ? 'on' : 'off'}`} />
+            {text('Autosave', '自动保存')} {autosaveOn ? 'ON' : 'OFF'}
           </button>
           <button
             className="btn"
             onClick={() => setAIOpen((v) => !v)}
             disabled={!activePath}
-            title="AI 助手"
-            style={aiOpen ? { borderColor: 'var(--primary)', color: 'var(--primary)' } : undefined}
+            title={text('AI Assistant', 'AI 助手')}
+            data-active={aiOpen ? 'true' : undefined}
           >
-            <IconSparkles size={14} /> AI 助手
+            <IconSparkles size={14} /> {text('AI Assistant', 'AI 助手')}
           </button>
           {anyDirty && (
             <button
               className="btn ghost"
               onClick={discardAll}
-              title="放弃所有未保存修改，恢复到上次保存状态"
+              title={text('Discard all unsaved changes and restore the last saved state', '放弃所有未保存修改，恢复到上次保存状态')}
               style={{ color: 'var(--red-text)', borderColor: 'var(--red-border, rgba(239,68,68,0.3))' }}
             >
-              放弃修改 ({dirtyPaths.size})
+              {text('Discard Changes', '放弃修改')} ({dirtyPaths.size})
             </button>
           )}
           {/* Split save: the primary half saves the active file, the right
@@ -1105,20 +1125,20 @@ export function Editor() {
               className="btn"
               onClick={saveActive}
               disabled={!canEdit || saving || !activeBuf?.dirty}
-              title="保存当前文件 (Ctrl/Cmd+S)"
+              title={text('Save current file (Ctrl/Cmd+S)', '保存当前文件 (Ctrl/Cmd+S)')}
               style={dirtyPaths.size > 1 ? { borderTopRightRadius: 0, borderBottomRightRadius: 0 } : undefined}
             >
-              <IconCode size={14} /> {saving ? '保存中...' : '保存'}
+              <IconCode size={14} /> {saving ? text('Saving...', '保存中...') : text('Save', '保存')}
             </button>
             {dirtyPaths.size > 1 && (
               <button
                 className="btn"
                 onClick={saveAll}
                 disabled={!canEdit || saving}
-                title="保存所有未保存的文件 (Ctrl/Cmd+Shift+S)"
+                title={text('Save all unsaved files (Ctrl/Cmd+Shift+S)', '保存所有未保存的文件 (Ctrl/Cmd+Shift+S)')}
                 style={{ borderLeft: 'none', borderTopLeftRadius: 0, borderBottomLeftRadius: 0, padding: '0 8px' }}
               >
-                全部 ({dirtyPaths.size})
+                {text('All', '全部')} ({dirtyPaths.size})
               </button>
             )}
           </div>
@@ -1131,28 +1151,18 @@ export function Editor() {
             // warnings. Hovering reveals the count.
             title={
               preflight.blockers.length > 0
-                ? `${preflight.blockers.length} 项必须修复后才能提交`
+                ? text(`${preflight.blockers.length} items must be fixed before submission`, `${preflight.blockers.length} 项必须修复后才能提交`)
                 : preflight.warnings.length > 0
-                  ? `${preflight.warnings.length} 项警告（不阻塞）`
-                  : '提交审批'
-            }
-            style={
-              preflight.blockers.length > 0
-                ? { background: 'var(--red)', borderColor: 'var(--red)' }
-                : preflight.warnings.length > 0
-                  ? { background: 'var(--amber)', borderColor: 'var(--amber)', color: 'var(--text)' }
-                  : undefined
+                  ? text(`${preflight.warnings.length} warnings (non-blocking)`, `${preflight.warnings.length} 项警告（不阻塞）`)
+                  : text('Submit for review', '提交审批')
             }
           >
             <IconRocket size={14} />
-            {submitting ? '提交中...' : '提交审批'}
-            {preflight.blockers.length > 0 && (
+            {submitting ? text('Submitting...', '提交中...') : text('Submit Review', '提交审批')}
+            {(preflight.blockers.length > 0 || preflight.warnings.length > 0) && (
               <span
-                style={{
-                  marginLeft: 6, padding: '0 6px', borderRadius: 8,
-                  background: 'rgba(255,255,255,0.25)', fontSize: 11, fontWeight: 700,
-                }}
-              >{preflight.blockers.length}</span>
+                className={`submit-badge ${preflight.blockers.length > 0 ? 'error' : 'warn'}`}
+              >{preflight.blockers.length > 0 ? preflight.blockers.length : preflight.warnings.length}</span>
             )}
           </button>
         </div>
@@ -1165,9 +1175,9 @@ export function Editor() {
         >
           <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: 10, width: 480, maxWidth: '92vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)' }}>
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>提交审批</h3>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{text('Submit Review', '提交审批')}</h3>
               <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>
-                当前版本 <span className="mono">v{currentVersion}</span> · 默认 bump 到 <span className="mono">v{nextVersion}</span>
+                {text('Current version', '当前版本')} <span className="mono">v{currentVersion}</span> · {text('default bump to', '默认 bump 到')} <span className="mono">v{nextVersion}</span>
               </div>
             </div>
             <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
@@ -1189,7 +1199,7 @@ export function Editor() {
                       ? <IconXCircle size={14} style={{ color: 'var(--red)' }} />
                       : <IconAlertTriangle size={14} style={{ color: 'var(--amber)' }} />}
                     <span style={{ color: preflight.blockers.length > 0 ? 'var(--red-text)' : 'var(--amber-text)' }}>
-                      提交前检查 · {preflight.blockers.length} 错误 · {preflight.warnings.length} 警告
+                      {text('Pre-submit checks', '提交前检查')} · {preflight.blockers.length} {text('errors', '错误')} · {preflight.warnings.length} {text('warnings', '警告')}
                     </span>
                   </div>
                   <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
@@ -1206,7 +1216,7 @@ export function Editor() {
                   </ul>
                   {preflight.blockers.length > 0 && (
                     <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--red-text)' }}>
-                      存在错误项 · 修复后再提交。
+                      {text('Errors exist · fix them before submitting.', '存在错误项 · 修复后再提交。')}
                     </div>
                   )}
                 </div>
@@ -1223,12 +1233,12 @@ export function Editor() {
                     display: 'flex', alignItems: 'center', gap: 6,
                   }}
                 >
-                  <IconCheckCircle size={14} /> 所有检查通过 · 可放心提交
+                  <IconCheckCircle size={14} /> {text('All checks passed · ready to submit', '所有检查通过 · 可放心提交')}
                 </div>
               )}
               <label style={{ display: 'block' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>新版本号</span>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>{text('New Version', '新版本号')}</span>
                   <div style={{ display: 'inline-flex', gap: 4 }}>
                     {(['patch', 'minor', 'major'] as const).map((k) => (
                       <button
@@ -1252,24 +1262,24 @@ export function Editor() {
                 </div>
                 <input className="input" value={submitVersion} onChange={(e) => setSubmitVersion(e.target.value)} placeholder={nextVersion} style={{ width: '100%', fontFamily: "'JetBrains Mono', monospace" }} />
                 {submitVersion && !SEMVER_RE.test(submitVersion) && (
-                  <div style={{ fontSize: 11, color: 'var(--red-text)', marginTop: 4 }}>不是合法 semver 格式</div>
+                  <div style={{ fontSize: 11, color: 'var(--red-text)', marginTop: 4 }}>{text('Not a valid semver format', '不是合法 semver 格式')}</div>
                 )}
               </label>
               <label style={{ display: 'block' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>提交说明（可选）</span>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>{text('Submission Note (optional)', '提交说明（可选）')}</span>
                   <button
                     type="button"
                     className="btn sm ghost"
                     style={{ fontSize: 10.5, padding: '2px 8px', gap: 4 }}
                     onClick={draftSubmitNote}
                     disabled={submitting}
-                    title={draftingNote ? '点击停止生成' : '让 AI 根据文档内容起草提交说明'}
+                    title={draftingNote ? text('Click to stop generation', '点击停止生成') : text('Let AI draft a submission note from the document content', '让 AI 根据文档内容起草提交说明')}
                   >
-                    <IconSparkles size={11} /> {draftingNote ? '生成中... 点击停止' : 'AI 起草'}
+                    <IconSparkles size={11} /> {draftingNote ? text('Generating... Stop', '生成中... 点击停止') : text('AI Draft', 'AI 起草')}
                   </button>
                 </div>
-                <textarea className="input" rows={4} value={submitNote} onChange={(e) => setSubmitNote(e.target.value)} placeholder={draftingNote ? 'AI 正在生成...' : '本次变更的关键点,会显示给审批人...'} style={{ width: '100%', resize: 'vertical' }} />
+                <textarea className="input" rows={4} value={submitNote} onChange={(e) => setSubmitNote(e.target.value)} placeholder={draftingNote ? text('AI is generating...', 'AI 正在生成...') : text('Key points in this change, shown to reviewers...', '本次变更的关键点,会显示给审批人...')} style={{ width: '100%', resize: 'vertical' }} />
                 {draftErr && (
                   <div style={{ fontSize: 11.5, color: 'var(--red-text)', marginTop: 4 }}>{draftErr}</div>
                 )}
@@ -1285,10 +1295,10 @@ export function Editor() {
                     style={{ accentColor: 'var(--red)' }}
                   />
                   <span style={{ fontWeight: 600, color: submitHotfix ? 'var(--red-text)' : 'var(--text)' }}>
-                    Hotfix 紧急通道
+                    {text('Hotfix Path', 'Hotfix 紧急通道')}
                   </span>
                   <span style={{ color: 'var(--text-faint)', fontSize: 11.5 }}>
-                    1 审批人 · SLA 4h · 仅生产事故
+                    {text('1 reviewer · SLA 4h · production incidents only', '1 审批人 · SLA 4h · 仅生产事故')}
                   </span>
                 </label>
                 {submitHotfix && (
@@ -1298,7 +1308,7 @@ export function Editor() {
                       rows={2}
                       value={submitHotfixReason}
                       onChange={(e) => setSubmitHotfixReason(e.target.value)}
-                      placeholder="必填:简要说明紧急原因(将进入审计日志)"
+                      placeholder={text('Required: briefly describe the emergency reason (saved to audit logs)', '必填:简要说明紧急原因(将进入审计日志)')}
                       style={{ width: '100%', resize: 'vertical', borderColor: 'var(--red)' }}
                     />
                   </div>
@@ -1309,17 +1319,17 @@ export function Editor() {
                   rule set their submission will be evaluated against. */}
               {submitHotfix ? (
                 <div style={{ fontSize: 12, color: 'var(--red-text)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                  Hotfix 策略: <span className="mono">1 审批人</span> · SLA <span className="mono">4h</span> · 自动绕过分类升级
+                  {text('Hotfix policy:', 'Hotfix 策略:')} <span className="mono">{text('1 reviewer', '1 审批人')}</span> · SLA <span className="mono">4h</span> · {text('bypasses classification escalation automatically', '自动绕过分类升级')}
                   <div style={{ color: 'var(--text-faint)', fontSize: 11, marginTop: 2 }}>
-                    将进入紧急审批通道,后续会进入审计日志。
+                    {text('This enters the emergency review path and will be recorded in audit logs.', '将进入紧急审批通道,后续会进入审计日志。')}
                   </div>
                 </div>
               ) : policy.data && (
                 <div style={{ fontSize: 12, color: 'var(--text-subtle)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                  策略: <span className="tag indigo">{policy.data.classification}</span>{' '}
+                  {text('Policy:', '策略:')} <span className="tag indigo">{policy.data.classification}</span>{' '}
                   {policy.data.mode} · SLA <span className="mono">{policy.data.slaHours}h</span>
                   {(policy.data.suggested ?? []).length > 0 && (
-                    <> · 建议审批人 {(policy.data.suggested ?? []).map((u) => `@${u}`).join(', ')}</>
+                    <> · {text('Suggested reviewers', '建议审批人')} {(policy.data.suggested ?? []).map((u) => `@${u}`).join(', ')}</>
                   )}
                 </div>
               )}
@@ -1329,7 +1339,7 @@ export function Editor() {
                 <div style={{ fontSize: 12, color: 'var(--text-subtle)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
                   <div style={{ marginBottom: 6 }}>
                     <span style={{ color: 'var(--amber-text)', fontWeight: 600 }}>{dirtyPaths.size}</span>{' '}
-                    个未保存文件，提交前会先保存：
+                    {text('unsaved files will be saved before submission:', '个未保存文件，提交前会先保存：')}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {Array.from(dirtyPaths).map((p) => {
@@ -1348,7 +1358,7 @@ export function Editor() {
                                 className="btn sm ghost"
                                 style={{ fontSize: 10.5, padding: '1px 7px' }}
                                 onClick={() => setShowDiffFor(expanded ? null : p)}
-                              >{expanded ? '收起' : '查看变更'}</button>
+                              >{expanded ? text('Collapse', '收起') : text('View Changes', '查看变更')}</button>
                             )}
                           </div>
                           {expanded && (
@@ -1358,7 +1368,7 @@ export function Editor() {
                               fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5, lineHeight: 1.5,
                             }}>
                               {diffLines.length === 0
-                                ? <div style={{ padding: '6px 10px', color: 'var(--text-faint)' }}>无差异</div>
+                                ? <div style={{ padding: '6px 10px', color: 'var(--text-faint)' }}>{text('No differences', '无差异')}</div>
                                 : diffLines.map((l, i) => (
                                   <div key={i} style={{
                                     padding: '0 10px', whiteSpace: 'pre',
@@ -1382,14 +1392,14 @@ export function Editor() {
               )}
             </div>
             <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button className="btn" onClick={() => setShowSubmit(false)} disabled={submitting}>取消</button>
+              <button className="btn" onClick={() => setShowSubmit(false)} disabled={submitting}>{text('Cancel', '取消')}</button>
               <button
                 className="btn primary"
                 disabled={submitting || !submitVersion.trim() || preflight.blockers.length > 0}
                 onClick={submitForReview}
-                title={preflight.blockers.length > 0 ? '存在 validation 错误，请先修复' : '确认提交审批'}
+                title={preflight.blockers.length > 0 ? text('Validation errors exist. Fix them first.', '存在 validation 错误，请先修复') : text('Confirm submission', '确认提交审批')}
               >
-                <IconRocket size={13} /> {submitting ? '提交中...' : '确认提交'}
+                <IconRocket size={13} /> {submitting ? text('Submitting...', '提交中...') : text('Confirm Submit', '确认提交')}
               </button>
             </div>
           </div>
@@ -1407,7 +1417,7 @@ export function Editor() {
             style={{ background: 'var(--bg)', borderRadius: 10, width: 560, maxWidth: '92vw', maxHeight: '90vh', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}
           >
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>新建文件</h3>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{text('New File', '新建文件')}</h3>
               <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
                 {(['template', 'upload'] as const).map((m) => (
                   <button
@@ -1415,7 +1425,7 @@ export function Editor() {
                     type="button"
                     className={`btn sm ${newFileMode === m ? 'primary' : 'ghost'}`}
                     onClick={() => { setNewFileMode(m); setNewFileErr(null); setUploadErr(null); setUploadFiles([]); }}
-                  >{m === 'template' ? '从模板创建' : '上传本地文件'}</button>
+                  >{m === 'template' ? text('From Template', '从模板创建') : text('Upload Local Files', '上传本地文件')}</button>
                 ))}
               </div>
             </div>
@@ -1424,7 +1434,7 @@ export function Editor() {
                 <>
                   <label>
                     <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 6 }}>
-                      选择文件（支持多选；文件名即路径）
+                      {text('Choose files (multi-select supported; file name becomes the path)', '选择文件（支持多选；文件名即路径）')}
                     </div>
                     <input
                       type="file"
@@ -1440,7 +1450,7 @@ export function Editor() {
                   </label>
                   {uploadFiles.length > 0 && (
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      已选 {uploadFiles.length} 个文件：{uploadFiles.map((f) => f.name).join('、')}
+                      {text(`Selected ${uploadFiles.length} files: `, `已选 ${uploadFiles.length} 个文件：`)}{uploadFiles.map((f) => f.name).join(text(', ', '、'))}
                     </div>
                   )}
                   {uploadErr && (
@@ -1452,7 +1462,7 @@ export function Editor() {
               ) : (
               <>
               <label>
-                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>路径</div>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 4 }}>{text('Path', '路径')}</div>
                 <input
                   className="input"
                   value={newFilePath}
@@ -1464,18 +1474,18 @@ export function Editor() {
                 />
                 {newFileContent && (
                   <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
-                    已选模板 · 创建后将写入 {newFileContent.length} 字符的起始内容
+                    {text(`Template selected · ${newFileContent.length} characters of starter content will be written`, `已选模板 · 创建后将写入 ${newFileContent.length} 字符的起始内容`)}
                     <button
                       type="button"
                       onClick={() => setNewFileContent('')}
                       style={{ marginLeft: 8, border: 'none', background: 'transparent', color: 'var(--primary)', cursor: 'pointer', fontSize: 11, padding: 0 }}
-                    >清除</button>
+                    >{text('Clear', '清除')}</button>
                   </div>
                 )}
               </label>
 
               <div>
-                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 6 }}>模板（点击选择）</div>
+                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 6 }}>{text('Templates (click to select)', '模板（点击选择）')}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {TEMPLATE_GROUPS.map((group) => (
                     <div key={group.title}>
@@ -1498,7 +1508,7 @@ export function Editor() {
                                 setNewFileErr(null);
                               }}
                               style={{ fontSize: 11, padding: '3px 8px', fontFamily: "'JetBrains Mono', monospace" }}
-                              title={taken ? '该文件已存在' : (tpl.desc ?? tpl.path)}
+                              title={taken ? text('This file already exists', '该文件已存在') : (tpl.desc ?? tpl.path)}
                             >{tpl.path}</button>
                           );
                         })}
@@ -1517,7 +1527,7 @@ export function Editor() {
               )}
             </div>
             <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button type="button" className="btn" onClick={closeNewFileDialog} disabled={newFileBusy || uploadBusy}>取消</button>
+              <button type="button" className="btn" onClick={closeNewFileDialog} disabled={newFileBusy || uploadBusy}>{text('Cancel', '取消')}</button>
               {newFileMode === 'upload' ? (
                 <button
                   type="button"
@@ -1525,11 +1535,11 @@ export function Editor() {
                   disabled={uploadBusy || uploadFiles.length === 0}
                   onClick={uploadLocalFiles}
                 >
-                  <IconPlus size={13} /> {uploadBusy ? '上传中...' : `上传 ${uploadFiles.length || ''} 个文件`}
+                  <IconPlus size={13} /> {uploadBusy ? text('Uploading...', '上传中...') : text(`Upload ${uploadFiles.length || ''} files`, `上传 ${uploadFiles.length || ''} 个文件`)}
                 </button>
               ) : (
                 <button type="submit" className="btn primary" disabled={newFileBusy || !newFilePath.trim()}>
-                  <IconPlus size={13} /> {newFileBusy ? '创建中...' : '创建'}
+                  <IconPlus size={13} /> {newFileBusy ? text('Creating...', '创建中...') : text('Create', '创建')}
                 </button>
               )}
             </div>
@@ -1541,7 +1551,7 @@ export function Editor() {
         <div className="card" style={{ marginBottom: 'var(--gap)', borderLeft: '3px solid var(--primary)' }}>
           <div className="card-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 13 }}>{msg}</span>
-            <button className="btn sm ghost" onClick={() => setMsg(null)}>关闭</button>
+            <button className="btn sm ghost" onClick={() => setMsg(null)}>{text('Close', '关闭')}</button>
           </div>
         </div>
       )}
@@ -1551,7 +1561,7 @@ export function Editor() {
           <div className="file-row dir" style={{ fontWeight: 600 }}>
             <IconChevronDown size={12} /> {name}
           </div>
-          {files.loading && <div style={{ padding: 12, fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
+          {files.loading && <div style={{ padding: 12, fontSize: 12, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>}
           {files.error && <div style={{ padding: 12, fontSize: 12, color: 'var(--red-text)' }}>{files.error.message}</div>}
           {files.data && (
             <FileTree
@@ -1565,12 +1575,12 @@ export function Editor() {
             />
           )}
           {/* Placeholder rows for recommended dirs that don't exist yet.
-              Clicking "+" seeds the dir with a README so it shows up in the
+              Clicking "+" seeds the dir with an index.md so it shows up in the
               tree (the backend has no concept of empty dirs). */}
           {canEdit && files.data && bundleStatus.missingStdDirs.length > 0 && (
             <div style={{ margin: '6px 4px 0', paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
               <div style={{ fontSize: 10.5, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '2px 8px 4px' }}>
-                推荐目录
+                {text('Recommended Directories', '推荐目录')}
               </div>
               {bundleStatus.missingStdDirs.map((key) => {
                 const d = STD_DIRS.find((x) => x.key === key)!;
@@ -1594,9 +1604,9 @@ export function Editor() {
             <button
               className="file-tree-new"
               onClick={() => openNewFileDialog()}
-              title="新建文件"
+              title={text('New File', '新建文件')}
             >
-              <IconPlus size={12} /> 新建文件
+              <IconPlus size={12} /> {text('New File', '新建文件')}
             </button>
           )}
         </div>
@@ -1604,7 +1614,7 @@ export function Editor() {
         <div className="editor-main">
           <div className="editor-tabs">
             {openPaths.length === 0 ? (
-              <div className="editor-tab" style={{ color: 'var(--text-faint)' }}>未选择文件</div>
+              <div className="editor-tab" style={{ color: 'var(--text-faint)' }}>{text('No file selected', '未选择文件')}</div>
             ) : (
               openPaths.map((p) => {
                 const isActive = p === activePath;
@@ -1622,7 +1632,7 @@ export function Editor() {
                     {dirty && <span style={{ color: 'var(--amber-text)' }}>•</span>}
                     <button
                       onClick={(e) => { e.stopPropagation(); closeFile(p); }}
-                      title="关闭"
+                      title={text('Close', '关闭')}
                       style={{
                         width: 18, height: 18, marginLeft: 4, border: 'none', background: 'transparent',
                         color: 'var(--text-faint)', cursor: 'pointer', borderRadius: 3, fontSize: 13,
@@ -1643,20 +1653,19 @@ export function Editor() {
               fontSize: 12, display: 'flex', alignItems: 'center', gap: 10,
             }}>
               <span style={{ flex: 1 }}>
-                发现 <span className="mono">{activePath}</span> 的本地未提交草稿
-                (保存于 {new Date(pendingRestore[activePath].ts).toLocaleString()})
-                ,与服务器版本不一致。
+                {text('Found an unsubmitted local draft for ', '发现 ')}<span className="mono">{activePath}</span>
+                {text(` (saved at ${new Date(pendingRestore[activePath].ts).toLocaleString(locale)}) that differs from the server version.`, ` 的本地未提交草稿(保存于 ${new Date(pendingRestore[activePath].ts).toLocaleString(locale)}),与服务器版本不一致。`)}
               </span>
               <button
                 className="btn sm primary"
                 style={{ padding: '2px 10px', fontSize: 11 }}
                 onClick={() => applyRestore(activePath)}
-              >恢复草稿</button>
+              >{text('Restore Draft', '恢复草稿')}</button>
               <button
                 className="btn sm ghost"
                 style={{ padding: '2px 10px', fontSize: 11 }}
                 onClick={() => discardRestore(activePath)}
-              >丢弃</button>
+              >{text('Discard', '丢弃')}</button>
             </div>
           )}
           {/* Frontmatter form — SKILL.md only. Lets the user edit the
@@ -1675,7 +1684,7 @@ export function Editor() {
                   padding: '6px 12px', cursor: 'pointer',
                   color: 'var(--text-muted)', fontWeight: 500,
                 }}
-                title={fmCollapsed ? '展开 Frontmatter 表单' : '折叠 Frontmatter 表单'}
+                title={fmCollapsed ? text('Expand frontmatter form', '展开 Frontmatter 表单') : text('Collapse frontmatter form', '折叠 Frontmatter 表单')}
               >
                 {fmCollapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
                 <span>Frontmatter</span>
@@ -1683,7 +1692,7 @@ export function Editor() {
                   <span style={{
                     fontSize: 10.5, padding: '1px 6px', borderRadius: 4,
                     background: 'var(--amber-bg)', color: 'var(--amber-text)',
-                  }}>缺失</span>
+                  }}>{text('Missing', '缺失')}</span>
                 )}
                 {skillMdFm.hasFrontmatter && skillMdFm.fields.name && (
                   <span style={{ color: 'var(--text-faint)', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
@@ -1705,7 +1714,7 @@ export function Editor() {
                     label="description"
                     fieldKey="description"
                     upstream={skillMdFm.fields.description ?? ''}
-                    placeholder="一句话描述这个 skill"
+                    placeholder={text('One-sentence description of this skill', '一句话描述这个 skill')}
                     multiline
                     readOnly={!canEdit}
                     onCommit={writeFrontmatter}
@@ -1738,7 +1747,7 @@ export function Editor() {
                     .filter((k) => !['name', 'description', 'license', 'version', 'tags'].includes(k))
                     .length > 0 && (
                     <div style={{ fontSize: 11, color: 'var(--text-faint)', paddingLeft: 84 }}>
-                      其他字段（在 Monaco 中编辑）:{' '}
+                      {text('Other fields (edit in Monaco): ', '其他字段（在 Monaco 中编辑）: ')}
                       {Object.keys(skillMdFm.fields)
                         .filter((k) => !['name', 'description', 'license', 'version', 'tags'].includes(k))
                         .map((k) => <span key={k} className="mono" style={{ marginRight: 6 }}>{k}</span>)}
@@ -1759,11 +1768,11 @@ export function Editor() {
               background: 'var(--bg-soft)',
               fontSize: 11.5,
             }}>
-              <span style={{ color: 'var(--text-faint)', marginRight: 4 }}>视图</span>
+              <span style={{ color: 'var(--text-faint)', marginRight: 4 }}>{text('View', '视图')}</span>
               {([
-                { key: 'code',    label: '编辑',  title: '仅编辑器' },
-                { key: 'split',   label: '并排',  title: '左编辑右预览' },
-                { key: 'preview', label: '预览',  title: '仅预览' },
+                { key: 'code',    label: text('Edit', '编辑'),  title: text('Editor only', '仅编辑器') },
+                { key: 'split',   label: text('Split', '并排'),  title: text('Editor on the left, preview on the right', '左编辑右预览') },
+                { key: 'preview', label: text('Preview', '预览'),  title: text('Preview only', '仅预览') },
               ] as const).map((m) => (
                 <button
                   key={m.key}
@@ -1839,7 +1848,7 @@ export function Editor() {
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   color: 'var(--text-faint)', background: '#1e1e1e',
                 }}>
-                  {activePath ? '加载文件中...' : '请从左侧文件树选择一个文件'}
+                  {activePath ? text('Loading file...', '加载文件中...') : text('Choose a file from the tree on the left', '请从左侧文件树选择一个文件')}
                 </div>
               )}
             </div>
@@ -1856,7 +1865,7 @@ export function Editor() {
                 {activeBuf ? (
                   <div className="readme" dangerouslySetInnerHTML={{ __html: previewHtml }} />
                 ) : (
-                  <div style={{ color: 'var(--text-faint)', fontSize: 13 }}>加载中...</div>
+                  <div style={{ color: 'var(--text-faint)', fontSize: 13 }}>{text('Loading...', '加载中...')}</div>
                 )}
               </div>
             )}
@@ -1865,7 +1874,7 @@ export function Editor() {
 
         <div className="editor-side">
           <div className="editor-side-section">
-            <div className="editor-side-title">Bundle 结构</div>
+            <div className="editor-side-title">{text('Bundle Structure', 'Bundle 结构')}</div>
             <div style={{ fontSize: 12, lineHeight: 1.55 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
                 {bundleStatus.hasSkillMD
@@ -1878,7 +1887,7 @@ export function Editor() {
                     className="btn sm ghost"
                     style={{ padding: '0 6px', height: 20, fontSize: 11 }}
                     onClick={() => openFile('SKILL.md')}
-                  >打开</button>
+                  >{text('Open', '打开')}</button>
                 ) : canEdit && (
                   <button
                     type="button"
@@ -1888,7 +1897,7 @@ export function Editor() {
                       const tpl = TEMPLATE_GROUPS[0].items.find((t) => t.path === 'SKILL.md');
                       openNewFileDialog({ path: 'SKILL.md', content: tpl?.content });
                     }}
-                  >创建</button>
+                  >{text('Create', '创建')}</button>
                 )}
               </div>
               {STD_DIRS.map((d) => {
@@ -1908,14 +1917,14 @@ export function Editor() {
                         className="btn sm ghost"
                         style={{ padding: '0 6px', height: 20, fontSize: 11 }}
                         onClick={() => createStdDir(d.key)}
-                        title={`一键创建 ${d.label}/ 目录（写入 README.md 占位）`}
-                      >+ 创建</button>
+                        title={text(`Create the ${d.label}/ directory with a placeholder index.md`, `一键创建 ${d.label}/ 目录（写入 index.md 占位）`)}
+                      >+ {text('Create', '创建')}</button>
                     )}
                   </div>
                 );
               })}
               <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 6, lineHeight: 1.4 }}>
-                推荐结构：SKILL.md 元数据 + scripts/ 脚本 + references/ 参考 + assets/ 资源。
+                {text('Recommended structure: SKILL.md metadata + scripts/ + references/ + assets/.', '推荐结构：SKILL.md 元数据 + scripts/ 脚本 + references/ 参考 + assets/ 资源。')}
               </div>
               {files.data && files.data.length > 0 && (
                 <div style={{
@@ -1923,7 +1932,7 @@ export function Editor() {
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   fontSize: 11,
                 }}>
-                  <span style={{ color: 'var(--text-faint)' }}>Token 预估</span>
+                  <span style={{ color: 'var(--text-faint)' }}>{text('Token Estimate', 'Token 预估')}</span>
                   <span style={{
                     fontFamily: "'JetBrains Mono', monospace", fontWeight: 600,
                     color: totalTokens > 80000 ? 'var(--red-text)' : totalTokens > 32000 ? 'var(--amber-text)' : 'var(--green-text)',
@@ -1935,7 +1944,7 @@ export function Editor() {
 
           {outline.length > 0 && (
             <div className="editor-side-section">
-              <div className="editor-side-title">大纲 · {activePath}</div>
+              <div className="editor-side-title">{text('Outline', '大纲')} · {activePath}</div>
               <div style={{ fontSize: 12, lineHeight: 1.5, maxHeight: 240, overflow: 'auto' }}>
                 {outline.map((h, idx) => (
                   <div
@@ -1962,30 +1971,30 @@ export function Editor() {
           )}
 
           <div className="editor-side-section">
-            <div className="editor-side-title">审批策略</div>
-            {policy.loading && <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
+            <div className="editor-side-title">{text('Review Policy', '审批策略')}</div>
+            {policy.loading && <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>}
             {policy.error && <div style={{ fontSize: 12, color: 'var(--red-text)' }}>{policy.error.message}</div>}
             {policy.data && (
               <div style={{ fontSize: 12, lineHeight: 1.55 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ color: 'var(--text-subtle)' }}>分类</span>
+                  <span style={{ color: 'var(--text-subtle)' }}>{text('Classification', '分类')}</span>
                   <span className="tag indigo">{policy.data.classification}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ color: 'var(--text-subtle)' }}>模式</span>
+                  <span style={{ color: 'var(--text-subtle)' }}>{text('Mode', '模式')}</span>
                   <span className="mono">{policy.data.mode}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                   <span style={{ color: 'var(--text-subtle)' }}>SLA</span>
                   <span className="mono">{policy.data.slaHours}h</span>
                 </div>
-                <div style={{ color: 'var(--text-subtle)', marginBottom: 4 }}>建议审批人</div>
+                <div style={{ color: 'var(--text-subtle)', marginBottom: 4 }}>{text('Suggested Reviewers', '建议审批人')}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                   {(policy.data.suggested ?? []).map((u) => (
                     <span key={u} className="tag" style={{ fontSize: 11 }}>@{u}</span>
                   ))}
                   {(!policy.data.suggested || policy.data.suggested.length === 0) && (
-                    <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>无可用审批人</span>
+                    <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>{text('No available reviewers', '无可用审批人')}</span>
                   )}
                 </div>
               </div>
@@ -2002,7 +2011,7 @@ export function Editor() {
                 }}>{validation.data.score}/100</span>
               )}
             </div>
-            {validation.loading && <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>}
+            {validation.loading && <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>}
             {validation.error && <div style={{ fontSize: 12, color: 'var(--red-text)' }}>{validation.error.message}</div>}
             {validation.data?.checks.map((v) => {
               const cls = v.severity === 'ok' ? 'green' : v.severity === 'warn' ? 'amber' : 'red';
@@ -2012,13 +2021,13 @@ export function Editor() {
                 <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', fontSize: 12.5 }} title={v.detail}>
                   <Icon size={14} style={{ color, flexShrink: 0 }} />
                   <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.label}</span>
-                  <span className={`tag ${cls}`}>{v.severity === 'ok' ? '通过' : v.severity === 'warn' ? '警告' : '错误'}</span>
+                  <span className={`tag ${cls}`}>{v.severity === 'ok' ? text('Pass', '通过') : v.severity === 'warn' ? text('Warn', '警告') : text('Error', '错误')}</span>
                   {v.severity !== 'ok' && (
                     <button
                       type="button"
                       className="btn sm ghost"
                       style={{ padding: '0 4px', height: 18, fontSize: 10, flexShrink: 0 }}
-                      title="让 AI 自动修复此问题"
+                      title={text('Ask AI to fix this issue', '让 AI 自动修复此问题')}
                       onClick={() => {
                         setAIOpen(true);
                         setAiTrigger({ action: 'fix-validation', instruction: `${v.label}: ${v.detail}` });
@@ -2031,18 +2040,18 @@ export function Editor() {
           </div>
 
           <div className="editor-side-section">
-            <div className="editor-side-title">未保存的文件</div>
-            {dirtyPaths.size === 0 && <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>无</div>}
+            <div className="editor-side-title">{text('Unsaved Files', '未保存的文件')}</div>
+            {dirtyPaths.size === 0 && <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>{text('None', '无')}</div>}
             {Array.from(dirtyPaths).map((p) => (
               <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', fontSize: 12 }}>
                 <span style={{ color: 'var(--amber-text)' }}>•</span>
                 <span className="mono" style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p}>{p}</span>
-                <button className="btn sm ghost" style={{ padding: '0 6px', height: 20, fontSize: 11 }} onClick={() => openFile(p)}>打开</button>
+                <button className="btn sm ghost" style={{ padding: '0 6px', height: 20, fontSize: 11 }} onClick={() => openFile(p)}>{text('Open', '打开')}</button>
               </div>
             ))}
             {dirtyPaths.size > 1 && (
               <button className="btn sm" style={{ width: '100%', marginTop: 8 }} onClick={saveAll} disabled={saving}>
-                <IconCode size={12} /> {saving ? '保存中...' : `全部保存 (${dirtyPaths.size})`}
+                <IconCode size={12} /> {saving ? text('Saving...', '保存中...') : text(`Save All (${dirtyPaths.size})`, `全部保存 (${dirtyPaths.size})`)}
               </button>
             )}
           </div>
@@ -2064,7 +2073,7 @@ export function Editor() {
 
       {showFilePicker && files.data && (
         <FilePicker
-          files={files.data}
+          files={displayFiles}
           onPick={openFile}
           onClose={() => setShowFilePicker(false)}
         />

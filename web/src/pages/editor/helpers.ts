@@ -61,27 +61,27 @@ export function draftKeyFor(ns: string, name: string, path: string): string {
 // --------- recommended-dir seeding --------------------------------------
 
 // Quick-create stub for a missing recommended dir. We seed the dir with a
-// short README.md so the directory actually exists in storage (the backend
-// has no concept of empty dirs) and so the file gives the maintainer a hint
-// about what to put there.
+// short index.md so the directory actually exists in storage (the backend has
+// no concept of empty dirs) and so the file gives the maintainer a hint about
+// what to put there.
 export function seedFileForDir(d: StdDirKey, name: string): { path: string; content: string } {
   switch (d) {
     case 'scripts':
       return {
-        path: 'scripts/README.md',
+        path: 'scripts/index.md',
         content: '# scripts/\n\n可执行脚本（Python / Shell / TypeScript）。\n\n约定:\n- 第一个 shebang 行声明解释器\n- 每个脚本都应能独立运行\n',
       };
     case 'references':
       return {
-        path: 'references/README.md',
+        path: 'references/index.md',
         content: '# references/\n\n参考资料与长篇说明文档放在这里。SKILL.md 应当只放最关键的指引，详细内容链接到这里。\n',
       };
     case 'assets':
       return {
-        path: 'assets/README.md',
+        path: 'assets/index.md',
         content: '# assets/\n\n模板、Prompt 片段、静态资源（JSON / YAML / 图片等）放在这里。\n',
       };
   }
   // Unreachable but TS demands the path.
-  return { path: `${name}/README.md`, content: `# ${name}/\n` };
+  return { path: `${name}/index.md`, content: `# ${name}/\n` };
 }

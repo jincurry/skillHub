@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import type { Me } from '../api/types';
 import { IconX, IconUpload, IconTrash } from './Icons';
 import { avatarFallbackGradient } from '../lib/profile';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 interface Props {
   open: boolean;
@@ -15,6 +16,7 @@ const ACCEPT = 'image/jpeg,image/png,image/webp,image/gif';
 const MAX_BYTES = 2 * 1024 * 1024;
 
 export function AvatarUploadModal({ open, me, onClose, onUpdated }: Props) {
+  const { isEnglish, text } = useLocaleText();
   const fileInput = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [chosen, setChosen] = useState<File | null>(null);
@@ -46,11 +48,11 @@ export function AvatarUploadModal({ open, me, onClose, onUpdated }: Props) {
     setErr(null);
     if (!f) return;
     if (!ACCEPT.split(',').includes(f.type)) {
-      setErr('不支持的格式，请选 JPG / PNG / WebP / GIF');
+      setErr(text('Unsupported format. Choose JPG / PNG / WebP / GIF.', '不支持的格式，请选 JPG / PNG / WebP / GIF'));
       return;
     }
     if (f.size > MAX_BYTES) {
-      setErr(`文件过大（${(f.size / 1024 / 1024).toFixed(2)}MB），上限 2MB`);
+      setErr(text(`File too large (${(f.size / 1024 / 1024).toFixed(2)}MB). Limit is 2MB.`, `文件过大（${(f.size / 1024 / 1024).toFixed(2)}MB），上限 2MB`));
       return;
     }
     setChosen(f);
@@ -75,7 +77,7 @@ export function AvatarUploadModal({ open, me, onClose, onUpdated }: Props) {
 
   async function removeAvatar() {
     if (!me.avatarUrl) return;
-    if (!window.confirm('确定要清除当前头像、恢复默认渐变？')) return;
+    if (!window.confirm(text('Remove the current avatar and restore the default gradient?', '确定要清除当前头像、恢复默认渐变？'))) return;
     setBusy(true);
     setErr(null);
     try {
@@ -102,8 +104,8 @@ export function AvatarUploadModal({ open, me, onClose, onUpdated }: Props) {
         boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)',
       }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>修改头像</h3>
-          <button className="btn sm ghost" onClick={onClose} disabled={busy} title="关闭"><IconX size={14} /></button>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{text('Change Avatar', '修改头像')}</h3>
+          <button className="btn sm ghost" onClick={onClose} disabled={busy} title={text('Close', '关闭')}><IconX size={14} /></button>
         </div>
 
         <div style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
@@ -120,8 +122,8 @@ export function AvatarUploadModal({ open, me, onClose, onUpdated }: Props) {
           </div>
 
           <div style={{ fontSize: 12, color: 'var(--text-subtle)', textAlign: 'center', lineHeight: 1.5 }}>
-            支持 JPG / PNG / WebP / GIF，最大 <strong>2MB</strong>。<br />
-            建议正方形图，过宽会被裁剪显示。
+            {text('Supports JPG / PNG / WebP / GIF, max ', '支持 JPG / PNG / WebP / GIF，最大 ')}<strong>2MB</strong>{isEnglish ? '.' : '。'}<br />
+            {text('Square images are recommended. Wide images will be cropped.', '建议正方形图，过宽会被裁剪显示。')}
           </div>
 
           <input
@@ -134,18 +136,18 @@ export function AvatarUploadModal({ open, me, onClose, onUpdated }: Props) {
 
           <div style={{ display: 'flex', gap: 8, width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
             <button className="btn" onClick={() => fileInput.current?.click()} disabled={busy}>
-              <IconUpload size={13} /> 选择图片
+              <IconUpload size={13} /> {text('Choose Image', '选择图片')}
             </button>
             {me.avatarUrl && (
               <button className="btn" onClick={removeAvatar} disabled={busy} style={{ color: 'var(--red-text)' }}>
-                <IconTrash size={13} /> 移除当前头像
+                <IconTrash size={13} /> {text('Remove Current Avatar', '移除当前头像')}
               </button>
             )}
           </div>
 
           {chosen && (
             <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
-              已选择：<span className="mono">{chosen.name}</span> · {(chosen.size / 1024).toFixed(0)}KB
+              {text('Selected: ', '已选择：')}<span className="mono">{chosen.name}</span> · {(chosen.size / 1024).toFixed(0)}KB
             </div>
           )}
 
@@ -153,9 +155,9 @@ export function AvatarUploadModal({ open, me, onClose, onUpdated }: Props) {
         </div>
 
         <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn" onClick={onClose} disabled={busy}>取消</button>
+          <button className="btn" onClick={onClose} disabled={busy}>{text('Cancel', '取消')}</button>
           <button className="btn primary" disabled={!chosen || busy} onClick={submit}>
-            {busy ? '上传中...' : '保存'}
+            {busy ? text('Uploading...', '上传中...') : text('Save', '保存')}
           </button>
         </div>
       </div>

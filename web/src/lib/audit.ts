@@ -43,6 +43,31 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   delete_file: '删除文件',
 };
 
+export const AUDIT_ACTION_LABEL_EN: Record<string, string> = {
+  publish: 'Publish',
+  yank: 'Yank',
+  deprecated: 'Deprecate',
+  approve_review: 'Approve review',
+  reject_review: 'Reject review',
+  request_changes: 'Request changes',
+  submit_review: 'Submit review',
+  create_draft: 'Create draft',
+  create_namespace: 'Create namespace',
+  delete_namespace: 'Delete namespace',
+  add_maintainer: 'Add maintainer',
+  remove_maintainer: 'Remove maintainer',
+  activate: 'Activate',
+  update_settings: 'Update settings',
+  rotate_key: 'Rotate key',
+  update_profile: 'Update profile',
+  edit_file: 'Edit file',
+  delete_file: 'Delete file',
+};
+
+export function auditActionLabel(action: string, isEnglish: boolean): string {
+  return (isEnglish ? AUDIT_ACTION_LABEL_EN[action] : AUDIT_ACTION_LABEL[action]) ?? action;
+}
+
 /**
  * Coarse-grained category for the audit-tab filter chips.
  * release: lifecycle changes (publish, yank, deprecate)

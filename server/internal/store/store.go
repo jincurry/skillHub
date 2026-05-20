@@ -36,7 +36,7 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(`ALTER TABLE users ADD COLUMN joined_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'`); err == nil {
 		_, _ = db.Exec(`UPDATE users SET joined_at = CURRENT_TIMESTAMP WHERE joined_at = '1970-01-01 00:00:00'`)
 	}
-	// Backfill: long-form description for skills (markdown-ish README body).
+	// Backfill: long-form description for skills (markdown-ish body).
 	_, _ = db.Exec(`ALTER TABLE skills ADD COLUMN long_desc TEXT NOT NULL DEFAULT ''`)
 	// Backfill: when a review was decided, used by the avg-decision-hours stat.
 	_, _ = db.Exec(`ALTER TABLE reviews ADD COLUMN decided_at DATETIME`)
@@ -142,8 +142,8 @@ func (s *Store) backfillDailyMetrics() error {
 		return err
 	}
 	type skillRow struct {
-		ns, name           string
-		weekly, deltaPct   int
+		ns, name         string
+		weekly, deltaPct int
 	}
 	var skills []skillRow
 	for rows.Next() {

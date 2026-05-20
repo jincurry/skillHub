@@ -1,4 +1,5 @@
 import { memo, useEffect, useState, type CSSProperties } from 'react';
+import { useLocaleText } from '../../i18n/useLocaleText';
 
 /** A single labelled input that holds its own typing buffer and only flushes
  *  to the parent on blur (or Enter). This avoids re-rendering the Monaco
@@ -97,6 +98,7 @@ function TagsFieldImpl({
   readOnly: boolean;
   onCommit: (key: string, val: string) => void;
 }) {
+  const { text } = useLocaleText();
   const [input, setInput] = useState('');
   const tags = upstream ? upstream.split(',').map((t) => t.trim()).filter(Boolean) : [];
 
@@ -141,7 +143,7 @@ function TagsFieldImpl({
               if (e.key === 'Backspace' && !input && tags.length > 0) removeTag(tags[tags.length - 1]);
             }}
             onBlur={() => { if (input.trim()) addTag(input); }}
-            placeholder={tags.length ? '继续添加…' : '输入后按 Enter 或逗号添加标签'}
+            placeholder={tags.length ? text('Add more...', '继续添加…') : text('Type and press Enter or comma to add tags', '输入后按 Enter 或逗号添加标签')}
             style={{
               fontSize: 12, padding: '3px 8px', width: '100%',
               background: 'var(--bg)', border: '1px solid var(--border)',

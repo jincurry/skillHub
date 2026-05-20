@@ -263,8 +263,7 @@ func (s *Store) UpdateSkillMeta(ns, name string, req model.UpdateSkillMetaReques
 		args = append(args, c)
 	}
 	if req.Version != nil {
-		sets = append(sets, "version = ?")
-		args = append(args, strings.TrimSpace(*req.Version))
+		return nil, errors.New("version cannot be updated via skill metadata; use the draft review and publish flow")
 	}
 	if req.Tags != nil {
 		sets = append(sets, "tags_csv = ?")
@@ -285,7 +284,7 @@ func (s *Store) UpdateSkillMeta(ns, name string, req model.UpdateSkillMetaReques
 	return s.GetSkill(ns, name)
 }
 
-// SetSkillLongDesc updates the markdown README body of a skill. Author or a
+// SetSkillLongDesc updates the long-form markdown body of a skill. Author or a
 // namespace maintainer/owner is expected to be enforced by the caller.
 func (s *Store) SetSkillLongDesc(ns, name, longDesc string) error {
 	res, err := s.DB.Exec(`UPDATE skills SET long_desc = ?, updated_at = CURRENT_TIMESTAMP WHERE ns = ? AND name = ?`,

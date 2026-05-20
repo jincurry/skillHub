@@ -8,17 +8,18 @@ import {
   IconSparkles, IconSend, IconStop, IconRefresh, IconCopy,
   IconCheck, IconX, IconChevronDown,
 } from './Icons';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 // What the user sees on the preset action grid. Keep ids in sync with
 // server/internal/api/ai.go::actionTemplate.
-const PRESETS: { id: AIAssistAction; label: string; hint: string }[] = [
-  { id: 'outline',    label: '生成大纲',  hint: '从零生成 SKILL.md 完整大纲' },
-  { id: 'expand',     label: '补充细节',  hint: '保持结构，扩充内容和示例' },
-  { id: 'polish',     label: '润色文笔',  hint: '更清晰更专业，不增删信息' },
-  { id: 'examples',   label: '加示例',    hint: '在合适位置补充使用示例' },
-  { id: 'summary',    label: '加 TL;DR',  hint: '在文档顶部加 3 行摘要' },
-  { id: 'translate',  label: '翻译为英文', hint: '保留代码块和结构' },
-  { id: 'review',     label: '体检',       hint: '不改文档，给改进清单' },
+const PRESETS: { id: AIAssistAction; labelEn: string; labelZh: string; hintEn: string; hintZh: string }[] = [
+  { id: 'outline',    labelEn: 'Draft Outline', hintEn: 'Generate a complete SKILL.md outline from scratch', labelZh: '生成大纲',  hintZh: '从零生成 SKILL.md 完整大纲' },
+  { id: 'expand',     labelEn: 'Add Detail',    hintEn: 'Keep the structure and expand content and examples', labelZh: '补充细节',  hintZh: '保持结构，扩充内容和示例' },
+  { id: 'polish',     labelEn: 'Polish',        hintEn: 'Make it clearer and more professional without changing meaning', labelZh: '润色文笔',  hintZh: '更清晰更专业，不增删信息' },
+  { id: 'examples',   labelEn: 'Add Examples',  hintEn: 'Add usage examples where they fit', labelZh: '加示例',    hintZh: '在合适位置补充使用示例' },
+  { id: 'summary',    labelEn: 'Add TL;DR',     hintEn: 'Add a 3-line summary at the top', labelZh: '加 TL;DR',  hintZh: '在文档顶部加 3 行摘要' },
+  { id: 'translate',  labelEn: 'Translate to English', hintEn: 'Preserve code blocks and structure', labelZh: '翻译为英文', hintZh: '保留代码块和结构' },
+  { id: 'review',     labelEn: 'Review',        hintEn: 'Do not edit the doc; return an improvement checklist', labelZh: '体检',       hintZh: '不改文档，给改进清单' },
 ];
 
 export interface EditorBridge {
@@ -56,6 +57,7 @@ interface Props {
 }
 
 export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allFiles, validationErrors, triggerAction, onTriggerConsumed }: Props) {
+  const { text } = useLocaleText();
   const [providers, setProviders] = useState<AIProviderRef[] | null>(null);
   const [providerId, setProviderId] = useState<number | null>(null);
   const [providersErr, setProvidersErr] = useState<string | null>(null);
@@ -131,7 +133,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
     if (running) return;
     const inst = freshInstruction !== undefined ? freshInstruction : instruction;
     if (action === 'freeform' && !inst.trim()) {
-      setStreamErr('自由指令不能为空');
+      setStreamErr(text('Free-form instruction is required', '自由指令不能为空'));
       return;
     }
     const sel = useSelection ? bridge.getSelection() : '';
@@ -147,7 +149,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
     // Snapshot the user's prompt for this turn — we re-use it on completion
     // to record the (user, assistant) pair into chatHistory.
     const userPromptSummary = inst.trim() ||
-      (PRESETS.find((p) => p.id === action)?.label ?? action);
+      (PRESETS.find((p) => p.id === action)?.labelEn ?? action);
     handleRef.current = runAssist(ns, name, {
       providerId,
       action,
@@ -206,7 +208,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      setStreamErr('复制失败，请手动选中后 Ctrl+C');
+      setStreamErr(text('Copy failed. Select manually and press Ctrl+C.', '复制失败，请手动选中后 Ctrl+C'));
     }
   }
 
@@ -255,12 +257,12 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
           <IconSparkles size={16} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>AI 助手</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{text('AI Assistant', 'AI 助手')}</div>
           <div style={{ fontSize: 11, color: 'var(--text-subtle)' }}>
             {ns}/{name} · {filePath}
           </div>
         </div>
-        <button className="btn sm ghost" onClick={onClose} title="关闭"><IconX size={14} /></button>
+        <button className="btn sm ghost" onClick={onClose} title={text('Close', '关闭')}><IconX size={14} /></button>
       </div>
 
       {/* Multi-turn toggle row — collapses to a single line so it doesn't
@@ -282,7 +284,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
             }}
             style={{ margin: 0 }}
           />
-          多轮上下文
+          {text('Multi-turn context', '多轮上下文')}
         </label>
         <span style={{ color: 'var(--text-faint)' }}>·</span>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
@@ -292,12 +294,12 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
             onChange={(e) => setIncludeAllFiles(e.target.checked)}
             style={{ margin: 0 }}
           />
-          含全部文件
+          {text('Include all files', '含全部文件')}
         </label>
         {multiTurn && (
           <>
             <span style={{ color: 'var(--text-faint)' }}>·</span>
-            <span>已记 {chatHistory.length / 2} 轮</span>
+            <span>{text(`${chatHistory.length / 2} turns remembered`, `已记 ${chatHistory.length / 2} 轮`)}</span>
             {chatHistory.length > 0 && (
               <button
                 type="button"
@@ -308,7 +310,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
                   borderRadius: 3, background: 'transparent',
                   color: 'var(--text-muted)', cursor: 'pointer',
                 }}
-              >清空</button>
+              >{text('Clear', '清空')}</button>
             )}
           </>
         )}
@@ -317,15 +319,16 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
       <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
         {/* Provider selector */}
         <div>
-          <Label>模型</Label>
+          <Label>{text('Model', '模型')}</Label>
           {providersErr && <div style={{ fontSize: 11, color: 'var(--red-text)' }}>{providersErr}</div>}
           {!providersErr && providers === null && (
-            <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>加载中...</div>
+            <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{text('Loading...', '加载中...')}</div>
           )}
           {providers !== null && providers.length === 0 && (
             <div style={{ fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.55 }}>
-              管理员还没有配置 AI 模型。请联系管理员，或前往
-              <a href="/admin" style={{ marginLeft: 4 }}>管理后台 → AI 模型</a> 添加。
+              {text('No AI models are configured yet. Contact an admin or go to ', '管理员还没有配置 AI 模型。请联系管理员，或前往')}
+              <a href="/admin" style={{ marginLeft: 4 }}>{text('Admin -> AI Models', '管理后台 → AI 模型')}</a>
+              {text(' to add one.', ' 添加。')}
             </div>
           )}
           {providers && providers.length > 0 && (
@@ -343,7 +346,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
               >
                 {providers.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} · {p.model}{p.isDefault ? ' (默认)' : ''}
+                    {p.name} · {p.model}{p.isDefault ? text(' (default)', ' (默认)') : ''}
                   </option>
                 ))}
               </select>
@@ -357,7 +360,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
 
         {/* Preset actions */}
         <div>
-          <Label>快捷动作</Label>
+          <Label>{text('Quick Actions', '快捷动作')}</Label>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
             {PRESETS.map((preset) => {
               const active = activeAction === preset.id && running;
@@ -367,7 +370,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
                   type="button"
                   disabled={!hasProvider || running}
                   onClick={() => start(preset.id)}
-                  title={preset.hint}
+                  title={text(preset.hintEn, preset.hintZh)}
                   style={{
                     textAlign: 'left',
                     padding: '8px 10px',
@@ -380,8 +383,8 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
                     transition: 'background 0.12s',
                   }}
                 >
-                  <div style={{ fontWeight: 600 }}>{preset.label}</div>
-                  <div style={{ fontSize: 10.5, color: 'var(--text-subtle)', marginTop: 2 }}>{preset.hint}</div>
+                  <div style={{ fontWeight: 600 }}>{text(preset.labelEn, preset.labelZh)}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-subtle)', marginTop: 2 }}>{text(preset.hintEn, preset.hintZh)}</div>
                 </button>
               );
             })}
@@ -390,11 +393,11 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
 
         {/* Free-form instruction */}
         <div>
-          <Label>自由指令</Label>
+          <Label>{text('Free-form Instruction', '自由指令')}</Label>
           <textarea
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
-            placeholder="例如：在 ## 用法 之后加一段 Python 调用示例"
+            placeholder={text('Example: add a Python usage example after ## Usage', '例如：在 ## 用法 之后加一段 Python 调用示例')}
             rows={3}
             disabled={running}
             style={{
@@ -410,11 +413,11 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
               checked={useSelection}
               onChange={(e) => setUseSelection(e.target.checked)}
             />
-            只针对编辑器中选中的内容
+            {text('Use selected editor content only', '只针对编辑器中选中的内容')}
           </label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
             <div style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>
-              预计发送 ~{fmtTokens(inputTokens)} tok
+              {text('Estimated input', '预计发送')} ~{fmtTokens(inputTokens)} tok
             </div>
             <div style={{ flex: 1 }} />
             {!running ? (
@@ -423,7 +426,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
                 disabled={!hasProvider || !instruction.trim()}
                 onClick={() => start('freeform')}
               >
-                <IconSend size={12} /> 运行
+                <IconSend size={12} /> {text('Run', '运行')}
               </button>
             ) : (
               <button
@@ -431,7 +434,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
                 onClick={stop}
                 style={{ color: 'var(--red-text)' }}
               >
-                <IconStop size={12} /> 停止
+                <IconStop size={12} /> {text('Stop', '停止')}
               </button>
             )}
           </div>
@@ -441,8 +444,8 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minHeight: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <Label>
-              输出
-              {running && <span style={{ color: 'var(--primary)', fontSize: 10.5, marginLeft: 6 }}>● 流式生成中</span>}
+              {text('Output', '输出')}
+              {running && <span style={{ color: 'var(--primary)', fontSize: 10.5, marginLeft: 6 }}>● {text('Streaming', '流式生成中')}</span>}
               {hasOutput && (
                 <span style={{ color: 'var(--text-faint)', fontSize: 10.5, marginLeft: 6, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
                   ~{fmtTokens(outputTokens)} tok
@@ -461,7 +464,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
                       color: viewMode === 'rendered' ? '#fff' : 'var(--text-muted)',
                       cursor: 'pointer',
                     }}
-                  >预览</button>
+                  >{text('Preview', '预览')}</button>
                   <button
                     type="button"
                     onClick={() => setViewMode('raw')}
@@ -472,7 +475,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
                       color: viewMode === 'raw' ? '#fff' : 'var(--text-muted)',
                       cursor: 'pointer',
                     }}
-                  >原文</button>
+                  >{text('Raw', '原文')}</button>
                 </div>
               )}
               {hasOutput && (
@@ -480,7 +483,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
                   <button
                     className="btn sm ghost"
                     onClick={copyOutput}
-                    title="复制全部"
+                    title={text('Copy all', '复制全部')}
                   >
                     {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
                   </button>
@@ -488,7 +491,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
                     className="btn sm ghost"
                     onClick={() => { setOutput(''); setStreamErr(null); }}
                     disabled={running}
-                    title="清空"
+                    title={text('Clear', '清空')}
                   >
                     <IconX size={12} />
                   </button>
@@ -524,7 +527,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
             >
               {hasOutput ? output : (
                 <span style={{ color: 'var(--text-faint)' }}>
-                  {running ? '...' : '点击上方动作按钮，或填写自由指令后运行。'}
+                  {running ? '...' : text('Click an action above, or enter a free-form instruction and run it.', '点击上方动作按钮，或填写自由指令后运行。')}
                 </span>
               )}
             </div>
@@ -540,12 +543,12 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
         {/* Apply / regenerate row — only meaningful once we have output */}
         {hasOutput && !running && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            <button className="btn sm" onClick={() => bridge.insertAtCursor(output)}>插入光标</button>
-            <button className="btn sm" onClick={() => bridge.replaceSelection(output)}>替换选中</button>
-            <button className="btn sm" onClick={() => bridge.replaceAll(output)}>替换全文</button>
+            <button className="btn sm" onClick={() => bridge.insertAtCursor(output)}>{text('Insert at Cursor', '插入光标')}</button>
+            <button className="btn sm" onClick={() => bridge.replaceSelection(output)}>{text('Replace Selection', '替换选中')}</button>
+            <button className="btn sm" onClick={() => bridge.replaceAll(output)}>{text('Replace All', '替换全文')}</button>
             <div style={{ flex: 1 }} />
-            <button className="btn sm ghost" onClick={regenerate} title="用相同指令重新生成">
-              <IconRefresh size={12} /> 重新生成
+            <button className="btn sm ghost" onClick={regenerate} title={text('Regenerate with the same instruction', '用相同指令重新生成')}>
+              <IconRefresh size={12} /> {text('Regenerate', '重新生成')}
             </button>
           </div>
         )}
@@ -556,7 +559,7 @@ export function AIAssistDrawer({ open, ns, name, filePath, bridge, onClose, allF
         padding: '8px 16px', borderTop: '1px solid var(--border)',
         fontSize: 10.5, color: 'var(--text-faint)',
       }}>
-        AI 输出仅作为草稿。建议在保存前阅读并自行调整。
+        {text('AI output is only a draft. Review and adjust it before saving.', 'AI 输出仅作为草稿。建议在保存前阅读并自行调整。')}
       </div>
     </aside>
   );

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { AIProvider } from '../api/types';
 import { IconX } from './Icons';
+import { useLocaleText } from '../i18n/useLocaleText';
 
 interface Props {
   open: boolean;
@@ -22,6 +23,7 @@ const URL_HINTS = [
 ];
 
 export function AIProviderModal({ open, editing, onClose, onSaved }: Props) {
+  const { text } = useLocaleText();
   const isEdit = !!editing;
   const [name, setName] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
@@ -67,11 +69,11 @@ export function AIProviderModal({ open, editing, onClose, onSaved }: Props) {
   // We only require a key when creating; on edit, leaving it blank means
   // "keep the existing one" which the server enforces.
   function validate(): string | null {
-    if (!name.trim()) return '名称必填';
-    if (!baseUrl.trim()) return 'Base URL 必填';
-    if (!model.trim()) return 'Model 必填';
-    if (!isEdit && !apiKey.trim()) return 'API Key 必填';
-    if (!/^https?:\/\//.test(baseUrl.trim())) return 'Base URL 必须以 http:// 或 https:// 开头';
+    if (!name.trim()) return text('Name is required', '名称必填');
+    if (!baseUrl.trim()) return text('Base URL is required', 'Base URL 必填');
+    if (!model.trim()) return text('Model is required', 'Model 必填');
+    if (!isEdit && !apiKey.trim()) return text('API Key is required', 'API Key 必填');
+    if (!/^https?:\/\//.test(baseUrl.trim())) return text('Base URL must start with http:// or https://', 'Base URL 必须以 http:// 或 https:// 开头');
     return null;
   }
 
@@ -147,29 +149,29 @@ export function AIProviderModal({ open, editing, onClose, onSaved }: Props) {
         }}>
           <div>
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
-              {isEdit ? '编辑 AI 模型' : '新增 AI 模型'}
+              {isEdit ? text('Edit AI Model', '编辑 AI 模型') : text('Add AI Model', '新增 AI 模型')}
             </h3>
             <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
-              支持任何 OpenAI 兼容协议（DeepSeek / Moonshot / Qwen / Azure / Ollama 等）
+              {text('Supports any OpenAI-compatible API (DeepSeek / Moonshot / Qwen / Azure / Ollama, etc.)', '支持任何 OpenAI 兼容协议（DeepSeek / Moonshot / Qwen / Azure / Ollama 等）')}
             </div>
           </div>
-          <button className="btn sm ghost" onClick={onClose} disabled={busy} title="关闭">
+          <button className="btn sm ghost" onClick={onClose} disabled={busy} title={text('Close', '关闭')}>
             <IconX size={14} />
           </button>
         </div>
 
         <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
-          <Field label="名称" hint="给这个模型起个易记的别名">
+          <Field label={text('Name', '名称')} hint={text('Give this model a memorable alias', '给这个模型起个易记的别名')}>
             <input
               className="input"
               value={name}
               onChange={(e) => { setName(e.target.value); setTestResult(null); }}
-              placeholder="如：公司 GPT-4o-mini"
+              placeholder={text('Example: Company GPT-4o-mini', '如：公司 GPT-4o-mini')}
               style={{ width: '100%' }}
             />
           </Field>
 
-          <Field label="Base URL" hint="OpenAI 兼容的 v1 入口（不要带 /chat/completions）">
+          <Field label="Base URL" hint={text('OpenAI-compatible v1 endpoint (do not include /chat/completions)', 'OpenAI 兼容的 v1 入口（不要带 /chat/completions）')}>
             <input
               className="input"
               value={baseUrl}
@@ -193,19 +195,19 @@ export function AIProviderModal({ open, editing, onClose, onSaved }: Props) {
             </div>
           </Field>
 
-          <Field label="Model" hint="API 请求里发给上游的 model 字段">
+          <Field label="Model" hint={text('The model field sent to the upstream API', 'API 请求里发给上游的 model 字段')}>
             <input
               className="input"
               value={model}
               onChange={(e) => { setModel(e.target.value); setTestResult(null); }}
-              placeholder="如：deepseek-chat / gpt-4o-mini / qwen-plus"
+              placeholder={text('Example: deepseek-chat / gpt-4o-mini / qwen-plus', '如：deepseek-chat / gpt-4o-mini / qwen-plus')}
               style={{ width: '100%', fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
             />
           </Field>
 
           <Field
-            label={isEdit ? 'API Key（留空则保留原 key）' : 'API Key'}
-            hint="加密存储，永不返回前端"
+            label={isEdit ? text('API Key (leave blank to keep the current key)', 'API Key（留空则保留原 key）') : 'API Key'}
+            hint={text('Encrypted at rest and never returned to the client', '加密存储，永不返回前端')}
           >
             <div style={{ display: 'flex', gap: 6 }}>
               <input
@@ -213,14 +215,14 @@ export function AIProviderModal({ open, editing, onClose, onSaved }: Props) {
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={(e) => { setApiKey(e.target.value); setTestResult(null); }}
-                placeholder={isEdit && editing?.hasKey ? '已配置（不变请留空）' : 'sk-...'}
+                placeholder={isEdit && editing?.hasKey ? text('Configured (leave blank to keep unchanged)', '已配置（不变请留空）') : 'sk-...'}
                 style={{ flex: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
               />
               <button
                 type="button"
                 className="btn sm"
                 onClick={() => setShowKey((v) => !v)}
-              >{showKey ? '隐藏' : '显示'}</button>
+              >{showKey ? text('Hide', '隐藏') : text('Show', '显示')}</button>
             </div>
           </Field>
 
@@ -231,7 +233,7 @@ export function AIProviderModal({ open, editing, onClose, onSaved }: Props) {
                 checked={enabled}
                 onChange={(e) => setEnabled(e.target.checked)}
               />
-              启用
+              {text('Enable', '启用')}
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
               <input
@@ -239,18 +241,18 @@ export function AIProviderModal({ open, editing, onClose, onSaved }: Props) {
                 checked={isDefault}
                 onChange={(e) => setIsDefault(e.target.checked)}
               />
-              设为默认
+              {text('Set as default', '设为默认')}
             </label>
           </div>
 
           {testResult && 'ok' in testResult && (
             <div style={{ fontSize: 12, color: 'var(--green-text)', background: 'var(--green-bg)', padding: '6px 10px', borderRadius: 6 }}>
-              ✓ 连通成功
+              {text('✓ Connection succeeded', '✓ 连通成功')}
             </div>
           )}
           {testResult && 'error' in testResult && (
             <div style={{ fontSize: 12, color: 'var(--red-text)', background: 'var(--red-bg)', padding: '6px 10px', borderRadius: 6, lineHeight: 1.5 }}>
-              连通失败：{testResult.error}
+              {text('Connection failed: ', '连通失败：')}{testResult.error}
             </div>
           )}
           {err && (
@@ -265,14 +267,14 @@ export function AIProviderModal({ open, editing, onClose, onSaved }: Props) {
           <div>
             {isEdit && (
               <button className="btn sm" onClick={runTest} disabled={busy}>
-                测试连通
+                {text('Test Connection', '测试连通')}
               </button>
             )}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={onClose} disabled={busy}>取消</button>
+            <button className="btn" onClick={onClose} disabled={busy}>{text('Cancel', '取消')}</button>
             <button className="btn primary" onClick={submit} disabled={busy}>
-              {busy ? '保存中...' : '保存'}
+              {busy ? text('Saving...', '保存中...') : text('Save', '保存')}
             </button>
           </div>
         </div>

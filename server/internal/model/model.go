@@ -46,8 +46,8 @@ type Review struct {
 	SubmittedAt    time.Time `json:"submittedAt"`
 	// IsHotfix flags the emergency channel: reviewers see a banner, the
 	// approval requirement is relaxed (1 reviewer), and the SLA is 4h.
-	IsHotfix       bool            `json:"isHotfix"`
-	HotfixReason   string          `json:"hotfixReason,omitempty"`
+	IsHotfix     bool   `json:"isHotfix"`
+	HotfixReason string `json:"hotfixReason,omitempty"`
 	// PolicySnapshot is the policy frozen at submission time. Nil means the
 	// review predates the snapshot feature; the UI should fall back to the
 	// live policy then.
@@ -59,13 +59,13 @@ type Review struct {
 // the policy package (which would create a cycle once the store reads
 // reviews through model).
 type PolicySnapshot struct {
-	Classification string         `json:"classification"`
-	Mode           string         `json:"mode"` // parallel|serial
-	SLAHours       int            `json:"slaHours"`
-	Slots          []PolicySlot   `json:"slots"`
+	Classification string       `json:"classification"`
+	Mode           string       `json:"mode"` // parallel|serial
+	SLAHours       int          `json:"slaHours"`
+	Slots          []PolicySlot `json:"slots"`
 	// Hotfix marks this snapshot as the override used by the emergency
 	// channel — handy for the reviewer-facing UI to label it clearly.
-	Hotfix         bool           `json:"hotfix,omitempty"`
+	Hotfix bool `json:"hotfix,omitempty"`
 }
 
 type PolicySlot struct {
@@ -170,10 +170,10 @@ type ReviewStats struct {
 	Total             int     `json:"total"`
 	Pending           int     `json:"pending"`
 	Approved          int     `json:"approved"`
-	Rejected          int     `json:"rejected"`           // includes changes_requested
-	Overdue           int     `json:"overdue"`            // pending + urgency=overdue
-	SLAComplianceRate float64 `json:"slaComplianceRate"`  // % of decided reviews not overdue
-	AvgDecisionHours  float64 `json:"avgDecisionHours"`   // -1 when no data yet
+	Rejected          int     `json:"rejected"`          // includes changes_requested
+	Overdue           int     `json:"overdue"`           // pending + urgency=overdue
+	SLAComplianceRate float64 `json:"slaComplianceRate"` // % of decided reviews not overdue
+	AvgDecisionHours  float64 `json:"avgDecisionHours"`  // -1 when no data yet
 }
 
 // CreateNamespaceRequest is the body for POST /namespaces. Owner defaults to
@@ -217,19 +217,19 @@ type AIProviderSummary struct {
 // set is tiny. SkillsByStatus and ReviewsByStatus map the enum values back
 // to counts so the client can render a stacked bar without a second call.
 type PlatformMetrics struct {
-	Users              int                `json:"users"`
-	Namespaces         int                `json:"namespaces"`
-	TotalSkills        int                `json:"totalSkills"`
-	SkillsByStatus     map[string]int     `json:"skillsByStatus"`
-	TotalReviews       int                `json:"totalReviews"`
-	ReviewsByStatus    map[string]int     `json:"reviewsByStatus"`
-	AvgDecisionHours   float64            `json:"avgDecisionHours"`
-	SlaComplianceRate  float64            `json:"slaComplianceRate"`
-	Overdue            int                `json:"overdue"`
-	AIProviders        AIProviderSummary  `json:"aiProviders"`
-	Activations30d     int                `json:"activations30d"`
-	ActivationsTrend   []TrendPoint       `json:"activationsTrend"`
-	RecentAudit        []AuditLog         `json:"recentAudit"`
+	Users             int               `json:"users"`
+	Namespaces        int               `json:"namespaces"`
+	TotalSkills       int               `json:"totalSkills"`
+	SkillsByStatus    map[string]int    `json:"skillsByStatus"`
+	TotalReviews      int               `json:"totalReviews"`
+	ReviewsByStatus   map[string]int    `json:"reviewsByStatus"`
+	AvgDecisionHours  float64           `json:"avgDecisionHours"`
+	SlaComplianceRate float64           `json:"slaComplianceRate"`
+	Overdue           int               `json:"overdue"`
+	AIProviders       AIProviderSummary `json:"aiProviders"`
+	Activations30d    int               `json:"activations30d"`
+	ActivationsTrend  []TrendPoint      `json:"activationsTrend"`
+	RecentAudit       []AuditLog        `json:"recentAudit"`
 }
 
 // ReviewFile is one file's snapshot inside a review request. BaseContent is
@@ -272,9 +272,9 @@ type Achievement struct {
 
 // SearchResult is the bag returned by the global ⌘K search endpoint.
 type SearchResult struct {
-	Skills     []Skill          `json:"skills"`
-	Namespaces []Namespace      `json:"namespaces"`
-	Users      []SearchUserHit  `json:"users"`
+	Skills     []Skill         `json:"skills"`
+	Namespaces []Namespace     `json:"namespaces"`
+	Users      []SearchUserHit `json:"users"`
 }
 
 // SearchUserHit is the user shape exposed by /search. We deliberately do not
@@ -308,7 +308,7 @@ type CreateSkillRequest struct {
 	Tags           []string `json:"tags"`
 	// TemplateID seeds the new skill's bundle from a built-in template
 	// (see internal/templates). Empty = the default SKILL.md / skill.yaml /
-	// README.md trio produced by SeedDefaultFiles.
+	// skill.yaml pair produced by SeedDefaultFiles.
 	TemplateID string `json:"templateId"`
 }
 
@@ -402,20 +402,20 @@ type UpdateAIProviderRequest struct {
 // AIAssistRequest is the editor -> server message that kicks off a streaming
 // LLM call for documentation help.
 type AIAssistRequest struct {
-	ProviderID       int64                  `json:"providerId"       binding:"required"`
-	Action           string                 `json:"action"`           // outline|expand|polish|examples|summary|translate|review|fix-validation|commit-summary|freeform
-	Instruction      string                 `json:"instruction"`      // user's free-form intent
-	Selection        string                 `json:"selection"`        // optional: only-this-region edits
-	CurrentContent   string                 `json:"currentContent"`   // full file body for context
-	FilePath         string                 `json:"filePath"`         // SKILL.md / README.md
-	History          []AIAssistTurn         `json:"history"`          // optional: prior turns in a multi-turn chat
+	ProviderID     int64          `json:"providerId"       binding:"required"`
+	Action         string         `json:"action"`         // outline|expand|polish|examples|summary|translate|review|fix-validation|commit-summary|freeform
+	Instruction    string         `json:"instruction"`    // user's free-form intent
+	Selection      string         `json:"selection"`      // optional: only-this-region edits
+	CurrentContent string         `json:"currentContent"` // full file body for context
+	FilePath       string         `json:"filePath"`       // SKILL.md / skill.yaml / etc.
+	History        []AIAssistTurn `json:"history"`        // optional: prior turns in a multi-turn chat
 	// AdditionalFiles gives the LLM cross-file context. Each entry maps
 	// path → content (truncated by the frontend to keep the prompt sane).
-	AdditionalFiles  map[string]string      `json:"additionalFiles"`
+	AdditionalFiles map[string]string `json:"additionalFiles"`
 	// ValidationErrors is populated by the frontend when the user triggers
 	// the "fix-validation" action. Each string is one human-readable error
 	// or warning line from the validation report.
-	ValidationErrors []string               `json:"validationErrors"`
+	ValidationErrors []string `json:"validationErrors"`
 }
 
 // AIAssistTurn is one prior message kept around so the LLM can see what the
@@ -429,10 +429,10 @@ type AIAssistTurn struct {
 // APIToken is the client-visible representation of a PAT. The raw token value
 // is only present in CreateAPITokenResponse (returned once at creation time).
 type APIToken struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Username  string    `json:"username"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID        int64      `json:"id"`
+	Name      string     `json:"name"`
+	Username  string     `json:"username"`
+	CreatedAt time.Time  `json:"createdAt"`
 	ExpiresAt *time.Time `json:"expiresAt"` // nil = never
 	LastUsed  *time.Time `json:"lastUsed"`
 }
@@ -450,7 +450,7 @@ type CreateAPITokenResponse struct {
 // Webhook is one registered HTTP callback endpoint.
 type Webhook struct {
 	ID        int64     `json:"id"`
-	Namespace string    `json:"ns"`      // "" = all namespaces
+	Namespace string    `json:"ns"` // "" = all namespaces
 	URL       string    `json:"url"`
 	HasSecret bool      `json:"hasSecret"`
 	Events    []string  `json:"events"`
@@ -487,9 +487,9 @@ type WebhookDelivery struct {
 
 // WebhookPayload is the JSON body posted to each registered endpoint.
 type WebhookPayload struct {
-	ID        string          `json:"id"`        // unique delivery id
-	Event     string          `json:"event"`     // e.g. skill.published
-	Timestamp time.Time       `json:"timestamp"`
+	ID        string           `json:"id"`    // unique delivery id
+	Event     string           `json:"event"` // e.g. skill.published
+	Timestamp time.Time        `json:"timestamp"`
 	Data      WebhookSkillData `json:"data"`
 }
 
@@ -510,11 +510,11 @@ type WebhookSkill struct {
 }
 
 type WebhookReview struct {
-	ID          int64     `json:"id"`
-	DecidedBy   string    `json:"decidedBy"`
-	Decision    string    `json:"decision"`
-	Note        string    `json:"note,omitempty"`
-	DecidedAt   time.Time `json:"decidedAt"`
+	ID        int64     `json:"id"`
+	DecidedBy string    `json:"decidedBy"`
+	Decision  string    `json:"decision"`
+	Note      string    `json:"note,omitempty"`
+	DecidedAt time.Time `json:"decidedAt"`
 }
 
 // ChangePasswordRequest body for PATCH /me/password.
@@ -560,6 +560,8 @@ type AdminUpdateUserRequest struct {
 
 // UpdateSkillMetaRequest is the body for PATCH /skills/:ns/:name.
 // All fields optional — only non-nil values are applied.
+// Version is intentionally rejected by the store; version changes must go
+// through the draft review and publish lifecycle.
 type UpdateSkillMetaRequest struct {
 	Description    *string  `json:"desc"`
 	LongDesc       *string  `json:"longDesc"`

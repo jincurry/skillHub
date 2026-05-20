@@ -27,3 +27,11 @@ export function languageFor(path: string): string {
       return path.toLowerCase().endsWith('dockerfile') ? 'dockerfile' : 'plaintext';
   }
 }
+
+export function isRootReadme(path: string): boolean {
+  return path.toLowerCase() === 'readme.md';
+}
+
+export function shouldDisplaySkillFile(path: string): boolean {
+  return !isRootReadme(path);
+}
