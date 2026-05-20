@@ -5,11 +5,11 @@ type Status = 'published' | 'draft' | 'review' | 'yanked' | 'deprecated';
 export function StatusPill({ status }: { status: Status }) {
   const { text } = useLocaleText();
   const map: Record<Status, { cls: string; label: string }> = {
-    published: { cls: 'published', label: 'Published' },
-    draft: { cls: 'draft', label: 'Draft' },
+    published: { cls: 'published', label: text('Published', '已发布') },
+    draft: { cls: 'draft', label: text('Draft', '草稿') },
     review: { cls: 'review', label: text('In Review', '审批中') },
-    yanked: { cls: 'yanked', label: 'Yanked' },
-    deprecated: { cls: 'deprecated', label: 'Deprecated' },
+    yanked: { cls: 'yanked', label: text('Yanked', '已撤销') },
+    deprecated: { cls: 'deprecated', label: text('Deprecated', '已弃用') },
   };
   const it = map[status] || map.draft;
   return (
