@@ -9,6 +9,7 @@ import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import type { AIAssistAction, ValidationReport } from '../api/types';
 import { AIAssistDrawer, type EditorBridge } from '../components/AIAssistDrawer';
+import { useConfirm } from '../components/useConfirm';
 import { runAssist, type AssistHandle } from '../lib/aiAssist';
 import { isRootReadme, languageFor, shouldDisplaySkillFile } from '../lib/files';
 import { renderMarkdown } from '../lib/markdown';
@@ -33,6 +34,7 @@ export function Editor() {
   const { ns = 'platform-team', name = 'go-code-review' } = useParams();
   const navigate = useNavigate();
   const { text, locale } = useLocaleText();
+  const [confirm, confirmEl] = useConfirm();
 
   const skill = useAsync(() => api.getSkill(ns, name), [ns, name]);
   const me = useAsync(() => api.me(), []);
@@ -62,9 +64,22 @@ export function Editor() {
     setActivePath(path);
   }
 
-  function closeFile(path: string) {
+  async function closeFile(path: string) {
     const buf = buffers[path];
-    if (buf?.dirty && !window.confirm(text(`${path} has unsaved changes. Closing will discard them. Continue?`, `${path} 有未保存修改，关闭将丢失，是否确认?`))) return;
+    if (buf?.dirty) {
+      const ok = await confirm({
+        title: text('Discard unsaved changes?', '放弃未保存修改？'),
+        message: text(
+          `${path} has unsaved changes. Closing this tab will discard them.`,
+          `${path} 有未保存的修改。关闭标签页将丢失这些改动。`,
+        ),
+        detail: text('You can save the file first if you want to keep them.', '如果想保留改动，请先保存文件。'),
+        confirmLabel: text('Discard and close', '放弃并关闭'),
+        cancelLabel: text('Cancel', '取消'),
+        tone: 'danger',
+      });
+      if (!ok) return;
+    }
     const idx = openPaths.indexOf(path);
     const nextOpen = openPaths.filter((p) => p !== path);
     setOpenPaths(nextOpen);
@@ -817,7 +832,15 @@ export function Editor() {
       setMsg(text(`${p} cannot be deleted`, `${p} 不可删除`));
       return;
     }
-    if (!window.confirm(text(`Delete file ${p}? This cannot be undone.`, `删除文件 ${p}? 此操作不可撤销。`))) return;
+    const ok = await confirm({
+      title: text('Delete file?', '删除文件？'),
+      message: text(`Delete ${p}?`, `确定删除 ${p}？`),
+      detail: text('This cannot be undone.', '此操作不可撤销。'),
+      confirmLabel: text('Delete', '删除'),
+      cancelLabel: text('Cancel', '取消'),
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.deleteFile(ns, name, p);
       setBuffers((b) => {
@@ -842,7 +865,18 @@ export function Editor() {
 
   async function discardAll() {
     if (dirtyPaths.size === 0) return;
-    if (!window.confirm(text(`Discard unsaved changes in ${dirtyPaths.size} files? They will be restored to the last saved state.`, `放弃 ${dirtyPaths.size} 个文件的未保存修改？将恢复为上次保存状态。`))) return;
+    const ok = await confirm({
+      title: text('Discard all unsaved changes?', '放弃全部未保存修改？'),
+      message: text(
+        `Discard unsaved changes in ${dirtyPaths.size} files? They will be restored to the last saved state.`,
+        `放弃 ${dirtyPaths.size} 个文件的未保存修改？将恢复为上次保存的状态。`,
+      ),
+      detail: text('This cannot be undone.', '此操作不可撤销。'),
+      confirmLabel: text('Discard all', '全部放弃'),
+      cancelLabel: text('Keep editing', '继续编辑'),
+      tone: 'danger',
+    });
+    if (!ok) return;
     const paths = Array.from(dirtyPaths);
     paths.forEach((p) => {
       try { localStorage.removeItem(draftKeyFor(ns, name, p)); } catch { /* ignore */ }
@@ -953,7 +987,17 @@ export function Editor() {
     // If a draft is still streaming, stop it first so we submit what we have.
     if (draftingNote) stopDraft();
     if (anyDirty) {
-      if (!window.confirm(text('There are unsaved changes. Save all before submitting?', '还有未保存的修改,要先保存全部再提交吗?'))) return;
+      const ok = await confirm({
+        title: text('Save before submitting?', '提交前先保存？'),
+        message: text(
+          'There are unsaved changes. Save all files before submitting for review?',
+          '还有未保存的修改。是否先保存全部文件再提交审批？',
+        ),
+        confirmLabel: text('Save and continue', '保存并继续'),
+        cancelLabel: text('Cancel', '取消'),
+        tone: 'primary',
+      });
+      if (!ok) return;
       await saveAll();
       if (Object.values(buffers).some((b) => b.dirty)) {
         setMsg(text('Some files could not be saved. Submission canceled.', '部分文件未能保存,提交已取消'));
@@ -2077,6 +2121,7 @@ export function Editor() {
           onClose={() => setShowFilePicker(false)}
         />
       )}
+      {confirmEl}
     </div>
   );
 }
