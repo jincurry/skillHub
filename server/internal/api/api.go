@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"database/sql"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -919,6 +920,12 @@ func (s *Server) decideReview(c *gin.Context) {
 		return
 	}
 	if err := s.store.DecideReview(id, req.Decision, req.Note, user); err != nil {
+		// Another reviewer raced us to a decision; surface 409 so the UI
+		// reloads instead of showing a generic 500.
+		if errors.Is(err, store.ErrReviewNotPending) {
+			c.JSON(409, gin.H{"error": "review already decided"})
+			return
+		}
 		serverError(c, err)
 		return
 	}

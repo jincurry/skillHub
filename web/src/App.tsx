@@ -1,8 +1,9 @@
-import { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { lazy, Suspense, type ReactNode } from 'react';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { RequireAuth } from './components/RequireAuth';
 import { RequireAdmin } from './components/RequireAdmin';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Workspace } from './pages/Workspace';
 import { Browse } from './pages/Browse';
 import { SkillDetail } from './pages/SkillDetail';
@@ -35,27 +36,53 @@ function EditorFallback() {
   );
 }
 
+// RouteBoundary wraps a single route element in an ErrorBoundary keyed on
+// pathname + search. React resets a boundary's error state when its key
+// changes, so navigating away from a broken page (then back) gives a fresh
+// mount instead of leaving the user stranded on the fallback UI.
+//
+// The boundary is intentionally placed *inside* the Layout outlet so the
+// sidebar / topbar keep working when only the page content blows up.
+function RouteBoundary({ children }: { children: ReactNode }) {
+  const loc = useLocation();
+  return (
+    <ErrorBoundary key={loc.pathname + loc.search}>
+      {children}
+    </ErrorBoundary>
+  );
+}
+
 export default function App() {
   return (
-    <Routes>
-      <Route path="login" element={<Login />} />
-      <Route path="register" element={<Register />} />
-      <Route element={<RequireAuth><Layout /></RequireAuth>}>
-        <Route index element={<Navigate to="/workspace" replace />} />
-        <Route path="workspace" element={<Workspace />} />
-        <Route path="skills" element={<Browse />} />
-        <Route path="skills/:ns/:name" element={<SkillDetail />} />
-        <Route
-          path="skills/:ns/:name/edit"
-          element={<Suspense fallback={<EditorFallback />}><Editor /></Suspense>}
-        />
-        <Route path="reviews" element={<Reviews />} />
-        <Route path="reviews/:id" element={<ReviewDetail />} />
-        <Route path="audit" element={<Audit />} />
-        <Route path="admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
-        <Route path="profile" element={<Profile />} />
-        <Route path="*" element={<Navigate to="/workspace" replace />} />
-      </Route>
-    </Routes>
+    // The outer boundary is the last line of defence — it catches errors
+    // raised by Layout / Sidebar / Topbar themselves (e.g. bad i18n key,
+    // crashed NotificationBell). Without it, a render-time exception in any
+    // shared chrome component would blank the whole SPA.
+    <ErrorBoundary>
+      <Routes>
+        <Route path="login" element={<Login />} />
+        <Route path="register" element={<Register />} />
+        <Route element={<RequireAuth><Layout /></RequireAuth>}>
+          <Route index element={<Navigate to="/workspace" replace />} />
+          <Route path="workspace" element={<RouteBoundary><Workspace /></RouteBoundary>} />
+          <Route path="skills" element={<RouteBoundary><Browse /></RouteBoundary>} />
+          <Route path="skills/:ns/:name" element={<RouteBoundary><SkillDetail /></RouteBoundary>} />
+          <Route
+            path="skills/:ns/:name/edit"
+            element={
+              <RouteBoundary>
+                <Suspense fallback={<EditorFallback />}><Editor /></Suspense>
+              </RouteBoundary>
+            }
+          />
+          <Route path="reviews" element={<RouteBoundary><Reviews /></RouteBoundary>} />
+          <Route path="reviews/:id" element={<RouteBoundary><ReviewDetail /></RouteBoundary>} />
+          <Route path="audit" element={<RouteBoundary><Audit /></RouteBoundary>} />
+          <Route path="admin" element={<RequireAdmin><RouteBoundary><Admin /></RouteBoundary></RequireAdmin>} />
+          <Route path="profile" element={<RouteBoundary><Profile /></RouteBoundary>} />
+          <Route path="*" element={<Navigate to="/workspace" replace />} />
+        </Route>
+      </Routes>
+    </ErrorBoundary>
   );
 }

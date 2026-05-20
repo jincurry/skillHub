@@ -11,6 +11,14 @@
   "app": {
     "loadingEditor": "正在加载编辑器…"
   },
+  "errorBoundary": {
+    "title": "页面渲染出错",
+    "description": "页面遇到了一个未预期的错误，建议重试该操作。",
+    "retry": "重试",
+    "reload": "刷新页面",
+    "goHome": "返回首页",
+    "details": "错误详情"
+  },
   "nav": {
     "section": "导航",
     "workspace": "工作台",

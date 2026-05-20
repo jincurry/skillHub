@@ -9,7 +9,15 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		// Misconfiguration (missing or weak JWT secret in production-like
+		// envs) is unrecoverable; surface a single line and exit.
+		log.Fatalf("config: %v", err)
+	}
+	if cfg.EphemeralJWTSecret {
+		log.Printf("warning: SKILLHUB_JWT_SECRET unset — using an ephemeral random secret (sessions reset on restart)")
+	}
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("store: %v", err)

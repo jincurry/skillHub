@@ -85,7 +85,7 @@ npm run dev
   |---|---|---|
   | `SKILLHUB_ADDR` | `:8080` | 监听地址 |
   | `SKILLHUB_DB` | `./skillhub.db` | SQLite 文件 |
-  | `SKILLHUB_JWT_SECRET` | `skillhub-dev-secret-change-me` | JWT 密钥（**生产必改**） |
+  | `SKILLHUB_JWT_SECRET` | _未设置时进程内生成临时随机密钥_ | JWT 密钥（**生产必须显式设置，至少 32 字节**；未设置时启动告警，重启后旧 token 失效；旧版默认值 `skillhub-dev-secret-change-me` 已被启动校验拒绝） |
   | `SKILLHUB_USER` | `alice` | 兜底身份（仅当请求未携带 token 且关闭中间件时使用） |
 
 - **数据库**：单 SQLite 文件，启动时执行 `schema.go` 内联建表 + `seed.go` 注入演示数据，启用 WAL；`server/skillhub.db*` 默认 gitignore。

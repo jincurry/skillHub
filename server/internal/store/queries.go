@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,6 +13,12 @@ import (
 	"github.com/jincurry/skillhub/server/internal/policy"
 	"github.com/jincurry/skillhub/server/internal/templates"
 )
+
+// ErrReviewNotPending is returned by DecideReview when the review row is no
+// longer in the "pending" status — typically because another reviewer has
+// already decided it concurrently. Callers should treat this as a 409
+// conflict rather than a generic 500.
+var ErrReviewNotPending = errors.New("review is not pending")
 
 // skillCols is the canonical SELECT column list for the skills table.
 // All queries that hydrate a model.Skill must use this constant so that
@@ -366,13 +373,27 @@ func (s *Store) DecideReview(id int64, decision, note, actor string) error {
 	} else {
 		skillStatus = "published"
 	}
-	if _, err := tx.Exec(`UPDATE reviews SET status=?, urgency=?, decided_at=CURRENT_TIMESTAMP WHERE id=?`,
-		newStatus, urgency, id); err != nil {
+	// Read the review row inside the transaction so that two reviewers
+	// racing to approve the same review can't both succeed. The UPDATE
+	// below uses status='pending' as a guard and bails when no rows are
+	// affected, turning the second caller into a clean 409.
+	var ns, name, version, author string
+	if err := tx.QueryRow(`SELECT ns,skill_name,version,author FROM reviews WHERE id=? AND status='pending'`, id).
+		Scan(&ns, &name, &version, &author); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrReviewNotPending
+		}
 		return err
 	}
-	var ns, name, version, author string
-	if err := tx.QueryRow(`SELECT ns,skill_name,version,author FROM reviews WHERE id=?`, id).Scan(&ns, &name, &version, &author); err != nil {
+	res, err := tx.Exec(`UPDATE reviews SET status=?, urgency=?, decided_at=CURRENT_TIMESTAMP
+		WHERE id=? AND status='pending'`, newStatus, urgency, id)
+	if err != nil {
 		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return ErrReviewNotPending
 	}
 	switch skillStatus {
 	case "published":
