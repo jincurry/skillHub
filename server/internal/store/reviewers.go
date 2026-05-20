@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/jincurry/skillhub/server/internal/audit"
 	"github.com/jincurry/skillhub/server/internal/model"
 )
 
@@ -82,8 +83,7 @@ func (s *Store) AddReviewer(reviewID int64, username, actor string) (*model.Revi
 	if _, err := tx.Exec(`UPDATE reviews SET reviewers_csv=? WHERE id=?`, newCSV, reviewID); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		actor, "add_reviewer", ns+"/"+name+":@"+username, "v"+version, "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, actor, "add_reviewer", ns+"/"+name+":@"+username, "v"+version, ""); err != nil {
 		return nil, err
 	}
 	body := "@" + actor + " 邀请你审批 " + ns + "/" + name + " v" + version
@@ -145,8 +145,7 @@ func (s *Store) RemoveReviewer(reviewID int64, username, actor string) (*model.R
 	if _, err := tx.Exec(`UPDATE reviews SET reviewers_csv=? WHERE id=?`, strings.Join(kept, ","), reviewID); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		actor, "remove_reviewer", ns+"/"+name+":@"+username, "v"+version, "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, actor, "remove_reviewer", ns+"/"+name+":@"+username, "v"+version, ""); err != nil {
 		return nil, err
 	}
 	// Notify the removed reviewer so the assignment doesn't silently vanish

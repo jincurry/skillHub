@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jincurry/skillhub/server/internal/audit"
 	"github.com/jincurry/skillhub/server/internal/model"
 )
 
@@ -86,8 +87,7 @@ func (s *Store) CreateDraftVersion(ns, name, newVersion, actor string) (*model.S
 		newVersion, ns, name); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		actor, "create_draft", ns+"/"+name, "v"+newVersion, "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, actor, "create_draft", ns+"/"+name, "v"+newVersion, ""); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -145,8 +145,7 @@ func (s *Store) AddNamespaceMember(ns, username, role, actor string) error {
 	if _, err := tx.Exec(`INSERT INTO namespace_members(ns, username, ns_role) VALUES(?, ?, ?)`, ns, username, role); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		actor, "add_member", ns+":@"+username+"/"+role, "", "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, actor, "add_member", ns+":@"+username+"/"+role, "", ""); err != nil {
 		return err
 	}
 	body := fmt.Sprintf("@%s 把你加入了 %s (%s)", actor, ns, role)
@@ -193,8 +192,7 @@ func (s *Store) UpdateNamespaceMemberRole(ns, username, role, actor string) erro
 	if _, err := tx.Exec(`UPDATE namespace_members SET ns_role=? WHERE ns=? AND username=?`, role, ns, username); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		actor, "update_member_role", ns+":@"+username+"/"+role, "", "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, actor, "update_member_role", ns+":@"+username+"/"+role, "", ""); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -227,8 +225,7 @@ func (s *Store) RemoveNamespaceMember(ns, username, actor string) error {
 	if _, err := tx.Exec(`DELETE FROM namespace_members WHERE ns=? AND username=?`, ns, username); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		actor, "remove_member", ns+":@"+username, "", "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, actor, "remove_member", ns+":@"+username, "", ""); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -442,8 +439,7 @@ func (s *Store) RollbackToVersion(ns, name, target, reason, actor string) (*mode
 
 	// Audit + fan-out notifications. Use a rollback-specific notification
 	// body so subscribers can tell this from a normal publish.
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		actor, "rollback", ns+"/"+name+": "+reason, "v"+target, "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, actor, "rollback", ns+"/"+name+": "+reason, "v"+target, ""); err != nil {
 		return nil, err
 	}
 	notifBody := ns + "/" + name + " 已回滚到 v" + target

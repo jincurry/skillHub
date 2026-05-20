@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jincurry/skillhub/server/internal/audit"
 	"github.com/jincurry/skillhub/server/internal/model"
 )
 
@@ -209,12 +210,10 @@ func (s *Server) aiAssist(c *gin.Context) {
 	// (e.g. cost spikes can be traced back to a user/skill).
 	target := ns + "/" + name
 	if streamErr != nil {
-		_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
-			user, "ai_assist_error", target, c.ClientIP())
+		audit.Log(s.store.DB, user, "ai_assist_error", target, "", c.ClientIP())
 		return
 	}
-	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
-		user, "ai_assist", target, c.ClientIP())
+	audit.Log(s.store.DB, user, "ai_assist", target, "", c.ClientIP())
 }
 
 // ---------- prompt + streaming helpers -----------------------------------

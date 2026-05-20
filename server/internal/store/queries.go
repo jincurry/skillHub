@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jincurry/skillhub/server/internal/audit"
 	"github.com/jincurry/skillhub/server/internal/model"
 	"github.com/jincurry/skillhub/server/internal/policy"
 	"github.com/jincurry/skillhub/server/internal/templates"
@@ -141,8 +142,9 @@ func (s *Store) CreateSkill(req model.CreateSkillRequest, author string) (*model
 		req.Namespace, req.Name, req.Description, req.Classification, "draft", "0.1.0", author, strings.Join(req.Tags, ",")); err != nil {
 		return nil, err
 	}
-	_, _ = s.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		author, "create_draft", req.Namespace+"/"+req.Name, "v0.1.0", "127.0.0.1")
+	// IP unknown at this layer — the api package augments it via audit.Log
+	// when needed. Empty is more honest than the legacy "127.0.0.1" lie.
+	audit.Log(s.DB, author, "create_draft", req.Namespace+"/"+req.Name, "v0.1.0", "")
 	// Seed the bundle. With a templateId, render the named template; otherwise
 	// fall back to the default bare SKILL.md scaffold. Both paths are
 	// best-effort: a seeding error doesn't block skill creation since the row
@@ -426,8 +428,7 @@ func (s *Store) DecideReview(id int64, decision, note, actor string) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		actor, action, ns+"/"+name, "v"+version, "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, actor, action, ns+"/"+name, "v"+version, ""); err != nil {
 		return err
 	}
 	// Notify the author (skip if they decided their own review).
@@ -785,15 +786,13 @@ func (s *Store) SubmitDraftForReview(ns, name, version, note, author string, rev
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		author, "submit_review", ns+"/"+name, "v"+version, "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, author, "submit_review", ns+"/"+name, "v"+version, ""); err != nil {
 		return nil, err
 	}
 	if opts.IsHotfix {
 		// Persist the reason in audit so platform admins can spot abuse of
 		// the emergency channel after the fact.
-		if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-			author, "hotfix_submit", ns+"/"+name+": "+opts.HotfixReason, "v"+version, "127.0.0.1"); err != nil {
+		if err := audit.LogTx(tx, author, "hotfix_submit", ns+"/"+name+": "+opts.HotfixReason, "v"+version, ""); err != nil {
 			return nil, err
 		}
 	}
@@ -887,8 +886,7 @@ func (s *Store) SetSkillLifecycleStatus(ns, name, newStatus, actor, reason strin
 		return err
 	}
 	action := newStatus
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		actor, action, ns+"/"+name, "v"+version, "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, actor, action, ns+"/"+name, "v"+version, ""); err != nil {
 		return err
 	}
 	body := fmt.Sprintf("%s/%s 已被 @%s 标记为 %s", ns, name, actor, newStatus)
