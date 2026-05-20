@@ -78,15 +78,6 @@ func (c *Client) post(path string, body, out any) error {
 	return checkDecode(resp, out)
 }
 
-func (c *Client) patch(path string, body, out any) error {
-	resp, err := c.do("PATCH", path, body)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return checkDecode(resp, out)
-}
-
 func (c *Client) put(path string, body, out any) error {
 	resp, err := c.do("PUT", path, body)
 	if err != nil {

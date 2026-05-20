@@ -22,14 +22,22 @@ go build ./...            # build check
 cd web
 npm install
 npm run dev               # dev server → http://localhost:5173 (proxies /api/* to :8080)
-npm run build             # production build → web/dist/
-npm run lint              # ESLint
+npm run build             # tsc + vite build → web/dist/
+npm run lint              # ESLint (flat config in eslint.config.js, max-warnings 10)
+npm test -- --run         # Vitest (single run, no watch)
 ```
 
 ### Reset dev data
 ```bash
 rm server/skillhub.db*    # delete SQLite file; re-running the server re-seeds it
 ```
+
+### CI
+`.github/workflows/ci.yml` runs on push to `main` and every PR:
+- backend: `golangci-lint` → `go vet ./...` → `go build ./...` → `go test ./... -race -count=1`
+- frontend: `npm ci` → `npm test -- --run` → `npm run build`
+
+Both jobs must pass. Match the CI commands locally before pushing.
 
 ## Architecture
 
@@ -48,15 +56,18 @@ Entry points:
 - `cmd/cli/main.go` — `skillhub` CLI (cobra-based; thin HTTP client over the REST API). Subcommands: `auth`, `skill`, `review`, `ns`. Config at `~/.config/skillhub/config.json` (override via `SKILLHUB_CONFIG`).
 
 Internal packages:
-- `internal/api` — Gin route registration and all HTTP handlers (`api.go` is the main file; `ai.go`, `dist_tags_subs.go`, `policies.go` handle their respective feature sets)
-- `internal/store` — SQLite wrapper. All DB access lives here. No ORM; raw `database/sql`. The single `Store` struct exposes every data operation as a method.
+- `internal/api` — Gin route registration and all HTTP handlers (`api.go` is the main file; `ai.go`, `dist_tags_subs.go`, `policies.go`, `webhooks.go`, `openapi.go` handle their respective feature sets)
+- `internal/store` — SQLite wrapper. All DB access lives here. No ORM; raw `database/sql`. The single `Store` struct exposes every data operation as a method, split across topical files (`activations.go`, `users.go`, `versions.go`, `skill_lifecycle.go`, …).
 - `internal/model` — Request/response structs shared between `api` and `store`
 - `internal/auth` — HS256 JWT sign/verify (self-implemented, no third-party JWT lib) and bcrypt password hashing
 - `internal/config` — Env var config (`SKILLHUB_ADDR`, `SKILLHUB_DB`, `SKILLHUB_JWT_SECRET`, `SKILLHUB_USER`)
 - `internal/policy` — Hardcoded default approval policies by classification (L1/L2/L3)
 - `internal/validate` — Six skill validation checks (schema, naming, secret scan, classification, tag coverage, description completeness)
+- `internal/middleware` — Gin middleware: structured JSON request logger, token-bucket rate limiter, Prometheus metrics registry (request count + latency histogram)
+- `internal/notifier` — External notification dispatcher with pluggable senders (Slack, Feishu/Lark). `Dispatcher.Dispatch()` fans events out concurrently and never blocks the caller.
+- `internal/templates` — Built-in skill bundle templates served to the New Skill flow
 
-**Schema management**: There are no migration files. `store/schema.go` contains the full `CREATE TABLE IF NOT EXISTS` DDL, and `store/store.go`'s `Open()` function runs `ALTER TABLE … ADD COLUMN` backfills for every column added after the initial schema. SQLite is capped to a single writer (`SetMaxOpenConns(1)`).
+**Schema management**: Hybrid — `store/schema.go` contains the baseline `CREATE TABLE IF NOT EXISTS` DDL applied on `Open()`, followed by `ALTER TABLE … ADD COLUMN` backfills for legacy columns. New schema changes go in `store/migrations/NNNN_name.up.sql` and are applied by `runMigrations()` (embedded via `//go:embed`), tracked in the `schema_migrations` table. Migrations run in numeric-prefix order, each in its own transaction. SQLite is capped to a single writer (`SetMaxOpenConns(1)`); WAL is enabled.
 
 **Seeding**: On first run, `store/seed.go` inserts 6 users, 7 namespaces, 9 skills, 5 reviews, and sample data. All seed passwords are `password`. `alice` is the bootstrap admin (`is_admin=1`).
 
@@ -78,6 +89,14 @@ Admin-only routes additionally require `users.is_admin = 1` (`requireAdmin` midd
 **Approval / review flow**: When a skill is submitted for review, `SubmitDraftForReview` in `store/queries.go` snapshots the current policy as JSON into the `reviews.policy_snapshot` column. This freeze means admin policy edits never affect in-flight reviews. `DecideReview("approve")` in the same transaction upserts the `latest` dist tag and fan-outs notifications to all subscribers (excluding the author and the approver).
 
 **AI assist**: `internal/api/ai.go` proxies to a configurable upstream (stored in the `ai_providers` table) and streams SSE deltas back to the client.
+
+**Observability endpoints** (no auth required):
+- `GET /healthz` — liveness probe (always 200 if process is up)
+- `GET /readyz` — readiness probe (checks DB connectivity)
+- `GET /metrics` — Prometheus exposition format (request count + latency histogram, served by `internal/middleware`)
+- `GET /api/v1/openapi.json` — generated OpenAPI 3.0 spec for the public API surface
+
+**External notifications**: `internal/notifier.Dispatcher` fans events out to registered `Sender`s (Slack, Feishu/Lark) concurrently. Senders are best-effort — failures are logged and never block the caller. The dispatcher is constructed in `cmd/api/main.go` from env config and injected into the `Server`.
 
 ### Frontend (`web/src/`)
 
@@ -157,20 +176,22 @@ To migrate a page, follow the pattern in `Layout.tsx`: add `const { t } = useTra
 
 ## Tests
 
-Tests live in `server/internal/store/`:
-- `platform_features_test.go` — original store tests (policy snapshot freeze, activation, etc.)
-- `new_features_test.go` — tests added for `RecordActivation`, `ChangePassword`, `UpdateSkillMeta`, and admin user management
+Backend tests are spread across the package they cover:
+- `internal/store/` — `platform_features_test.go`, `new_features_test.go`, `inline_comments_test.go`, `migrate_test.go` (real on-disk SQLite under `t.TempDir()`; helpers `seedBasicWorld()` / `seedUserWithPassword()` set up fixtures)
+- `internal/api/` — HTTP integration tests (`auth_test.go`, `skills_test.go`, `reviews_test.go`, `comments_test.go`, `notifications_test.go`, `observability_test.go`); `helpers_test.go` builds a test `Server` over a temp DB
+- `internal/middleware/` — logger / metrics / ratelimit unit tests
+- `internal/notifier/` — dispatcher fan-out test
+- `internal/templates/` — built-in template fixtures
 
-All tests use a real on-disk SQLite under `t.TempDir()`. Helper `seedBasicWorld()` creates a namespace + users + skill; `seedUserWithPassword()` creates a user with a real bcrypt hash for auth tests.
+CI runs `go test ./... -race -count=1`; match locally before pushing.
 
-To run a specific test:
+Run a single test:
 ```bash
 cd server && go test ./internal/store/ -run TestRecordActivation -v
-cd server && go test ./internal/store/ -run TestChangePassword -v
-cd server && go test ./internal/store/ -run TestAdminUpdateUser -v
+cd server && go test ./internal/api/ -run TestSkills -v
 ```
 
-There are no frontend tests.
+Frontend tests use **Vitest** (jsdom + Testing Library). Co-located `*.test.ts(x)` files; run with `npm test -- --run` (single shot) or `npm test` (watch mode).
 
 ## Seed Accounts
 

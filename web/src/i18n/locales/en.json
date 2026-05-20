@@ -77,7 +77,9 @@
     "username": "Username",
     "password": "Password",
     "submit": "Sign in",
-    "submitting": "Signing in…"
+    "submitting": "Signing in…",
+    "noAccount": "No account yet?",
+    "registerNow": "Register now"
   },
   "relative": {
     "justNow": "just now"
