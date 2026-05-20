@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"database/sql"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jincurry/skillhub/server/internal/audit"
 	"github.com/jincurry/skillhub/server/internal/auth"
 	"github.com/jincurry/skillhub/server/internal/config"
 	"github.com/jincurry/skillhub/server/internal/i18n"
@@ -919,6 +921,12 @@ func (s *Server) decideReview(c *gin.Context) {
 		return
 	}
 	if err := s.store.DecideReview(id, req.Decision, req.Note, user); err != nil {
+		// Another reviewer raced us to a decision; surface 409 so the UI
+		// reloads instead of showing a generic 500.
+		if errors.Is(err, store.ErrReviewNotPending) {
+			c.JSON(409, gin.H{"error": "review already decided"})
+			return
+		}
 		serverError(c, err)
 		return
 	}
@@ -1438,8 +1446,7 @@ func (s *Server) putSkillFile(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		user, "edit_file", ns+"/"+name+":"+p, "", "127.0.0.1")
+	audit.Log(s.store.DB, user, "edit_file", ns+"/"+name+":"+p, "", c.ClientIP())
 	c.JSON(200, f)
 }
 
@@ -1475,8 +1482,7 @@ func (s *Server) deleteSkillFile(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "file not found"})
 		return
 	}
-	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		user, "delete_file", ns+"/"+name+":"+p, "", "127.0.0.1")
+	audit.Log(s.store.DB, user, "delete_file", ns+"/"+name+":"+p, "", c.ClientIP())
 	c.JSON(204, nil)
 }
 
@@ -1524,8 +1530,7 @@ func (s *Server) renameSkillFile(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		user, "rename_file", ns+"/"+name+":"+from+"→"+to, "", "127.0.0.1")
+	audit.Log(s.store.DB, user, "rename_file", ns+"/"+name+":"+from+"→"+to, "", c.ClientIP())
 	c.JSON(200, f)
 }
 
@@ -1598,9 +1603,7 @@ func (s *Server) deleteDraftSkill(c *gin.Context) {
 		serverError(c, err)
 		return
 	}
-	_, _ = s.store.DB.Exec(
-		`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		actor, "delete_draft", ns+"/"+name, "", c.ClientIP())
+	audit.Log(s.store.DB, actor, "delete_draft", ns+"/"+name, "", c.ClientIP())
 	c.JSON(200, gin.H{"ok": true})
 }
 
@@ -1619,9 +1622,7 @@ func (s *Server) adminDeleteSkill(c *gin.Context) {
 		c.JSON(500, gin.H{"error": msg})
 		return
 	}
-	_, _ = s.store.DB.Exec(
-		`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		s.currentUser(c), "delete_skill", ns+"/"+name, "", c.ClientIP())
+	audit.Log(s.store.DB, s.currentUser(c), "delete_skill", ns+"/"+name, "", c.ClientIP())
 	c.JSON(200, gin.H{"ok": true})
 }
 
@@ -1645,9 +1646,7 @@ func (s *Server) deleteNamespace(c *gin.Context) {
 		}
 		return
 	}
-	_, _ = s.store.DB.Exec(
-		`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		s.currentUser(c), "delete_namespace", ns, "", c.ClientIP())
+	audit.Log(s.store.DB, s.currentUser(c), "delete_namespace", ns, "", c.ClientIP())
 	c.JSON(200, gin.H{"ok": true})
 }
 
@@ -1780,8 +1779,7 @@ func (s *Server) downloadSkillBundle(c *gin.Context) {
 	if tagParam != "" {
 		target += "@" + tagParam
 	}
-	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		s.currentUser(c), "download_bundle", target, "v"+version, "127.0.0.1")
+	audit.Log(s.store.DB, s.currentUser(c), "download_bundle", target, "v"+version, c.ClientIP())
 }
 
 // ---------------------------------------------------------------------------
@@ -1812,8 +1810,7 @@ func (s *Server) createAdminUser(c *gin.Context) {
 		serverError(c, err)
 		return
 	}
-	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
-		s.currentUser(c), "create_user", "@"+req.Username, "127.0.0.1")
+	audit.Log(s.store.DB, s.currentUser(c), "create_user", "@"+req.Username, "", c.ClientIP())
 	c.JSON(201, u)
 }
 
@@ -1829,8 +1826,7 @@ func (s *Server) adminUpdateUser(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
-		s.currentUser(c), "admin_update_user", "@"+username, "127.0.0.1")
+	audit.Log(s.store.DB, s.currentUser(c), "admin_update_user", "@"+username, "", c.ClientIP())
 	c.JSON(200, u)
 }
 

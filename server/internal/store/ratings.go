@@ -1,6 +1,7 @@
 package store
 
 import (
+	"github.com/jincurry/skillhub/server/internal/audit"
 	"github.com/jincurry/skillhub/server/internal/model"
 )
 
@@ -42,8 +43,7 @@ func (s *Store) RateSkill(ns, name, username string, stars int, comment string) 
 		return nil, err
 	}
 
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		username, "rate_skill", ns+"/"+name, "", "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, username, "rate_skill", ns+"/"+name, "", ""); err != nil {
 		return nil, err
 	}
 	if skillAuthor != "" && skillAuthor != username {

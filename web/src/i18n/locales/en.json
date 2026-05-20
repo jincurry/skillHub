@@ -11,6 +11,14 @@
   "app": {
     "loadingEditor": "Loading editor…"
   },
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "description": "This page hit an unexpected error. Try again, or reload if the problem persists.",
+    "retry": "Try again",
+    "reload": "Reload page",
+    "goHome": "Go home",
+    "details": "Error details"
+  },
   "nav": {
     "section": "Navigation",
     "workspace": "Workspace",

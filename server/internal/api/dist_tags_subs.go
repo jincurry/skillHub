@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/jincurry/skillhub/server/internal/audit"
 	"github.com/jincurry/skillhub/server/internal/i18n"
 	"github.com/jincurry/skillhub/server/internal/model"
 )
@@ -55,8 +56,7 @@ func (s *Server) setDistTag(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		user, "set_dist_tag", ns+"/"+name+":"+tag, "v"+req.Version, "127.0.0.1")
+	audit.Log(s.store.DB, user, "set_dist_tag", ns+"/"+name+":"+tag, "v"+req.Version, c.ClientIP())
 	c.JSON(200, gin.H{"tag": tag, "version": req.Version})
 }
 
@@ -80,8 +80,7 @@ func (s *Server) deleteDistTag(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	_, _ = s.store.DB.Exec(`INSERT INTO audit_logs(actor,action,target,version,ip) VALUES(?,?,?,?,?)`,
-		user, "delete_dist_tag", ns+"/"+name+":"+tag, "", "127.0.0.1")
+	audit.Log(s.store.DB, user, "delete_dist_tag", ns+"/"+name+":"+tag, "", c.ClientIP())
 	c.JSON(200, gin.H{"ok": true})
 }
 

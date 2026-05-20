@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/jincurry/skillhub/server/internal/audit"
 	"github.com/jincurry/skillhub/server/internal/auth"
 	"github.com/jincurry/skillhub/server/internal/model"
 )
@@ -55,8 +56,7 @@ func (s *Store) UpdateMe(username string, req model.UpdateMeRequest) (*model.Me,
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, errors.New("user not found")
 	}
-	_, _ = s.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
-		username, "update_profile", "@"+username, "127.0.0.1")
+	audit.Log(s.DB, username, "update_profile", "@"+username, "", "")
 	return s.GetUser(username)
 }
 
@@ -71,8 +71,7 @@ func (s *Store) SetAvatarURL(username, url string) (*model.Me, error) {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, errors.New("user not found")
 	}
-	_, _ = s.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
-		username, "update_profile", "@"+username, "127.0.0.1")
+	audit.Log(s.DB, username, "update_profile", "@"+username, "", "")
 	return s.GetUser(username)
 }
 
@@ -135,8 +134,7 @@ func (s *Store) ChangePassword(username, oldPassword, newPassword string) error 
 	if _, err := s.DB.Exec(`UPDATE users SET password_hash=? WHERE username=?`, newHash, username); err != nil {
 		return err
 	}
-	_, _ = s.DB.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
-		username, "change_password", "@"+username, "127.0.0.1")
+	audit.Log(s.DB, username, "change_password", "@"+username, "", "")
 	return nil
 }
 
@@ -223,8 +221,7 @@ func (s *Store) CreateNamespace(id, owner string) (*model.Namespace, error) {
 	if _, err := tx.Exec(`INSERT INTO namespace_members(ns, username, ns_role) VALUES(?, ?, 'owner')`, id, owner); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(`INSERT INTO audit_logs(actor,action,target,ip) VALUES(?,?,?,?)`,
-		owner, "create_namespace", id, "127.0.0.1"); err != nil {
+	if err := audit.LogTx(tx, owner, "create_namespace", id, "", ""); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

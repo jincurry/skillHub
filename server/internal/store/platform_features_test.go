@@ -2,7 +2,9 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/jincurry/skillhub/server/internal/model"
@@ -346,3 +348,94 @@ func TestSetAndResolveDistTag(t *testing.T) {
 	}
 }
 
+// TestDecideReviewIsExclusive verifies that two reviewers racing to approve
+// the same review produce exactly one published version: the second caller
+// must see ErrReviewNotPending. Without the WHERE status='pending' guard
+// inside the UPDATE, the second decision would silently overwrite the first
+// and fan out a duplicate "latest" upsert + duplicate notifications.
+func TestDecideReviewIsExclusive(t *testing.T) {
+	s := newTestStore(t)
+	ns, name := seedBasicWorld(t, s)
+
+	// Two reviewers assigned to the same review. Either one is allowed to
+	// decide; whichever wins the race should be the one whose decision sticks.
+	rev, err := s.SubmitDraftForReview(ns, name, "0.2.0", "rev", tAuthor,
+		[]string{tOwner, tReviewer}, SubmitDraftOptions{})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		errs    []error
+		results []string
+	)
+	wg.Add(2)
+	for _, decision := range []struct {
+		actor    string
+		decision string
+	}{
+		{tOwner, "approve"},
+		{tReviewer, "reject"},
+	} {
+		decision := decision
+		go func() {
+			defer wg.Done()
+			err := s.DecideReview(rev.ID, decision.decision, "", decision.actor)
+			mu.Lock()
+			defer mu.Unlock()
+			errs = append(errs, err)
+			results = append(results, decision.decision)
+		}()
+	}
+	wg.Wait()
+
+	// Exactly one call must succeed; the other must report ErrReviewNotPending.
+	var ok, conflicts int
+	for _, e := range errs {
+		switch {
+		case e == nil:
+			ok++
+		case errors.Is(e, ErrReviewNotPending):
+			conflicts++
+		default:
+			t.Errorf("unexpected error: %v", e)
+		}
+	}
+	if ok != 1 || conflicts != 1 {
+		t.Fatalf("want 1 success + 1 conflict, got %d success / %d conflicts (errs=%v)", ok, conflicts, errs)
+	}
+
+	// The persisted review status must reflect a terminal decision (not still
+	// "pending"), proving the winning UPDATE landed.
+	var status string
+	if err := s.DB.QueryRow(`SELECT status FROM reviews WHERE id=?`, rev.ID).Scan(&status); err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if status == "pending" {
+		t.Fatal("review still pending after both decide calls returned")
+	}
+}
+
+// TestDecideReviewSecondCallConflicts is the deterministic, non-concurrent
+// version of the above: once a review is approved, a follow-up DecideReview
+// (e.g. from a stale UI tab) must return ErrReviewNotPending instead of
+// silently re-running the publish path and emitting duplicate notifications.
+func TestDecideReviewSecondCallConflicts(t *testing.T) {
+	s := newTestStore(t)
+	ns, name := seedBasicWorld(t, s)
+
+	rev, err := s.SubmitDraftForReview(ns, name, "0.2.0", "rev", tAuthor,
+		[]string{tReviewer}, SubmitDraftOptions{})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if err := s.DecideReview(rev.ID, "approve", "lgtm", tReviewer); err != nil {
+		t.Fatalf("first approve: %v", err)
+	}
+	err = s.DecideReview(rev.ID, "approve", "lgtm again", tReviewer)
+	if !errors.Is(err, ErrReviewNotPending) {
+		t.Fatalf("second approve err = %v, want ErrReviewNotPending", err)
+	}
+}
