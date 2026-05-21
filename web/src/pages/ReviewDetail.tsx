@@ -715,10 +715,34 @@ function ChangesView({ files, comments, reviewId, me, editingCommentId, editingB
   }
 
   return (
-    <div className="card" style={{ overflow: 'hidden' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '260px minmax(0,1fr)', minHeight: 500 }}>
+    // The review-changes view is the main thing reviewers stare at, so we
+    // take over most of the viewport. height = viewport minus the page
+    // header + tab bar + a little breathing room. minHeight keeps it sane
+    // on short screens; the card itself is a flex column so the grid
+    // child can stretch.
+    <div
+      className="card"
+      style={{
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        height: 'calc(100vh - 220px)',
+        minHeight: 600,
+      }}
+    >
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '260px minmax(0,1fr)',
+          flex: 1,
+          // minHeight: 0 lets the grid children shrink below their content
+          // size, so the inner overflow:auto actually kicks in instead of
+          // the whole card scrolling.
+          minHeight: 0,
+        }}
+      >
         {/* File list */}
-        <div style={{ borderRight: '1px solid var(--border)', overflowY: 'auto', maxHeight: 600 }}>
+        <div style={{ borderRight: '1px solid var(--border)', overflowY: 'auto' }}>
           <div style={{
             padding: '10px 14px', borderBottom: '1px solid var(--border)',
             fontSize: 11, color: 'var(--text-muted)', fontWeight: 600,
@@ -769,8 +793,10 @@ function ChangesView({ files, comments, reviewId, me, editingCommentId, editingB
           })}
         </div>
 
-        {/* Diff editor pane + inline comments */}
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        {/* Diff editor pane + inline comments. minHeight: 0 lets the flex
+            children (the diff editor especially) shrink to fit, so the
+            inner overflow:auto on the comment list works as intended. */}
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
           {active ? (
             <>
               <div style={{
@@ -785,7 +811,7 @@ function ChangesView({ files, comments, reviewId, me, editingCommentId, editingB
                 <div style={{ flex: 1 }} />
                 <DiffStat base={active.baseContent} next={active.newContent} />
               </div>
-              <div style={{ flex: 1, minHeight: 400, background: '#1e1e1e' }}>
+              <div style={{ flex: 1, minHeight: 0, background: '#1e1e1e' }}>
                 <DiffEditor
                   key={active.path}
                   height="100%"
@@ -806,8 +832,19 @@ function ChangesView({ files, comments, reviewId, me, editingCommentId, editingB
                 />
               </div>
 
-              {/* Inline comments section */}
-              <div style={{ borderTop: '1px solid var(--border)', padding: '12px 14px', background: 'var(--bg)' }}>
+              {/* Inline comments section. Capped height + own scroll so it
+                  never pushes the diff editor off-screen — reviewers want
+                  to keep code in view while reading remarks. */}
+              <div
+                style={{
+                  borderTop: '1px solid var(--border)',
+                  padding: '12px 14px',
+                  background: 'var(--bg)',
+                  maxHeight: 240,
+                  overflowY: 'auto',
+                  flexShrink: 0,
+                }}
+              >
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
                   {text('Inline Comments', '行内评论')} {fileComments.length > 0 && <span className="count-pill" style={{ marginLeft: 4 }}>{fileComments.length}</span>}
                 </div>
