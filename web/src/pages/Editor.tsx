@@ -157,12 +157,12 @@ export function Editor() {
   }, [autosaveOn]);
 
   // Markdown view mode — only applies to .md files. We persist the choice so
-  // a user who prefers split-view doesn't have to re-toggle each session.
-  type EditorMode = 'code' | 'preview' | 'split';
+  // authors can switch between the full editor and a full-width preview.
+  type EditorMode = 'code' | 'preview';
   const [editorMode, setEditorMode] = useState<EditorMode>(() => {
     try {
       const v = localStorage.getItem('skillHub.editor.mode');
-      if (v === 'preview' || v === 'split' || v === 'code') return v;
+      if (v === 'preview' || v === 'code') return v;
     } catch { /* ignore */ }
     return 'code';
   });
@@ -1811,9 +1811,8 @@ export function Editor() {
             }}>
               <span style={{ color: 'var(--text-faint)', marginRight: 4 }}>{text('View', '视图')}</span>
               {([
-                { key: 'code',    label: text('Edit', '编辑'),  title: text('Editor only', '仅编辑器') },
-                { key: 'split',   label: text('Split', '并排'),  title: text('Editor on the left, preview on the right', '左编辑右预览') },
-                { key: 'preview', label: text('Preview', '预览'),  title: text('Preview only', '仅预览') },
+                { key: 'code', label: text('Edit', '编辑'), title: text('Editor only', '仅编辑器') },
+                { key: 'preview', label: text('Preview', '预览'), title: text('Preview only', '仅预览') },
               ] as const).map((m) => (
                 <button
                   key={m.key}
@@ -1831,7 +1830,7 @@ export function Editor() {
               className="editor-code"
               style={{
                 display: effectiveMode === 'preview' ? 'none' : 'block',
-                flex: effectiveMode === 'split' ? '1 1 50%' : 1,
+                flex: 1,
                 minWidth: 0,
                 padding: 0,
                 background: '#1e1e1e',
@@ -1893,14 +1892,13 @@ export function Editor() {
                 </div>
               )}
             </div>
-            {(effectiveMode === 'preview' || effectiveMode === 'split') && (
+            {effectiveMode === 'preview' && (
               <div
                 className="md-preview"
                 style={{
                   flex: 1, minWidth: 0, overflow: 'auto',
                   padding: '20px 24px',
                   background: 'var(--bg)',
-                  borderLeft: effectiveMode === 'split' ? '1px solid var(--border)' : undefined,
                 }}
               >
                 {activeBuf ? (
