@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import type { Webhook, WebhookDelivery, CreateWebhookRequest } from '../api/types';
 import { useAsync } from '../api/useAsync';
 import { useLocaleText } from '../i18n/useLocaleText';
+import { useConfirm } from './useConfirm';
 
 const ALL_EVENTS = ['skill.published', 'skill.yanked', 'skill.deprecated'];
 
@@ -13,6 +14,7 @@ interface Props {
 
 export function WebhookPanel({ ns = '' }: Props) {
   const { text, locale } = useLocaleText();
+  const [confirm, confirmEl] = useConfirm();
   const { data: hooks, loading, error, reload } = useAsync(() => api.listWebhooks(ns || undefined), [ns]);
   const [creating, setCreating] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -46,7 +48,18 @@ export function WebhookPanel({ ns = '' }: Props) {
   }
 
   async function handleDelete(id: number) {
-    if (!confirm(text('Delete this webhook?', '确定删除这个 Webhook？'))) return;
+    const ok = await confirm({
+      title: text('Delete webhook', '删除 Webhook'),
+      message: text('Delete this webhook?', '确定删除这个 Webhook？'),
+      detail: text(
+        'Future events for the configured triggers will no longer be delivered.',
+        '后续事件将不再向该 URL 投递。',
+      ),
+      confirmLabel: text('Delete', '删除'),
+      cancelLabel: text('Cancel', '取消'),
+      tone: 'danger',
+    });
+    if (!ok) return;
     await api.deleteWebhook(id);
     reload();
   }
@@ -289,6 +302,7 @@ export function WebhookPanel({ ns = '' }: Props) {
           </div>
         ))}
       </div>
+      {confirmEl}
     </div>
   );
 }

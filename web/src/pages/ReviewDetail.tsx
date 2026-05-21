@@ -10,6 +10,8 @@ import { useAsync } from '../api/useAsync';
 import { languageFor, shouldDisplaySkillFile } from '../lib/files';
 import type { ReviewFile, Comment, Me } from '../api/types';
 import { useLocaleText } from '../i18n/useLocaleText';
+import { useConfirm } from '../components/useConfirm';
+import { usePrompt } from '../components/usePrompt';
 
 // Visual mapping for the change-kind sidebar badge. Kept tight so the
 // sidebar can be narrow without truncating.
@@ -33,6 +35,8 @@ export function ReviewDetail() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { text, locale } = useLocaleText();
+  const [confirm, confirmEl] = useConfirm();
+  const [prompt, promptEl] = usePrompt();
   const [tab, setTab] = useState<'overview' | 'changes'>('overview');
 
   const review = useAsync(() => api.getReview(id), [id]);
@@ -82,7 +86,14 @@ export function ReviewDetail() {
   };
 
   const deleteComment = async (id: number) => {
-    if (!window.confirm(text('Delete this comment?', '确定删除此评论?'))) return;
+    const ok = await confirm({
+      title: text('Delete comment', '删除评论'),
+      message: text('Delete this comment?', '确定删除此评论?'),
+      confirmLabel: text('Delete', '删除'),
+      cancelLabel: text('Cancel', '取消'),
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.deleteComment(id);
       comments.reload();
@@ -109,7 +120,18 @@ export function ReviewDetail() {
   };
 
   const removeReviewer = async (username: string) => {
-    if (!window.confirm(text(`Remove @${username} from this review?`, `将 @${username} 从此审批移除?`))) return;
+    const ok = await confirm({
+      title: text('Remove reviewer', '移除审批人'),
+      message: text(`Remove @${username} from this review?`, `将 @${username} 从此审批移除?`),
+      detail: text(
+        'They will lose the ability to act on this review. They keep namespace membership.',
+        '他将无法继续审批此请求，命名空间内的角色不变。',
+      ),
+      confirmLabel: text('Remove', '移除'),
+      cancelLabel: text('Cancel', '取消'),
+      tone: 'danger',
+    });
+    if (!ok) return;
     setReviewerBusy(true);
     try {
       await api.removeReviewer(id, username);
@@ -153,8 +175,17 @@ export function ReviewDetail() {
     }
   };
 
-  const requestChanges = () => {
-    const note = window.prompt(text('Briefly describe the required changes (the author will be notified):', '请简要说明需要修改的内容(将通知作者):'), '');
+  const requestChanges = async () => {
+    const note = await prompt({
+      title: text('Request changes', '请求修改'),
+      message: text(
+        'Briefly describe the required changes. The author will be notified.',
+        '请简要说明需要修改的内容，将通知作者。',
+      ),
+      placeholder: text('e.g. Please add tests for the error path.', '例如：请补充错误路径的测试用例。'),
+      confirmLabel: text('Send', '发送'),
+      cancelLabel: text('Cancel', '取消'),
+    });
     if (note === null) return;
     decide('request_changes', note);
   };
@@ -555,6 +586,8 @@ export function ReviewDetail() {
           isAdmin={isAdmin}
         />
       )}
+      {confirmEl}
+      {promptEl}
     </div>
   );
 }

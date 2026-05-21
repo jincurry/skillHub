@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { setUnauthorizedHandler } from './api/client';
 import { applyTheme, getStoredTheme } from './lib/theme';
+import { ToastHost } from './components/ToastHost';
 import './i18n';
 import './styles/global.css';
 
@@ -21,6 +22,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
       <App />
+      <ToastHost />
     </BrowserRouter>
   </React.StrictMode>
 );

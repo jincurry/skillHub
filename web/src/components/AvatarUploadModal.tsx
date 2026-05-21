@@ -4,6 +4,7 @@ import type { Me } from '../api/types';
 import { IconX, IconUpload, IconTrash } from './Icons';
 import { avatarFallbackGradient } from '../lib/profile';
 import { useLocaleText } from '../i18n/useLocaleText';
+import { useConfirm } from './useConfirm';
 
 interface Props {
   open: boolean;
@@ -17,6 +18,7 @@ const MAX_BYTES = 2 * 1024 * 1024;
 
 export function AvatarUploadModal({ open, me, onClose, onUpdated }: Props) {
   const { isEnglish, text } = useLocaleText();
+  const [confirm, confirmEl] = useConfirm();
   const fileInput = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [chosen, setChosen] = useState<File | null>(null);
@@ -77,7 +79,17 @@ export function AvatarUploadModal({ open, me, onClose, onUpdated }: Props) {
 
   async function removeAvatar() {
     if (!me.avatarUrl) return;
-    if (!window.confirm(text('Remove the current avatar and restore the default gradient?', '确定要清除当前头像、恢复默认渐变？'))) return;
+    const ok = await confirm({
+      title: text('Remove avatar', '移除头像'),
+      message: text(
+        'Remove the current avatar and restore the default gradient?',
+        '确定要清除当前头像、恢复默认渐变？',
+      ),
+      confirmLabel: text('Remove', '移除'),
+      cancelLabel: text('Cancel', '取消'),
+      tone: 'danger',
+    });
+    if (!ok) return;
     setBusy(true);
     setErr(null);
     try {
@@ -161,6 +173,7 @@ export function AvatarUploadModal({ open, me, onClose, onUpdated }: Props) {
           </button>
         </div>
       </div>
+      {confirmEl}
     </div>
   );
 }

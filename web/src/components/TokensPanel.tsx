@@ -3,11 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import type { APIToken } from '../api/types';
 import { useAsync } from '../api/useAsync';
+import { useConfirm } from './useConfirm';
 
 export function TokensPanel() {
   const { i18n } = useTranslation();
   const isEnglish = (i18n.resolvedLanguage ?? i18n.language ?? '').startsWith('en');
   const text = (en: string, zh: string) => (isEnglish ? en : zh);
+  const [confirm, confirmEl] = useConfirm();
   const { data: tokens, loading, error, reload } = useAsync(() => api.listAPITokens(), []);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
@@ -30,7 +32,18 @@ export function TokensPanel() {
   }
 
   async function handleDelete(tok: APIToken) {
-    if (!confirm(text(`Revoke "${tok.name}"? Systems using this token will lose access immediately.`, `确定吊销 "${tok.name}"？吊销后使用该 Token 的系统将立即失去访问权限。`))) return;
+    const ok = await confirm({
+      title: text('Revoke API token', '吊销 API Token'),
+      message: text(`Revoke "${tok.name}"?`, `确定吊销 "${tok.name}"？`),
+      detail: text(
+        'Systems using this token will lose access immediately. This cannot be undone.',
+        '使用该 Token 的系统将立即失去访问权限，且无法撤销。',
+      ),
+      confirmLabel: text('Revoke', '吊销'),
+      cancelLabel: text('Cancel', '取消'),
+      tone: 'danger',
+    });
+    if (!ok) return;
     await api.deleteAPIToken(tok.id);
     reload();
   }
@@ -155,6 +168,7 @@ export function TokensPanel() {
         </code>
         <p className="text-gray-500">{text('Token values start with ', 'Token 格式以 ')}<code>skillhub_</code>{text(' and are separate from normal login JWTs.', ' 开头，与普通登录 JWT 区分。')}</p>
       </div>
+      {confirmEl}
     </div>
   );
 }

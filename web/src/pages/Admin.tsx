@@ -12,12 +12,15 @@ import { AdminOverview } from '../components/AdminOverview';
 import { CleanNamespaceModal } from '../components/CleanNamespaceModal';
 import { WebhookPanel } from '../components/WebhookPanel';
 import { UsersPanel } from '../components/UsersPanel';
+import { useConfirm } from '../components/useConfirm';
+import { toast } from '../lib/toast';
 import type { AIProvider } from '../api/types';
 
 export function Admin() {
   const { i18n } = useTranslation();
   const isEnglish = (i18n.resolvedLanguage ?? i18n.language ?? '').startsWith('en');
   const text = (en: string, zh: string) => (isEnglish ? en : zh);
+  const [confirm, confirmEl] = useConfirm();
   const [tab, setTab] = useState<'namespaces' | 'members' | 'overview' | 'policies' | 'ai' | 'webhooks' | 'users'>('namespaces');
   const aiProviders = useAsync(() => api.listAIProviders(), []);
   const [aiModalOpen, setAIModalOpen] = useState(false);
@@ -111,12 +114,26 @@ export function Admin() {
                           style={{ color: 'var(--red-text)' }}
                           onClick={async () => {
                             if (isEmpty) {
-                              if (!confirm(text(`Delete namespace "${ns.id}"? This cannot be undone and will also clean up members and review policies.`, `确定删除命名空间 "${ns.id}"？此操作不可撤销（将同时清理成员和审批策略）。`))) return;
+                              const ok = await confirm({
+                                title: text('Delete namespace', '删除命名空间'),
+                                message: text(
+                                  `Delete namespace "${ns.id}"?`,
+                                  `确定删除命名空间 "${ns.id}"？`,
+                                ),
+                                detail: text(
+                                  'This cannot be undone. Members and review policies will also be cleaned up.',
+                                  '此操作不可撤销。命名空间下的成员和审批策略也会被清理。',
+                                ),
+                                confirmLabel: text('Delete', '删除'),
+                                cancelLabel: text('Cancel', '取消'),
+                                tone: 'danger',
+                              });
+                              if (!ok) return;
                               try {
                                 await api.adminDeleteNamespace(ns.id);
                                 namespaces.reload();
                               } catch (e) {
-                                alert(text('Delete failed: ', '删除失败：') + (e as Error).message);
+                                toast.error(text('Delete failed: ', '删除失败：') + (e as Error).message);
                               }
                             } else {
                               setCleanupNs(ns.id);
@@ -263,12 +280,26 @@ export function Admin() {
                             className="btn sm"
                             style={{ marginLeft: 6, color: 'var(--red-text)' }}
                             onClick={async () => {
-                              if (!confirm(text(`Delete "${p.name}"? Existing sessions that used this model are unaffected.`, `确定删除 “${p.name}”？已使用该模型的会话不受影响。`))) return;
+                              const ok = await confirm({
+                                title: text('Delete AI provider', '删除 AI 模型'),
+                                message: text(
+                                  `Delete "${p.name}"?`,
+                                  `确定删除 “${p.name}”？`,
+                                ),
+                                detail: text(
+                                  'Existing sessions that already used this model are unaffected.',
+                                  '已使用该模型的会话不受影响。',
+                                ),
+                                confirmLabel: text('Delete', '删除'),
+                                cancelLabel: text('Cancel', '取消'),
+                                tone: 'danger',
+                              });
+                              if (!ok) return;
                               try {
                                 await api.deleteAIProvider(p.id);
                                 aiProviders.reload();
                               } catch (e) {
-                                alert(text('Delete failed: ', '删除失败：') + (e as Error).message);
+                                toast.error(text('Delete failed: ', '删除失败：') + (e as Error).message);
                               }
                             }}
                           >{text('Delete', '删除')}</button>
@@ -307,6 +338,8 @@ export function Admin() {
           }}
         />
       )}
+
+      {confirmEl}
     </div>
   );
 }

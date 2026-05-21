@@ -1,12 +1,27 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { IconPlus, IconXCircle } from './Icons';
 import { api } from '../api/client';
 import { useAsync } from '../api/useAsync';
 import type { AdminUser } from '../api/types';
 import { useLocaleText } from '../i18n/useLocaleText';
+import { toast } from '../lib/toast';
 
 function fmtDate(iso: string, locale: string) {
   return iso ? new Date(iso).toLocaleDateString(locale) : '—';
+}
+
+// Aggregate the distinct, non-empty values of a string field across the
+// known platform users. Used to power role / team autocomplete (datalists)
+// on the create / edit modals so admins don't have to remember exact
+// labels they used last time.
+function distinctValues(users: AdminUser[] | null, field: 'role' | 'team'): string[] {
+  if (!users) return [];
+  const set = new Set<string>();
+  for (const u of users) {
+    const v = (u[field] ?? '').trim();
+    if (v) set.add(v);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
 
 export function UsersPanel() {
@@ -14,6 +29,11 @@ export function UsersPanel() {
   const users = useAsync(() => api.listAdminUsers(), []);
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<AdminUser | null>(null);
+
+  // Pre-compute distinct role / team values once so the modals can render
+  // <datalist> options without re-scanning the user list each keystroke.
+  const knownRoles = useMemo(() => distinctValues(users.data, 'role'), [users.data]);
+  const knownTeams = useMemo(() => distinctValues(users.data, 'team'), [users.data]);
 
   return (
     <div className="card">
@@ -72,7 +92,7 @@ export function UsersPanel() {
                           await api.adminUpdateUser(u.username, { isDisabled: !u.isDisabled });
                           users.reload();
                         } catch (e) {
-                          alert((e as Error).message);
+                          toast.error((e as Error).message);
                         }
                       }}
                     >{u.isDisabled ? text('Enable', '启用') : text('Disable', '禁用')}</button>
@@ -86,6 +106,8 @@ export function UsersPanel() {
 
       {showCreate && (
         <CreateUserModal
+          knownRoles={knownRoles}
+          knownTeams={knownTeams}
           onClose={() => setShowCreate(false)}
           onCreated={() => { setShowCreate(false); users.reload(); }}
         />
@@ -94,6 +116,8 @@ export function UsersPanel() {
       {editing && (
         <EditUserModal
           user={editing}
+          knownRoles={knownRoles}
+          knownTeams={knownTeams}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); users.reload(); }}
         />
@@ -105,7 +129,12 @@ export function UsersPanel() {
 // ---------------------------------------------------------------------------
 // Create user modal
 // ---------------------------------------------------------------------------
-function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function CreateUserModal({ knownRoles, knownTeams, onClose, onCreated }: {
+  knownRoles: string[];
+  knownTeams: string[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const { text } = useLocaleText();
   const [username, setUsername] = useState('');
   const [display, setDisplay] = useState('');
@@ -149,10 +178,12 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label={text('Role', '角色')}>
             <input className="input" value={role} onChange={(e) => setRole(e.target.value)}
+              list="users-role-options"
               placeholder="Maintainer" style={{ width: '100%' }} />
           </Field>
           <Field label={text('Team', '团队')}>
             <input className="input" value={team} onChange={(e) => setTeam(e.target.value)}
+              list="users-team-options"
               placeholder="backend-team" style={{ width: '100%' }} />
           </Field>
         </div>
@@ -165,6 +196,7 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
           {text('Make platform admin (can access all Admin features)', '设为平台管理员（可访问 Admin 后台全部功能）')}
         </label>
         {err && <div style={{ color: 'var(--red-text)', fontSize: 12.5 }}>{err}</div>}
+        <SuggestionLists roles={knownRoles} teams={knownTeams} />
       </div>
     </ModalShell>
   );
@@ -173,7 +205,13 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
 // ---------------------------------------------------------------------------
 // Edit user modal
 // ---------------------------------------------------------------------------
-function EditUserModal({ user, onClose, onSaved }: { user: AdminUser; onClose: () => void; onSaved: () => void }) {
+function EditUserModal({ user, knownRoles, knownTeams, onClose, onSaved }: {
+  user: AdminUser;
+  knownRoles: string[];
+  knownTeams: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { text } = useLocaleText();
   const [display, setDisplay] = useState(user.display);
   const [role, setRole] = useState(user.role);
@@ -207,10 +245,14 @@ function EditUserModal({ user, onClose, onSaved }: { user: AdminUser; onClose: (
         </Field>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label={text('Role', '角色')}>
-            <input className="input" value={role} onChange={(e) => setRole(e.target.value)} style={{ width: '100%' }} />
+            <input className="input" value={role} onChange={(e) => setRole(e.target.value)}
+              list="users-role-options"
+              style={{ width: '100%' }} />
           </Field>
           <Field label={text('Team', '团队')}>
-            <input className="input" value={team} onChange={(e) => setTeam(e.target.value)} style={{ width: '100%' }} />
+            <input className="input" value={team} onChange={(e) => setTeam(e.target.value)}
+              list="users-team-options"
+              style={{ width: '100%' }} />
           </Field>
         </div>
         <Field label={text('Email', '邮箱')}>
@@ -225,8 +267,26 @@ function EditUserModal({ user, onClose, onSaved }: { user: AdminUser; onClose: (
           {text('Platform Admin', '平台管理员')}
         </label>
         {err && <div style={{ color: 'var(--red-text)', fontSize: 12.5 }}>{err}</div>}
+        <SuggestionLists roles={knownRoles} teams={knownTeams} />
       </div>
     </ModalShell>
+  );
+}
+
+// Render shared <datalist> options for the role / team inputs. The browser
+// surfaces these as a native autocomplete dropdown (typing filters; clicking
+// the input arrow shows the full list). The IDs match the `list=` attrs on
+// the matching inputs above.
+function SuggestionLists({ roles, teams }: { roles: string[]; teams: string[] }) {
+  return (
+    <>
+      <datalist id="users-role-options">
+        {roles.map((r) => <option key={r} value={r} />)}
+      </datalist>
+      <datalist id="users-team-options">
+        {teams.map((t) => <option key={t} value={t} />)}
+      </datalist>
+    </>
   );
 }
 

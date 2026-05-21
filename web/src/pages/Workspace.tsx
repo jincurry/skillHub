@@ -15,6 +15,8 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import type { Notification, Review, Skill, ValidationReport } from '../api/types';
 import { SkillIcon } from '../components/SkillIcon';
 import { useLocaleText } from '../i18n/useLocaleText';
+import { useConfirm } from '../components/useConfirm';
+import { toast } from '../lib/toast';
 
 const DRAFT_CHECKS_FALLBACK = [
   { severity: 'ok' as const, label: 'Schema' },
@@ -65,6 +67,7 @@ function DraftCard({ d, meName, onChanged }: {
   onChanged: () => void;
 }) {
   const { text, locale } = useLocaleText();
+  const [confirm, confirmEl] = useConfirm();
   const navigate = useNavigate();
   const v = useAsync<ValidationReport>(() => api.validate(d.ns, d.name), [d.ns, d.name]);
   const checks = v.data?.checks ?? DRAFT_CHECKS_FALLBACK;
@@ -111,22 +114,28 @@ function DraftCard({ d, meName, onChanged }: {
 
   async function downloadBundle() {
     try { await api.downloadBundle(d.ns, d.name); }
-    catch (e) { window.alert(text('Download failed: ', '下载失败: ') + (e as Error).message); }
+    catch (e) { toast.error(text('Download failed: ', '下载失败: ') + (e as Error).message); }
   }
 
   async function deleteDraft() {
     if (!isAuthor) return;
-    if (!window.confirm(
-      text(
-        `Delete draft ${d.ns}/${d.name}?\n\nThis will also remove files, versions, comments, notifications, and related data. It cannot be undone.`,
-        `确定删除草稿 ${d.ns}/${d.name}?\n\n该操作会同时清掉文件、版本、评论、通知等附属数据,且无法恢复。`,
+    const ok = await confirm({
+      title: text('Delete draft', '删除草稿'),
+      message: text(`Delete draft ${d.ns}/${d.name}?`, `确定删除草稿 ${d.ns}/${d.name}?`),
+      detail: text(
+        'This also removes files, versions, comments, notifications, and related data. It cannot be undone.',
+        '将同时清掉文件、版本、评论、通知等附属数据，且无法恢复。',
       ),
-    )) return;
+      confirmLabel: text('Delete', '删除'),
+      cancelLabel: text('Cancel', '取消'),
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.deleteDraftSkill(d.ns, d.name);
       onChanged();
     } catch (e) {
-      window.alert(text('Delete failed: ', '删除失败: ') + (e as Error).message);
+      toast.error(text('Delete failed: ', '删除失败: ') + (e as Error).message);
     }
   }
 
@@ -234,6 +243,7 @@ function DraftCard({ d, meName, onChanged }: {
           <IconRocket size={13} /> {text('Submit Review', '提交审批')}
         </button>
       </div>
+      {confirmEl}
     </div>
   );
 }

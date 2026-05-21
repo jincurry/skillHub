@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { IconDownload, IconChevronDown, IconCopy, IconCheck } from './Icons';
 import { api } from '../api/client';
 import { useLocaleText } from '../i18n/useLocaleText';
+import { toast } from '../lib/toast';
 
 interface Props {
   ns: string;
@@ -35,7 +36,7 @@ export function DownloadMenu({ ns, name, version }: Props) {
     try {
       await api.downloadBundle(ns, name);
     } catch (e) {
-      window.alert(text('Download failed: ', '下载失败: ') + (e as Error).message);
+      toast.error(text('Download failed: ', '下载失败: ') + (e as Error).message);
     }
   }
 

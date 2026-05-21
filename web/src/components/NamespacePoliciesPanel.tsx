@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import type { Namespace, NamespacePolicy, PolicySlot } from '../api/types';
 import { IconPlus, IconXCircle } from './Icons';
 import { useLocaleText } from '../i18n/useLocaleText';
+import { useConfirm } from './useConfirm';
 
 // Roles a slot can require. Mirrors the validation list in
 // server/internal/api/policies.go::upsertNamespacePolicy.
@@ -123,6 +124,7 @@ interface PolicyCardProps {
 // each keystroke firing a network request. Save / Reset commit the change.
 function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
   const { text } = useLocaleText();
+  const [confirm, confirmEl] = useConfirm();
   // Track the loaded server values so we can detect "no changes" and disable Save.
   const [draftMode, setDraftMode] = useState(policy.mode);
   const [draftSLA, setDraftSLA] = useState(String(policy.slaHours));
@@ -168,7 +170,21 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
   }
 
   async function reset() {
-    if (!confirm(text(`Reset ${policy.classification} to the global default?`, `确定要把 ${policy.classification} 重置为全局默认吗？`))) return;
+    const ok = await confirm({
+      title: text('Reset policy', '重置策略'),
+      message: text(
+        `Reset ${policy.classification} to the global default?`,
+        `确定要把 ${policy.classification} 重置为全局默认吗？`,
+      ),
+      detail: text(
+        'This namespace override will be removed. Reviews already in flight are unaffected.',
+        '将清除该命名空间的覆盖配置。已经在审批中的请求不受影响。',
+      ),
+      confirmLabel: text('Reset', '重置'),
+      cancelLabel: text('Cancel', '取消'),
+      tone: 'danger',
+    });
+    if (!ok) return;
     setBusy(true);
     setErrMsg(null);
     try {
@@ -332,6 +348,7 @@ function PolicyCard({ ns, policy, onChange }: PolicyCardProps) {
           {busy ? text('Saving...', '保存中...') : (dirty ? text('Save', '保存') : text('Up to Date', '已是最新'))}
         </button>
       </div>
+      {confirmEl}
     </div>
   );
 }

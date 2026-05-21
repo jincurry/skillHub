@@ -21,6 +21,9 @@ import {
   type AuditCategory,
 } from '../lib/audit';
 import { useLocaleText } from '../i18n/useLocaleText';
+import { useConfirm } from '../components/useConfirm';
+import { usePrompt } from '../components/usePrompt';
+import { toast } from '../lib/toast';
 
 // Pre-fills the "new draft version" prompt with a sensible default. The server
 // re-runs the same logic so the prompt is just UX — the user can override.
@@ -37,6 +40,10 @@ export function SkillDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const { text, isEnglish, locale } = useLocaleText();
+  // The page-level confirm dialog is owned by inner modals (DistTagsModal)
+  // that have their own destructive flows. The page itself only needs a
+  // prompt for yank / deprecate reasons.
+  const [prompt, promptEl] = usePrompt();
   type Tab = 'overview' | 'files' | 'versions' | 'health' | 'audit';
   // Honor a deep-link from another page (e.g. the editor's "查看历史版本"
   // button). We read both react-router state and the URL hash so plain
@@ -105,7 +112,7 @@ export function SkillDetail() {
       else await api.subscribeSkill(ns, name);
       subState.reload();
     } catch (e) {
-      window.alert((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setSubBusy(false);
     }
@@ -149,23 +156,45 @@ export function SkillDetail() {
   const showLifecycleButtons = canManageLifecycle && p.status !== 'yanked' && p.status !== 'deprecated';
 
   async function doYank() {
-    const reason = window.prompt(text('Enter a yank reason (required; the author will be notified):', '请输入撤销原因（必填，将通知作者）：'));
-    if (!reason || !reason.trim()) return;
+    const reason = await prompt({
+      title: text('Yank skill', '撤销 Skill'),
+      message: text(
+        'Enter a yank reason. The author will be notified.',
+        '请输入撤销原因，将通知作者。',
+      ),
+      detail: text('A reason is required for yank.', '撤销操作必须填写原因。'),
+      placeholder: text('e.g. CVE-2025-1234 — leaks tokens', '例如：CVE-2025-1234，存在敏感信息泄漏'),
+      required: true,
+      confirmLabel: text('Yank', '撤销'),
+      cancelLabel: text('Cancel', '取消'),
+      tone: 'danger',
+    });
+    if (reason === null || !reason.trim()) return;
     try {
       await api.yankSkill(p.ns, p.name, reason.trim());
       await skill.reload();
     } catch (e) {
-      alert(text('Action failed: ', '操作失败：') + (e as Error).message);
+      toast.error(text('Action failed: ', '操作失败：') + (e as Error).message);
     }
   }
   async function doDeprecate() {
-    const reason = window.prompt(text('Enter a deprecation reason (optional):', '请输入弃用原因（可选）：')) ?? '';
-    if (!window.confirm(text(`Mark ${p.ns}/${p.name} as deprecated?`, `确定将 ${p.ns}/${p.name} 标记为 deprecated？`))) return;
+    const reason = await prompt({
+      title: text('Deprecate skill', '弃用 Skill'),
+      message: text(
+        `Mark ${p.ns}/${p.name} as deprecated? An optional reason will be shown to consumers.`,
+        `确定将 ${p.ns}/${p.name} 标记为 deprecated？可选的原因会展示给使用方。`,
+      ),
+      placeholder: text('Optional — e.g. superseded by foo/bar v2', '可选 — 例如：已被 foo/bar v2 取代'),
+      confirmLabel: text('Deprecate', '弃用'),
+      cancelLabel: text('Cancel', '取消'),
+      tone: 'danger',
+    });
+    if (reason === null) return;
     try {
       await api.deprecateSkill(p.ns, p.name, reason.trim());
       await skill.reload();
     } catch (e) {
-      alert(text('Action failed: ', '操作失败：') + (e as Error).message);
+      toast.error(text('Action failed: ', '操作失败：') + (e as Error).message);
     }
   }
 
@@ -177,7 +206,7 @@ export function SkillDetail() {
       await distTags.reload();
       setRollbackOpen(false);
     } catch (e) {
-      alert(text('Rollback failed: ', '回滚失败：') + (e as Error).message);
+      toast.error(text('Rollback failed: ', '回滚失败：') + (e as Error).message);
     }
   }
 
@@ -700,6 +729,7 @@ export function SkillDetail() {
           onSubmit={doRollback}
         />
       )}
+      {promptEl}
     </div>
   );
 }
@@ -907,6 +937,7 @@ function DistTagsModal({
   onChange: () => void;
 }) {
   const { text, locale } = useLocaleText();
+  const [confirm, confirmEl] = useConfirm();
   const [tagInput, setTagInput] = useState('stable');
   const [versionInput, setVersionInput] = useState(versions[0] ?? '');
   const [busy, setBusy] = useState(false);
@@ -929,7 +960,18 @@ function DistTagsModal({
   }
 
   async function applyDelete(tag: string) {
-    if (!window.confirm(text(`Delete tag "${tag}"?`, `确定删除 tag "${tag}"?`))) return;
+    const ok = await confirm({
+      title: text('Delete tag', '删除 tag'),
+      message: text(`Delete tag "${tag}"?`, `确定删除 tag "${tag}"?`),
+      detail: text(
+        'Consumers pinning this tag will stop receiving updates until it is repointed.',
+        '锁定该 tag 的使用方将停止收到更新，除非 tag 被重新指向新版本。',
+      ),
+      confirmLabel: text('Delete', '删除'),
+      cancelLabel: text('Cancel', '取消'),
+      tone: 'danger',
+    });
+    if (!ok) return;
     setErr(null); setBusy(true);
     try {
       await api.deleteDistTag(ns, name, tag);
@@ -942,6 +984,7 @@ function DistTagsModal({
   }
 
   return (
+    <>
     <div
       onClick={onClose}
       style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
@@ -1019,6 +1062,8 @@ function DistTagsModal({
         </div>
       </div>
     </div>
+    {confirmEl}
+    </>
   );
 }
 
