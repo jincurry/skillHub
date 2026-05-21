@@ -239,6 +239,9 @@ func (s *Server) Routes() *gin.Engine {
 		adminAI.GET("/users", s.listAdminUsers)
 		adminAI.POST("/users", s.createAdminUser)
 		adminAI.PATCH("/users/:username", s.adminUpdateUser)
+
+		// Blob GC: mark-and-sweep unreferenced blobs.
+		adminAI.POST("/blobs/gc", s.adminGCBlobs)
 	}
 
 	if webDir := strings.TrimSpace(os.Getenv("SKILLHUB_WEB_DIR")); webDir != "" {
@@ -1368,10 +1371,8 @@ func (s *Server) getReviewStats(c *gin.Context) {
 }
 
 // canEditSkill reports whether the user can write or delete a skill's files.
-// Author of the skill always wins; otherwise the user must be an owner or
-// maintainer of the owning namespace. This mirrors the rule applied by
-// submitForReview — if you can't submit a bundle, you shouldn't be able to
-// rewrite it either.
+// Author always wins; otherwise any namespace role (owner/maintainer/member)
+// is sufficient for file edits. Only owner/maintainer can approve reviews.
 func (s *Server) canEditSkill(user, ns, name string) (bool, error) {
 	k, err := s.store.GetSkill(ns, name)
 	if err != nil {
@@ -1387,7 +1388,7 @@ func (s *Server) canEditSkill(user, ns, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return role == "owner" || role == "maintainer", nil
+	return role == "owner" || role == "maintainer" || role == "member", nil
 }
 
 // extractFilePath normalises gin's wildcard path (which arrives with a leading

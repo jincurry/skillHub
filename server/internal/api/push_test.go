@@ -423,6 +423,145 @@ func TestChunkedUpload(t *testing.T) {
 	}
 }
 
+// TestTextMergeAutoResolves verifies that two non-overlapping edits to the
+// same text file are automatically merged without a 409.
+func TestTextMergeAutoResolves(t *testing.T) {
+	srv, r := newTestServer(t)
+	ns, _ := seedAPIWorld(t, srv.store)
+	token := signFor(t, uOwner)
+
+	// Create skill with a two-section SKILL.md.
+	original := []byte("# Header\n\nSection A content.\n\nSection B content.\n")
+	s0 := uploadBlob(t, r, token, original)
+	w := do(t, r, http.MethodPost, "/api/v1/skills/"+ns+"/merge-skill/push", token, map[string]any{
+		"base_tree_hash": nil,
+		"files":          []map[string]any{{"path": "SKILL.md", "sha256": s0, "size": len(original)}},
+		"description":    "merge test",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var cr map[string]any
+	decode(t, w, &cr)
+	base := cr["tree_hash"].(string)
+
+	// Push A: changes only Section A.
+	editA := []byte("# Header\n\nSection A EDITED.\n\nSection B content.\n")
+	sA := uploadBlob(t, r, token, editA)
+	wA := do(t, r, http.MethodPost, "/api/v1/skills/"+ns+"/merge-skill/push", token, map[string]any{
+		"base_tree_hash": base,
+		"files":          []map[string]any{{"path": "SKILL.md", "sha256": sA, "size": len(editA)}},
+	})
+	if wA.Code != http.StatusOK {
+		t.Fatalf("push A: %d %s", wA.Code, wA.Body.String())
+	}
+
+	// Push B from same base: changes only Section B.
+	editB := []byte("# Header\n\nSection A content.\n\nSection B EDITED.\n")
+	sB := uploadBlob(t, r, token, editB)
+	wB := do(t, r, http.MethodPost, "/api/v1/skills/"+ns+"/merge-skill/push", token, map[string]any{
+		"base_tree_hash": base, // same base → diverged from A
+		"files":          []map[string]any{{"path": "SKILL.md", "sha256": sB, "size": len(editB)}},
+	})
+	if wB.Code != http.StatusOK {
+		t.Fatalf("push B (text merge): %d %s", wB.Code, wB.Body.String())
+	}
+	var rb map[string]any
+	decode(t, wB, &rb)
+	if rb["merged"] != true {
+		t.Errorf("expected merged=true for auto-resolved text edit, got %v", rb["merged"])
+	}
+}
+
+// TestTextMergeConflictReturns409 verifies that overlapping edits to the same
+// line of a text file produce a 409 conflict.
+func TestTextMergeConflictReturns409(t *testing.T) {
+	srv, r := newTestServer(t)
+	ns, _ := seedAPIWorld(t, srv.store)
+	token := signFor(t, uOwner)
+
+	original := []byte("line one\nline two\nline three\n")
+	s0 := uploadBlob(t, r, token, original)
+	w := do(t, r, http.MethodPost, "/api/v1/skills/"+ns+"/conflict-text/push", token, map[string]any{
+		"base_tree_hash": nil,
+		"files":          []map[string]any{{"path": "SKILL.md", "sha256": s0, "size": len(original)}},
+		"description":    "conflict text test",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var cr map[string]any
+	decode(t, w, &cr)
+	base := cr["tree_hash"].(string)
+
+	// Push A: changes line two one way.
+	editA := []byte("line one\nLINE TWO FROM A\nline three\n")
+	sA := uploadBlob(t, r, token, editA)
+	wA := do(t, r, http.MethodPost, "/api/v1/skills/"+ns+"/conflict-text/push", token, map[string]any{
+		"base_tree_hash": base,
+		"files":          []map[string]any{{"path": "SKILL.md", "sha256": sA, "size": len(editA)}},
+	})
+	if wA.Code != http.StatusOK {
+		t.Fatalf("push A: %d %s", wA.Code, wA.Body.String())
+	}
+
+	// Push B from same base: changes line two a different way.
+	editB := []byte("line one\nLINE TWO FROM B\nline three\n")
+	sB := uploadBlob(t, r, token, editB)
+	wB := do(t, r, http.MethodPost, "/api/v1/skills/"+ns+"/conflict-text/push", token, map[string]any{
+		"base_tree_hash": base,
+		"files":          []map[string]any{{"path": "SKILL.md", "sha256": sB, "size": len(editB)}},
+	})
+	if wB.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for overlapping text edit, got %d %s", wB.Code, wB.Body.String())
+	}
+}
+
+// TestGCBlobsDeletesUnreferenced verifies that GC removes blobs not referenced
+// by any skill file or tree.
+func TestGCBlobsDeletesUnreferenced(t *testing.T) {
+	srv, r := newTestServer(t)
+	_, _ = seedAPIWorld(t, srv.store)
+	token := signFor(t, uOwner)
+
+	// Upload a blob but never reference it in a skill.
+	orphan := []byte("orphaned blob content - never used in a push")
+	orphanSum := uploadBlob(t, r, token, orphan)
+
+	// Verify it exists before GC.
+	wBefore := do(t, r, http.MethodPost, "/api/v1/blobs/exists", token, map[string]any{
+		"sha256s": []string{orphanSum},
+	})
+	var beforeResp map[string]any
+	decode(t, wBefore, &beforeResp)
+	if missing, _ := beforeResp["missing"].([]any); len(missing) != 0 {
+		t.Fatalf("blob should exist before GC, missing=%v", missing)
+	}
+
+	// Run GC as admin.
+	adminToken := signFor(t, uAdmin)
+	wGC := do(t, r, http.MethodPost, "/api/v1/admin/blobs/gc", adminToken, nil)
+	if wGC.Code != http.StatusOK {
+		t.Fatalf("gc: %d %s", wGC.Code, wGC.Body.String())
+	}
+	var gcResp map[string]any
+	decode(t, wGC, &gcResp)
+	deleted := int(gcResp["deleted"].(float64))
+	if deleted == 0 {
+		t.Errorf("expected at least 1 blob deleted by GC, got 0")
+	}
+
+	// Verify the orphan blob is gone from blobstore.
+	wAfter := do(t, r, http.MethodPost, "/api/v1/blobs/exists", token, map[string]any{
+		"sha256s": []string{orphanSum},
+	})
+	var afterResp map[string]any
+	decode(t, wAfter, &afterResp)
+	if missing, _ := afterResp["missing"].([]any); len(missing) == 0 {
+		t.Errorf("orphan blob should be missing after GC")
+	}
+}
+
 // strPtr is a helper for constructing *string literals inline.
 func strPtr(s string) *string { return &s }
 

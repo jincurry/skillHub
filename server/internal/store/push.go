@@ -1,15 +1,24 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 )
+
+// blobReadWriter is the minimal BlobStore surface needed during push/merge.
+// Defined here to keep the store package free of blobstore import cycles.
+type blobReadWriter interface {
+	Get(ctx context.Context, sha256 string) (io.ReadCloser, int64, error)
+	Put(ctx context.Context, sha256 string, r io.Reader, size int64) error
+}
 
 // PushFile is one file entry in a push request tree manifest.
 type PushFile struct {
@@ -33,6 +42,9 @@ type PushSkillParams struct {
 	Description    string
 	Classification string
 	Tags           string
+	// Blobs provides read/write access for text-file auto-merge.
+	// If nil, text-file conflicts cannot be auto-resolved.
+	Blobs blobReadWriter
 }
 
 // PushResult is returned on a successful push.
@@ -69,7 +81,7 @@ var (
 // update). It runs entirely inside one transaction so that concurrent pushes
 // from different users are serialised by SQLite's single-writer guarantee,
 // preventing silent overwrites.
-func (s *Store) PushSkillTree(p PushSkillParams) (*PushResult, error) {
+func (s *Store) PushSkillTree(ctx context.Context, p PushSkillParams) (*PushResult, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return nil, err
@@ -80,7 +92,7 @@ func (s *Store) PushSkillTree(p PushSkillParams) (*PushResult, error) {
 	if p.BaseTreeHash == nil {
 		result, err = createSkillWithTree(tx, p)
 	} else {
-		result, err = updateSkillTree(tx, p)
+		result, err = updateSkillTree(ctx, tx, p)
 	}
 	if err != nil {
 		return nil, err
@@ -126,7 +138,7 @@ func createSkillWithTree(tx *sql.Tx, p PushSkillParams) (*PushResult, error) {
 }
 
 // updateSkillTree handles the base_tree_hash != nil case (update existing skill).
-func updateSkillTree(tx *sql.Tx, p PushSkillParams) (*PushResult, error) {
+func updateSkillTree(ctx context.Context, tx *sql.Tx, p PushSkillParams) (*PushResult, error) {
 	var currentTreeHash, status string
 	err := tx.QueryRow(`
 		SELECT COALESCE(draft_tree_hash, ''), status
@@ -148,7 +160,7 @@ func updateSkillTree(tx *sql.Tx, p PushSkillParams) (*PushResult, error) {
 	if currentTreeHash == *p.BaseTreeHash {
 		return doFastForward(tx, p, newTreeHash, newManifest)
 	}
-	return doMerge(tx, p, currentTreeHash)
+	return doMerge(ctx, tx, p, currentTreeHash)
 }
 
 func doFastForward(tx *sql.Tx, p PushSkillParams, treeHash, manifest string) (*PushResult, error) {
@@ -171,7 +183,7 @@ func doFastForward(tx *sql.Tx, p PushSkillParams, treeHash, manifest string) (*P
 
 // doMerge performs a three-way file-level merge between the common base
 // (p.BaseTreeHash), the current server draft, and the incoming push.
-func doMerge(tx *sql.Tx, p PushSkillParams, currentHash string) (*PushResult, error) {
+func doMerge(ctx context.Context, tx *sql.Tx, p PushSkillParams, currentHash string) (*PushResult, error) {
 	baseFiles    := loadTreeManifest(tx, *p.BaseTreeHash)
 	currentFiles := loadTreeManifest(tx, currentHash)
 	theirFiles   := filesToMap(p.Files)
@@ -181,7 +193,7 @@ func doMerge(tx *sql.Tx, p PushSkillParams, currentHash string) (*PushResult, er
 	var summary   []string
 
 	for _, path := range unionPaths(baseFiles, currentFiles, theirFiles) {
-		m, conflict, note := mergeOneFile(path, baseFiles[path], currentFiles[path], theirFiles[path])
+		m, conflict, note := mergeOneFile(ctx, tx, p.Blobs, path, baseFiles[path], currentFiles[path], theirFiles[path])
 		if conflict != nil {
 			conflicts = append(conflicts, *conflict)
 		} else if m != nil {
@@ -216,7 +228,7 @@ func doMerge(tx *sql.Tx, p PushSkillParams, currentHash string) (*PushResult, er
 
 // mergeOneFile applies three-way merge logic for a single path.
 // Returns (mergedFile, conflict, summaryNote).
-func mergeOneFile(path string, base, current, theirs *PushFile) (*PushFile, *ConflictDetail, string) {
+func mergeOneFile(ctx context.Context, tx *sql.Tx, blobs blobReadWriter, path string, base, current, theirs *PushFile) (*PushFile, *ConflictDetail, string) {
 	switch {
 	case current == nil && theirs == nil:
 		// Both sides independently deleted the file.
@@ -254,12 +266,15 @@ func mergeOneFile(path string, base, current, theirs *PushFile) (*PushFile, *Con
 
 	default:
 		// Both sides changed the file independently.
-		// Text files are a candidate for line-level merge (deferred to P4).
-		reason := "both sides modified"
-		if isTextFile(path) {
-			reason = "both sides modified (text merge not yet implemented)"
+		// Try line-level merge for text files when blobs are available.
+		if isTextFile(path) && blobs != nil && base != nil {
+			ancestorSHA := base.SHA256
+			if merged, note, ok := tryTextMerge(ctx, tx, blobs, path, ancestorSHA, current.SHA256, theirs.SHA256, current.Executable); ok {
+				return merged, nil, note
+			}
+			return nil, &ConflictDetail{path, "text merge conflict"}, ""
 		}
-		return nil, &ConflictDetail{path, reason}, ""
+		return nil, &ConflictDetail{path, "both sides modified"}, ""
 	}
 }
 

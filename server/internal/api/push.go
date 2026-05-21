@@ -276,7 +276,7 @@ func (s *Server) pushSkill(c *gin.Context) {
 		}
 	}
 
-	result, err := s.store.PushSkillTree(store.PushSkillParams{
+	result, err := s.store.PushSkillTree(c.Request.Context(), store.PushSkillParams{
 		NS:             ns,
 		Name:           name,
 		PushedBy:       user,
@@ -286,6 +286,7 @@ func (s *Server) pushSkill(c *gin.Context) {
 		Description:    req.Description,
 		Classification: req.Classification,
 		Tags:           req.Tags,
+		Blobs:          s.blobs,
 	})
 	if err != nil {
 		switch {
@@ -353,4 +354,17 @@ func (s *Server) canPushSkill(user, ns, name string) (bool, error) {
 func sha256Hex(b []byte) string {
 	h := cryptosha256.Sum256(b)
 	return hex.EncodeToString(h[:])
+}
+
+// POST /api/v1/admin/blobs/gc
+// Runs a mark-and-sweep GC over blob_objects: deletes blobs that are no
+// longer referenced by any skill file, tree manifest, or active upload.
+// Admin-only; returns the count of deleted blobs.
+func (s *Server) adminGCBlobs(c *gin.Context) {
+	n, err := s.store.GCBlobs(c.Request.Context(), s.blobs)
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": n})
 }

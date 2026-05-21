@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"log"
 	"path/filepath"
+	"time"
 
 	"github.com/jincurry/skillhub/server/internal/api"
 	"github.com/jincurry/skillhub/server/internal/blobstore"
@@ -30,6 +32,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("blobstore: %v", err)
 	}
+
+	// Background blob GC: runs every 24 hours to remove unreferenced blobs.
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			n, err := st.GCBlobs(context.Background(), blobs)
+			if err != nil {
+				log.Printf("gc blobs: %v", err)
+			} else if n > 0 {
+				log.Printf("gc blobs: deleted %d unreferenced blobs", n)
+			}
+		}
+	}()
 
 	srv := api.New(cfg, st, blobs)
 	log.Printf("skillhub api listening on %s (db=%s, data=%s, user=%s)",
