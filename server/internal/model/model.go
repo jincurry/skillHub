@@ -189,6 +189,7 @@ type CreateNamespaceRequest struct {
 type SkillFile struct {
 	Path      string    `json:"path"`
 	Content   string    `json:"content,omitempty"`
+	BlobHash  string    `json:"blobHash,omitempty"`
 	Size      int       `json:"size"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	UpdatedBy string    `json:"updatedBy"`

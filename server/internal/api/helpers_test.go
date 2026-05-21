@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jincurry/skillhub/server/internal/auth"
+	"github.com/jincurry/skillhub/server/internal/blobstore"
 	"github.com/jincurry/skillhub/server/internal/config"
 	"github.com/jincurry/skillhub/server/internal/model"
 	"github.com/jincurry/skillhub/server/internal/store"
@@ -47,15 +48,21 @@ func newTestServer(t *testing.T) (*Server, *gin.Engine) {
 	}
 	t.Cleanup(func() { _ = st.DB.Close() })
 
+	blobs, err := blobstore.NewLocal(filepath.Join(t.TempDir(), "blobs"))
+	if err != nil {
+		t.Fatalf("open blobstore: %v", err)
+	}
+
 	cfg := config.Config{
 		Addr:      ":0",
 		DBPath:    dbPath,
+		DataDir:   t.TempDir(),
 		User:      uOwner,
 		JWTSecret: testSecret,
 		JWTTTL:    1 * time.Hour,
 		LogWriter: io.Discard,
 	}
-	srv := New(cfg, st)
+	srv := New(cfg, st, blobs)
 	return srv, srv.Routes()
 }
 

@@ -12,8 +12,9 @@ import (
 
 type Config struct {
 	Addr      string
-	DBPath    string
-	User      string
+	DBPath  string
+	DataDir string
+	User    string
 	JWTSecret []byte
 	JWTTTL    time.Duration
 
@@ -59,6 +60,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Addr:             env("SKILLHUB_ADDR", ":8080"),
 		DBPath:           env("SKILLHUB_DB", "./skillhub.db"),
+		DataDir:          env("SKILLHUB_DATA_DIR", "./data"),
 		User:             env("SKILLHUB_USER", "alice"),
 		JWTTTL:           24 * time.Hour,
 		SlackWebhookURL:  env("SKILLHUB_SLACK_WEBHOOK", ""),

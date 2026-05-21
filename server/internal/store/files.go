@@ -82,10 +82,11 @@ func (s *Store) GetSkillFile(ns, name, p string) (*model.SkillFile, error) {
 	if strings.EqualFold(p, "README.md") {
 		return nil, nil
 	}
-	row := s.DB.QueryRow(`SELECT path, content, size, updated_at, updated_by
+	row := s.DB.QueryRow(`
+		SELECT path, content, COALESCE(blob_hash,''), size, updated_at, updated_by
 		FROM skill_files WHERE ns = ? AND skill_name = ? AND path = ?`, ns, name, p)
 	var f model.SkillFile
-	if err := row.Scan(&f.Path, &f.Content, &f.Size, &f.UpdatedAt, &f.UpdatedBy); err != nil {
+	if err := row.Scan(&f.Path, &f.Content, &f.BlobHash, &f.Size, &f.UpdatedAt, &f.UpdatedBy); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}

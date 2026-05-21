@@ -2,8 +2,10 @@ package main
 
 import (
 	"log"
+	"path/filepath"
 
 	"github.com/jincurry/skillhub/server/internal/api"
+	"github.com/jincurry/skillhub/server/internal/blobstore"
 	"github.com/jincurry/skillhub/server/internal/config"
 	"github.com/jincurry/skillhub/server/internal/store"
 )
@@ -24,8 +26,14 @@ func main() {
 	}
 	defer st.Close()
 
-	srv := api.New(cfg, st)
-	log.Printf("skillhub api listening on %s (db=%s, user=%s)", cfg.Addr, cfg.DBPath, cfg.User)
+	blobs, err := blobstore.NewLocal(filepath.Join(cfg.DataDir, "blobs"))
+	if err != nil {
+		log.Fatalf("blobstore: %v", err)
+	}
+
+	srv := api.New(cfg, st, blobs)
+	log.Printf("skillhub api listening on %s (db=%s, data=%s, user=%s)",
+		cfg.Addr, cfg.DBPath, cfg.DataDir, cfg.User)
 	if err := srv.Routes().Run(cfg.Addr); err != nil {
 		log.Fatalf("server: %v", err)
 	}

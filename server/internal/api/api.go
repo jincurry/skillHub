@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"database/sql"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jincurry/skillhub/server/internal/audit"
 	"github.com/jincurry/skillhub/server/internal/auth"
+	"github.com/jincurry/skillhub/server/internal/blobstore"
 	"github.com/jincurry/skillhub/server/internal/config"
 	"github.com/jincurry/skillhub/server/internal/i18n"
 	"github.com/jincurry/skillhub/server/internal/middleware"
@@ -28,11 +30,12 @@ import (
 type Server struct {
 	cfg      config.Config
 	store    *store.Store
+	blobs    blobstore.BlobStore
 	notifier *notifier.Dispatcher
 	metrics  *middleware.Registry
 }
 
-func New(cfg config.Config, st *store.Store) *Server {
+func New(cfg config.Config, st *store.Store, blobs blobstore.BlobStore) *Server {
 	// Build notifier dispatcher from config.
 	d := notifier.New()
 	if s := notifier.NewSlack(cfg.SlackWebhookURL); s != nil {
@@ -41,7 +44,7 @@ func New(cfg config.Config, st *store.Store) *Server {
 	if f := notifier.NewFeishu(cfg.FeishuWebhookURL); f != nil {
 		d.Register(f)
 	}
-	return &Server{cfg: cfg, store: st, notifier: d, metrics: middleware.NewRegistry()}
+	return &Server{cfg: cfg, store: st, blobs: blobs, notifier: d, metrics: middleware.NewRegistry()}
 }
 
 func (s *Server) Routes() *gin.Engine {
@@ -190,6 +193,17 @@ func (s *Server) Routes() *gin.Engine {
 		auth.DELETE("/webhooks/:id", s.deleteWebhook)
 		auth.GET("/webhooks/:id/deliveries", s.listWebhookDeliveries)
 		auth.POST("/webhooks/:id/ping", s.pingWebhook)
+
+		// Blob storage — phase 1 (content-addressed upload/download).
+		auth.POST("/blobs/exists", s.blobsExists)
+		auth.PUT("/blobs/:sha256", s.putBlob)
+		auth.POST("/blobs/:sha256/uploads", s.startChunkedUpload)
+		auth.PUT("/blobs/:sha256/uploads/:upload_id/chunks/:index", s.putChunk)
+		auth.POST("/blobs/:sha256/uploads/:upload_id/complete", s.completeChunkedUpload)
+
+		// Push protocol — phase 2 (concurrent push with conflict detection).
+		auth.POST("/skills/:ns/:name/push", s.pushSkill)
+		auth.GET("/skills/:ns/:name/draft-tree", s.getDraftTree)
 	}
 
 	// Admin-only configuration. requireAdmin checks users.is_admin = 1.
@@ -1417,6 +1431,28 @@ func (s *Server) getSkillFile(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "file not found"})
 		return
 	}
+
+	// If the file has a blob_hash it was stored via the push protocol.
+	// Stream it directly from blob storage (or redirect for S3).
+	if f.BlobHash != "" && s.blobs != nil {
+		if url, _ := s.blobs.PresignedGetURL(c.Request.Context(), f.BlobHash, 15*time.Minute); url != "" {
+			c.Redirect(http.StatusFound, url)
+			return
+		}
+		rc, size, err := s.blobs.Get(c.Request.Context(), f.BlobHash)
+		if err != nil {
+			serverError(c, err)
+			return
+		}
+		defer rc.Close()
+		c.Header("Content-Disposition", `attachment; filename="`+filepath.Base(p)+`"`)
+		c.Header("Content-Length", strconv.FormatInt(size, 10))
+		c.Header("Content-Type", "application/octet-stream")
+		c.Status(http.StatusOK)
+		io.Copy(c.Writer, rc)
+		return
+	}
+
 	c.JSON(200, f)
 }
 
