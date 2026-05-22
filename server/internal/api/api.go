@@ -1478,10 +1478,47 @@ func (s *Server) putSkillFile(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	f, err := s.store.PutSkillFile(ns, name, p, req.Content, user)
-	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+	// Two body shapes are accepted (mutually exclusive):
+	//
+	//   1. {"content": "..."} — inline text upload (legacy path; ≤ 1 MiB).
+	//   2. {"blobHash": "<sha256>", "size": N} — body lives in blob storage,
+	//      uploaded via /api/v1/blobs/* before this PUT. Used by the editor
+	//      for large or binary files so we never JSON-encode the body.
+	//
+	// If both shapes are present we reject — that's a client bug; pick one.
+	var f *model.SkillFile
+	switch {
+	case req.BlobHash != "" && req.Content != "":
+		c.JSON(400, gin.H{"error": "either content or blobHash, not both"})
 		return
+	case req.BlobHash != "":
+		// Verify the blob is actually present so we never persist a row
+		// pointing at a missing object. Cheap O(1) stat against the
+		// blobstore index.
+		if s.blobs == nil {
+			c.JSON(503, gin.H{"error": "blob storage not configured"})
+			return
+		}
+		exists, err := s.blobs.Exists(c.Request.Context(), req.BlobHash)
+		if err != nil {
+			serverError(c, err)
+			return
+		}
+		if !exists {
+			c.JSON(422, gin.H{"error": "blob not uploaded", "blobHash": req.BlobHash})
+			return
+		}
+		f, err = s.store.PutSkillFileBlob(ns, name, p, req.BlobHash, req.Size, user)
+		if err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+	default:
+		f, err = s.store.PutSkillFile(ns, name, p, req.Content, user)
+		if err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	audit.Log(s.store.DB, user, "edit_file", ns+"/"+name+":"+p, "", c.ClientIP())
 	c.JSON(200, f)
@@ -1795,10 +1832,19 @@ func (s *Server) downloadSkillBundle(c *gin.Context) {
 
 	now := time.Now()
 	for _, f := range files {
+		// Resolve the body. Inline files keep using f.Content; blob files
+		// stream straight from blob storage so we never load a multi-MB
+		// binary into a Go string. ListSkillFilesAtVersion sets f.Size for
+		// blob files via the snapshot; for live files it reflects the
+		// skill_files.size column.
+		size := int64(len(f.Content))
+		if f.BlobHash != "" {
+			size = int64(f.Size)
+		}
 		hdr := &tar.Header{
 			Name:    root + "/" + f.Path,
 			Mode:    0o644,
-			Size:    int64(len(f.Content)),
+			Size:    size,
 			ModTime: now,
 		}
 		if !f.UpdatedAt.IsZero() {
@@ -1806,6 +1852,30 @@ func (s *Server) downloadSkillBundle(c *gin.Context) {
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
 			return
+		}
+		if f.BlobHash != "" {
+			if s.blobs == nil {
+				return
+			}
+			rc, blobSize, err := s.blobs.Get(c.Request.Context(), f.BlobHash)
+			if err != nil {
+				return
+			}
+			// Header.Size must match exactly or tar.Writer will refuse the
+			// next entry. If our recorded size disagreed with the blob's
+			// real size, the Get above would still have given us the truth
+			// but the header is already written — bail rather than corrupt
+			// the archive.
+			if blobSize != size {
+				rc.Close()
+				return
+			}
+			if _, err := io.Copy(tw, rc); err != nil {
+				rc.Close()
+				return
+			}
+			rc.Close()
+			continue
 		}
 		if _, err := tw.Write([]byte(f.Content)); err != nil {
 			return

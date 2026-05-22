@@ -812,24 +812,50 @@ function ChangesView({ files, comments, reviewId, me, editingCommentId, editingB
                 <DiffStat base={active.baseContent} next={active.newContent} />
               </div>
               <div style={{ flex: 1, minHeight: 0, background: '#1e1e1e' }}>
-                <DiffEditor
-                  key={active.path}
-                  height="100%"
-                  language={languageFor(active.path)}
-                  theme="vs-dark"
-                  original={active.baseContent}
-                  modified={active.newContent}
-                  onMount={handleEditorMount}
-                  options={{
-                    readOnly: true,
-                    renderSideBySide: true,
-                    minimap: { enabled: false },
-                    fontSize: 12.5,
-                    automaticLayout: true,
-                    renderWhitespace: 'selection',
-                    scrollBeyondLastLine: false,
-                  }}
-                />
+                {(active.baseBlobHash || active.newBlobHash) ? (
+                  // Blob-backed files (large/binary) aren't shown in the diff
+                  // editor — Monaco can't usefully render them and the bytes
+                  // would balloon the JS heap. Surface a placeholder with the
+                  // hashes + sizes so the reviewer can verify the upload.
+                  <div style={{
+                    color: 'var(--text-muted)', fontSize: 13, padding: 24,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    height: '100%', display: 'flex', flexDirection: 'column',
+                    gap: 12, justifyContent: 'center', alignItems: 'center',
+                  }}>
+                    <div style={{ color: 'var(--text)', fontSize: 14, fontWeight: 500 }}>
+                      {text('Binary file (blob storage)', '二进制文件（blob 存储）')}
+                    </div>
+                    {active.baseBlobHash && (
+                      <div>{text('Base: ', '原版本：')}<span style={{ color: 'var(--text-faint)' }}>{active.baseBlobHash.slice(0, 12)}…</span> · {(active.baseSize ?? 0)} B</div>
+                    )}
+                    {active.newBlobHash && (
+                      <div>{text('Head: ', '新版本：')}<span style={{ color: 'var(--text-faint)' }}>{active.newBlobHash.slice(0, 12)}…</span> · {(active.newSize ?? 0)} B</div>
+                    )}
+                    <div style={{ fontSize: 11.5 }}>
+                      {text('Use the bundle download to inspect contents locally.', '请通过 Bundle 下载在本地查看内容。')}
+                    </div>
+                  </div>
+                ) : (
+                  <DiffEditor
+                    key={active.path}
+                    height="100%"
+                    language={languageFor(active.path)}
+                    theme="vs-dark"
+                    original={active.baseContent}
+                    modified={active.newContent}
+                    onMount={handleEditorMount}
+                    options={{
+                      readOnly: true,
+                      renderSideBySide: true,
+                      minimap: { enabled: false },
+                      fontSize: 12.5,
+                      automaticLayout: true,
+                      renderWhitespace: 'selection',
+                      scrollBeyondLastLine: false,
+                    }}
+                  />
+                )}
               </div>
 
               {/* Inline comments section. Capped height + own scroll so it

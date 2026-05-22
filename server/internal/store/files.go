@@ -57,7 +57,7 @@ func ValidateFilePath(p string) (string, error) {
 // ListSkillFiles returns all files (without content) for a skill, sorted by
 // path so directories cluster together.
 func (s *Store) ListSkillFiles(ns, name string) ([]model.SkillFile, error) {
-	rows, err := s.DB.Query(`SELECT path, size, updated_at, updated_by
+	rows, err := s.DB.Query(`SELECT path, COALESCE(blob_hash,''), size, updated_at, updated_by
 		FROM skill_files
 		WHERE ns = ? AND skill_name = ? AND lower(path) <> 'readme.md'
 		ORDER BY path`, ns, name)
@@ -68,7 +68,7 @@ func (s *Store) ListSkillFiles(ns, name string) ([]model.SkillFile, error) {
 	var out []model.SkillFile
 	for rows.Next() {
 		var f model.SkillFile
-		if err := rows.Scan(&f.Path, &f.Size, &f.UpdatedAt, &f.UpdatedBy); err != nil {
+		if err := rows.Scan(&f.Path, &f.BlobHash, &f.Size, &f.UpdatedAt, &f.UpdatedBy); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -95,7 +95,13 @@ func (s *Store) GetSkillFile(ns, name, p string) (*model.SkillFile, error) {
 	return &f, nil
 }
 
-// PutSkillFile inserts or replaces a file. Returns the row as it now exists.
+// PutSkillFile inserts or replaces an inline (small text) file. The on-disk
+// blob storage is bypassed — the body lives in skill_files.content. Returns
+// the row as it now exists.
+//
+// For blob-backed files (large / binary uploads via the push protocol) use
+// PutSkillFileBlob instead, which writes the same row but with content=''
+// and blob_hash=<sha256>.
 func (s *Store) PutSkillFile(ns, name, p, content, updatedBy string) (*model.SkillFile, error) {
 	if len(content) > MaxFileBytes {
 		return nil, errors.New("file too large (max 1 MiB)")
@@ -103,15 +109,58 @@ func (s *Store) PutSkillFile(ns, name, p, content, updatedBy string) (*model.Ski
 	if strings.EqualFold(p, "README.md") {
 		return nil, errors.New("root README.md is no longer used for skills; put documentation in SKILL.md")
 	}
+	// Inline write resets blob_hash so the same path can flip back to an
+	// inline file (the caller might be re-uploading a small text edit
+	// over a previously blob-backed file).
 	if _, err := s.DB.Exec(`
-		INSERT INTO skill_files(ns, skill_name, path, content, size, updated_at, updated_by)
-		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+		INSERT INTO skill_files(ns, skill_name, path, content, blob_hash, size, updated_at, updated_by)
+		VALUES (?, ?, ?, ?, '', ?, CURRENT_TIMESTAMP, ?)
 		ON CONFLICT(ns, skill_name, path) DO UPDATE SET
 			content    = excluded.content,
+			blob_hash  = '',
 			size       = excluded.size,
 			updated_at = CURRENT_TIMESTAMP,
 			updated_by = excluded.updated_by`,
 		ns, name, p, content, len(content), updatedBy); err != nil {
+		return nil, err
+	}
+	return s.GetSkillFile(ns, name, p)
+}
+
+// PutSkillFileBlob inserts or replaces a file row that points at a blob
+// uploaded via the /api/v1/blobs/* protocol. The caller must guarantee:
+//
+//   - blobHash matches an entry in blob_objects (it should — push protocol
+//     verifies blob existence before this is reachable from the file API).
+//   - size matches the blob's recorded size (we trust the API layer here).
+//
+// blob_hash is set on the skill_files row and content is cleared. Reads via
+// GetSkillFile / ListSkillFilesWithContent then resolve the body by streaming
+// from blob storage rather than from the SQLite TEXT column.
+func (s *Store) PutSkillFileBlob(ns, name, p, blobHash string, size int64, updatedBy string) (*model.SkillFile, error) {
+	if strings.EqualFold(p, "README.md") {
+		return nil, errors.New("root README.md is no longer used for skills; put documentation in SKILL.md")
+	}
+	if len(blobHash) != 64 {
+		return nil, errors.New("invalid blob hash")
+	}
+	if size < 0 {
+		return nil, errors.New("invalid blob size")
+	}
+	if _, err := s.DB.Exec(`
+		INSERT INTO skill_files(ns, skill_name, path, content, blob_hash, size, updated_at, updated_by)
+		VALUES (?, ?, ?, '', ?, ?, CURRENT_TIMESTAMP, ?)
+		ON CONFLICT(ns, skill_name, path) DO UPDATE SET
+			content    = '',
+			blob_hash  = excluded.blob_hash,
+			size       = excluded.size,
+			updated_at = CURRENT_TIMESTAMP,
+			updated_by = excluded.updated_by`,
+		ns, name, p, blobHash, size, updatedBy); err != nil {
+		return nil, err
+	}
+	// Bump ref_count so GC won't reap the blob between push events.
+	if err := s.UpsertBlobObject(blobHash, size, false); err != nil {
 		return nil, err
 	}
 	return s.GetSkillFile(ns, name, p)

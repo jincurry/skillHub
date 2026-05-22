@@ -238,17 +238,37 @@ type PlatformMetrics struct {
 // brand-new file or the skill has no prior approval). NewContent is what the
 // author submitted *for this review*. ChangeKind is precomputed at submit
 // time so the UI doesn't have to diff every file just to render a sidebar.
+//
+// Blob-backed files (uploaded via the push / blob protocol) have an empty
+// BaseContent / NewContent and a non-empty BaseBlobHash / NewBlobHash. The
+// reviewer UI is expected to render a "binary file" placeholder for these
+// rather than try to diff the bytes.
 type ReviewFile struct {
 	Path        string `json:"path"`
 	BaseContent string `json:"baseContent"`
 	NewContent  string `json:"newContent"`
+	// Blob hashes are only set for files stored via the blob protocol.
+	BaseBlobHash string `json:"baseBlobHash,omitempty"`
+	NewBlobHash  string `json:"newBlobHash,omitempty"`
+	// Size in bytes, for both inline and blob files. Lets the UI label
+	// blob diffs as e.g. "binary, 5.2 MB" without fetching the content.
+	BaseSize int64 `json:"baseSize,omitempty"`
+	NewSize  int64 `json:"newSize,omitempty"`
 	// ChangeKind ∈ "added" | "modified" | "deleted" | "unchanged".
 	ChangeKind string `json:"changeKind"`
 }
 
 // PutFileRequest is the body for PUT /skills/:ns/:name/files/*path.
+//
+// Two mutually-exclusive shapes:
+//   - {"content": "..."} — inline text upload (legacy path; capped at 1 MiB)
+//   - {"blobHash": "<sha256>", "size": N} — file body lives in blob storage,
+//     uploaded via /api/v1/blobs/* before this PUT. Used for large or binary
+//     files so the editor doesn't have to ship them through JSON.
 type PutFileRequest struct {
-	Content string `json:"content"`
+	Content  string `json:"content"`
+	BlobHash string `json:"blobHash"`
+	Size     int64  `json:"size"`
 }
 
 // RenameFileRequest is the body for POST /skills/:ns/:name/files/rename.

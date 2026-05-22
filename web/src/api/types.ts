@@ -86,10 +86,19 @@ export interface SubscriptionState {
 // ReviewFile is one file's snapshot inside a review request, returned by
 // GET /reviews/:id/files. The base/new contents power the diff view; the
 // pre-computed changeKind drives the file-list sidebar.
+//
+// Blob-backed files (uploaded via push / large-file protocol) carry empty
+// baseContent / newContent and non-empty baseBlobHash / newBlobHash. The
+// reviewer UI should render a "binary file" placeholder for these instead
+// of attempting a textual diff.
 export interface ReviewFile {
   path: string;
   baseContent: string;
   newContent: string;
+  baseBlobHash?: string;
+  newBlobHash?: string;
+  baseSize?: number;
+  newSize?: number;
   changeKind: 'added' | 'modified' | 'deleted' | 'unchanged';
 }
 
@@ -315,6 +324,10 @@ export interface SkillFile {
   path: string;
   /** Empty in list responses; populated for single-file responses. */
   content?: string;
+  /** Non-empty when the file's body lives in blob storage (large/binary).
+      The editor MUST NOT attempt to load `content` for these — fetch a
+      placeholder via `size` instead. */
+  blobHash?: string;
   size: number;
   updatedAt: string;
   updatedBy: string;

@@ -11,9 +11,12 @@ import type { AIAssistAction, ValidationReport } from '../api/types';
 import { AIAssistDrawer, type EditorBridge } from '../components/AIAssistDrawer';
 import { useConfirm } from '../components/useConfirm';
 import { runAssist, type AssistHandle } from '../lib/aiAssist';
-import { isRootReadme, languageFor, shouldDisplaySkillFile } from '../lib/files';
+import { isRootReadme, languageFor, shouldDisplaySkillFile, shouldUploadInline, formatBytes } from '../lib/files';
 import { renderMarkdown } from '../lib/markdown';
 import { estimateTokens, fmtTokens } from '../lib/tokens';
+import { uploadBlob, MAX_BLOB_SIZE } from '../lib/blob';
+import { downloadFromAPI, progressPct, type DownloadProgress } from '../lib/download';
+import { toast } from '../lib/toast';
 import {
   AUTOSAVE_MS, REQUIRED_FILES, SEMVER_RE, STD_DIRS, TEMPLATE_GROUPS,
   type StdDirKey,
@@ -44,6 +47,14 @@ export function Editor() {
     () => (files.data ?? []).filter((f) => shouldDisplaySkillFile(f.path)),
     [files.data],
   );
+  // Set of file paths whose body is stored in blob storage (large/binary).
+  // Editor save / autosave / model-sync paths must skip these — sending an
+  // empty inline content for a blob-backed file would silently overwrite it.
+  const blobPaths = useMemo(() => {
+    const s = new Set<string>();
+    for (const f of displayFiles) if (f.blobHash) s.add(f.path);
+    return s;
+  }, [displayFiles]);
   const validation = useAsync<ValidationReport>(() => api.validate(ns, name), [ns, name]);
   const policy = useAsync(
     () => api.namespacePolicy(ns, (skill.data?.classification ?? 'L2') as 'L1' | 'L2' | 'L3'),
@@ -219,13 +230,34 @@ export function Editor() {
   // we also peek at the localStorage backup for the same path; if the
   // backup disagrees with what the server has, we queue a restore prompt
   // instead of silently overwriting either side.
+  //
+  // Blob-backed files (uploaded via the push / large-file protocol) skip
+  // the GET entirely — calling api.getFile on them would download the raw
+  // bytes through fetch and we'd have nothing useful to do with them in
+  // Monaco anyway. The render path checks `activeFileMeta.blobHash` and
+  // shows a binary-file placeholder instead.
   useEffect(() => {
     if (!activePath) return;
     if (buffers[activePath]) return;
     if (inflight.current.has(activePath)) return;
+    const meta = (files.data ?? []).find((f) => f.path === activePath);
+    if (meta?.blobHash) {
+      // Blob file — don't try to load it as text. Plant an empty buffer so
+      // the editor renders the placeholder branch but other code paths
+      // (token count, save buttons) don't keep retrying the load.
+      setBuffers((b) => ({ ...b, [activePath]: { content: '', dirty: false } }));
+      return;
+    }
     inflight.current.add(activePath);
     api.getFile(ns, name, activePath)
       .then((f) => {
+        // The server may have flipped the file to blob storage between the
+        // listing and the GET (e.g. another tab replaced it). Treat that
+        // the same as the "skip" branch above.
+        if (f.blobHash) {
+          setBuffers((b) => ({ ...b, [activePath]: { content: '', dirty: false } }));
+          return;
+        }
         const server = f.content ?? '';
         setBuffers((b) => ({ ...b, [activePath]: { content: server, dirty: false } }));
         setServerSnapshots((s) => ({ ...s, [activePath]: server }));
@@ -244,7 +276,7 @@ export function Editor() {
       })
       .catch((e: Error) => setMsg(text(`Failed to load ${activePath}: ${e.message}`, `加载 ${activePath} 失败: ${e.message}`)))
       .finally(() => { inflight.current.delete(activePath); });
-  }, [activePath, ns, name, buffers]);
+  }, [activePath, ns, name, buffers, files.data]);
 
   const currentVersion = skill.data?.version ?? '0.1.0';
   // The submit modal lets the user pick patch/minor/major; we keep the
@@ -480,10 +512,15 @@ export function Editor() {
   }, [activePath, activeBuf, editorMountTick]);
 
   // Keep readOnly in sync without remounting. canEdit can flip after the
-  // members.data load completes.
+  // members.data load completes. Blob-backed files are also forced read-only
+  // so a stray keystroke can't synthesise an edit on the empty model under
+  // the placeholder overlay.
   useEffect(() => {
-    editorRef.current?.updateOptions({ readOnly: !canEdit });
-  }, [canEdit]);
+    const ed = editorRef.current;
+    if (!ed) return;
+    const onBlob = activePath ? blobPaths.has(activePath) : false;
+    ed.updateOptions({ readOnly: !canEdit || onBlob });
+  }, [canEdit, activePath, blobPaths]);
 
   // Dispose models for files that have been deleted/renamed away. Called
   // whenever the file listing changes; the rename flow re-keys buffers and
@@ -648,6 +685,16 @@ export function Editor() {
   async function saveActive() {
     if (!activePath || !activeBuf) return;
     if (!activeBuf.dirty) return;
+    if (blobPaths.has(activePath)) {
+      // Blob-backed files aren't editable in Monaco; the buffer can't be
+      // dirty in normal flow but defend against the AI-assist replaceAll
+      // bridge or a stray external write that flipped `dirty` anyway.
+      setMsg(text(
+        `${activePath} is a binary file; edits aren't saved through the editor`,
+        `${activePath} 是二进制文件，无法通过编辑器保存改动`,
+      ));
+      return;
+    }
     setSaving(true); setMsg(null);
     try {
       const updated = await api.putFile(ns, name, activePath, activeBuf.content);
@@ -670,6 +717,7 @@ export function Editor() {
     let lastErr: Error | null = null;
     for (const [p, b] of Object.entries(buffers)) {
       if (!b.dirty) continue;
+      if (blobPaths.has(p)) continue; // never overwrite a blob file with inline content
       try {
         const updated = await api.putFile(ns, name, p, b.content);
         setBuffers((bs) => ({ ...bs, [p]: { content: updated.content ?? b.content, dirty: false } }));
@@ -704,6 +752,13 @@ export function Editor() {
   useEffect(() => {
     for (const [p, b] of Object.entries(buffers)) {
       const prev = autosaveTimers.current.get(p);
+      // Blob-backed files don't go through the inline JSON path; their body
+      // lives in CAS storage and the editor never holds it. Skip every save
+      // / backup branch so a stray dirty flag can't overwrite the blob.
+      if (blobPaths.has(p)) {
+        if (prev) { clearTimeout(prev); autosaveTimers.current.delete(p); }
+        continue;
+      }
       if (!b.dirty) {
         // Going clean — cancel any pending save and clear the local backup.
         if (prev) { clearTimeout(prev); autosaveTimers.current.delete(p); }
@@ -914,10 +969,30 @@ export function Editor() {
         errors.push(text(`${path} already exists`, `${path} 已存在`));
         continue;
       }
+      if (file.size > MAX_BLOB_SIZE) {
+        errors.push(text(
+          `${path}: file exceeds ${formatBytes(MAX_BLOB_SIZE)} limit`,
+          `${path}：超出 ${formatBytes(MAX_BLOB_SIZE)} 上限`,
+        ));
+        continue;
+      }
       try {
-        const text = await file.text();
-        const f = await api.putFile(ns, name, path, text);
-        setBuffers((b) => ({ ...b, [path]: { content: f.content ?? text, dirty: false } }));
+        if (shouldUploadInline(file)) {
+          // Small text file — inline JSON path keeps Monaco-editable. Reading
+          // a ≤ INLINE_UPLOAD_MAX file as text is safe; the size guard above
+          // makes sure file.text() can't OOM the tab.
+          const body = await file.text();
+          const f = await api.putFile(ns, name, path, body);
+          setBuffers((b) => ({ ...b, [path]: { content: f.content ?? body, dirty: false } }));
+        } else {
+          // Large or binary file — go through the blob protocol so the body
+          // never enters the JS heap as a string. The blob is hashed and
+          // streamed in chunks; the editor only sees a binary placeholder
+          // for it after the upload.
+          const { sha256, size } = await uploadBlob(file);
+          await api.putFileBlob(ns, name, path, sha256, size);
+          setBuffers((b) => ({ ...b, [path]: { content: '', dirty: false } }));
+        }
         created++;
       } catch (e) {
         errors.push(`${path}: ${(e as Error).message}`);
@@ -932,7 +1007,12 @@ export function Editor() {
     }
     if (created > 0) {
       setMsg(text(`Uploaded ${created} files`, `已上传 ${created} 个文件`));
-      if (uploadFiles.length === 1) openFile(uploadFiles[0].name);
+      // Auto-open only if it's a single text file the editor can show.
+      // Auto-opening a 200 MB binary file would just plant a placeholder
+      // and switch the user away from whatever they were editing.
+      if (uploadFiles.length === 1 && shouldUploadInline(uploadFiles[0])) {
+        openFile(uploadFiles[0].name);
+      }
     }
     setUploadBusy(false);
   }
@@ -1891,6 +1971,26 @@ export function Editor() {
                   {activePath ? text('Loading file...', '加载文件中...') : text('Choose a file from the tree on the left', '请从左侧文件树选择一个文件')}
                 </div>
               )}
+              {activePath && activeBuf && blobPaths.has(activePath) && (() => {
+                // Binary / large file placeholder. Layered above Monaco (which
+                // is also still mounted with an empty model) so the user gets
+                // a meaningful surface and we never call file.text() on a
+                // multi-MB body. The download path uses an authenticated
+                // streaming fetch (NOT a plain `<a href>` which would 401
+                // because the JWT lives in localStorage, not cookies).
+                const meta = (files.data ?? []).find((f) => f.path === activePath);
+                const sha = meta?.blobHash ?? '';
+                const sz = meta?.size ?? 0;
+                return (
+                  <BinaryFilePlaceholder
+                    ns={ns}
+                    name={name}
+                    path={activePath}
+                    size={sz}
+                    sha256={sha}
+                  />
+                );
+              })()}
             </div>
             {effectiveMode === 'preview' && (
               <div
@@ -2120,6 +2220,98 @@ export function Editor() {
         />
       )}
       {confirmEl}
+    </div>
+  );
+}
+
+// BinaryFilePlaceholder is the surface shown over Monaco when the active
+// file lives in blob storage (uploaded via the push protocol). It carries
+// its own busy / progress state so a 100+ MB blob doesn't look like a dead
+// button on the first click.
+//
+// Why a button + authenticated fetch instead of `<a href>`?
+//   - The download endpoint requires a Bearer token. Anchors only carry
+//     cookies; localStorage-resident JWTs would 401.
+//   - Streaming the response gives us a real progress percentage so users
+//     stop pounding the button (which used to spawn duplicate downloads).
+function BinaryFilePlaceholder({
+  ns, name, path, size, sha256,
+}: {
+  ns: string;
+  name: string;
+  path: string;
+  size: number;
+  sha256: string;
+}) {
+  const { text } = useLocaleText();
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<DownloadProgress | null>(null);
+  const inflightRef = useRef<AbortController | null>(null);
+  // Cancel any inflight fetch when the user switches tabs / unmounts.
+  useEffect(() => () => inflightRef.current?.abort(), []);
+
+  async function doDownload() {
+    if (inflightRef.current) return; // single-flight guard
+    const ctl = new AbortController();
+    inflightRef.current = ctl;
+    setBusy(true);
+    setProgress({ received: 0, total: 0 });
+    try {
+      const filename = await downloadFromAPI(
+        `/skills/${ns}/${name}/files/${encodeURI(path)}`,
+        // The bundle download falls back on `<ns>-<name>.tar.gz`; here we
+        // use the file's own name since the server returns the raw blob.
+        path.split('/').pop() ?? path,
+        { signal: ctl.signal, onProgress: (p) => setProgress(p) },
+      );
+      toast.info(text(`Downloaded ${filename}`, `已下载 ${filename}`));
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') return;
+      toast.error(text('Download failed: ', '下载失败: ') + (e as Error).message);
+    } finally {
+      inflightRef.current = null;
+      setBusy(false);
+      setProgress(null);
+    }
+  }
+
+  const pct = progressPct(progress);
+  const label = busy
+    ? (pct != null ? text(`Downloading ${pct}%`, `下载中 ${pct}%`) : text('Downloading...', '下载中…'))
+    : text('Download', '下载');
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0,
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      gap: 12, padding: 24, background: '#1e1e1e',
+      color: 'var(--text-muted)', fontSize: 13,
+      fontFamily: "'JetBrains Mono', monospace",
+    }}>
+      <div style={{ color: 'var(--text)', fontSize: 14, fontWeight: 500 }}>
+        {text('Binary file (blob storage)', '二进制文件（blob 存储）')}
+      </div>
+      <div>{path} · {formatBytes(size)}</div>
+      {sha256 && (
+        <div style={{ color: 'var(--text-faint)', fontSize: 11.5 }}>
+          sha256: {sha256.slice(0, 16)}…
+        </div>
+      )}
+      <button
+        type="button"
+        className="btn sm"
+        onClick={doDownload}
+        disabled={busy}
+        aria-busy={busy}
+        style={{ marginTop: 4 }}
+      >{label}</button>
+      <div style={{ fontSize: 11.5, maxWidth: 320, textAlign: 'center', color: 'var(--text-faint)' }}>
+        {text(
+          'This file is stored as a blob and cannot be edited inline. Re-upload from the New File dialog to replace it.',
+          '该文件存储在 blob 中，无法在编辑器中修改。如需替换，请通过"新建文件"重新上传。',
+        )}
+      </div>
     </div>
   );
 }
