@@ -500,7 +500,16 @@ export function SkillDetail() {
                             </>
                           )}
                         </div>
-                        {/^.*\.(md|markdown)$/i.test(activePath) ? (
+                        {activeFile.data.blobHash ? (
+                          <div style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            color: 'var(--text-faint)', fontSize: 13, padding: '20px 0',
+                          }}>
+                            <IconFile size={14} />
+                            <span>{text('Binary file — cannot preview in browser.', '二进制文件，无法在浏览器中预览。')}</span>
+                            <span style={{ fontFamily: 'monospace', fontSize: 11 }}>sha256:{activeFile.data.blobHash.slice(0, 12)}…</span>
+                          </div>
+                        ) : /^.*\.(md|markdown)$/i.test(activePath) ? (
                           <div className="readme" dangerouslySetInnerHTML={{ __html: renderMarkdown(activeFile.data.content ?? '') }} />
                         ) : (
                           <pre style={{
