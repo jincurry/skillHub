@@ -1202,8 +1202,14 @@ function RollbackModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 480 }}>
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: 'var(--bg)', borderRadius: 10, width: 480, maxWidth: '92vw', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)' }}
+      >
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontSize: 15, fontWeight: 600 }}>{text('Rollback', '回滚')} {ns}/{name}</div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
