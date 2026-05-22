@@ -101,4 +101,41 @@ describe('renderMarkdown', () => {
       expect(html).toContain('<p>after</p>');
     });
   });
+
+  // Regression: shebangs and other `#x` (no whitespace) lines used to be
+  // rejected by both the heading parser (which requires \s+ after #) AND the
+  // paragraph collector (which excluded any ^#), leaving the outer loop
+  // unable to advance — a classic infinite-loop → browser OOM crash.
+  describe('lines starting with # but not headings', () => {
+    function withTimeout(fn: () => string, ms = 1000): string {
+      const start = Date.now();
+      const out = fn();
+      if (Date.now() - start > ms) throw new Error('renderMarkdown took too long');
+      return out;
+    }
+
+    it('renders a bash shebang as a paragraph instead of hanging', () => {
+      const html = withTimeout(() => renderMarkdown('#!/bin/bash\necho hi'));
+      expect(html).toContain('<p>');
+      expect(html).toContain('#!/bin/bash');
+    });
+
+    it('renders a python shebang as a paragraph instead of hanging', () => {
+      const html = withTimeout(() => renderMarkdown('#!/usr/bin/env python3\nprint("hi")'));
+      expect(html).toContain('#!/usr/bin/env python3');
+    });
+
+    it('still rejects `#hashtag` lines from being headings', () => {
+      const html = withTimeout(() => renderMarkdown('#hashtag content'));
+      // Not a heading (no space after #), so paragraph-wrapped.
+      expect(html).not.toContain('<h1>');
+      expect(html).toContain('<p>');
+      expect(html).toContain('#hashtag');
+    });
+
+    it('still parses real headings', () => {
+      expect(renderMarkdown('# Title')).toContain('<h1>Title</h1>');
+      expect(renderMarkdown('### Sub')).toContain('<h3>Sub</h3>');
+    });
+  });
 });

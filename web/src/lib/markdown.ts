@@ -83,12 +83,30 @@ function looksLikeTableHeader(line: string): boolean {
   return true;
 }
 
+// Lines starting with these patterns short-circuit the paragraph collector.
+// The `#` arm must require whitespace after the hashes so that shell shebangs
+// (`#!/bin/bash`, `#!/usr/bin/env python3`) — which the heading parser also
+// rejects — don't get stuck in a no-op branch and infinite-loop the outer
+// while loop. See markdown.test.ts for the regression case.
+const PARAGRAPH_BREAK_RE = /^(#{1,6}\s|```|[-*]\s|\d+\.\s)/;
+
 export function renderMarkdown(src: string): string {
   if (!src) return '';
   const lines = src.split(/\r?\n/);
   const out: string[] = [];
   let i = 0;
+  // Defense-in-depth: even with the paragraph-break fix above, any future
+  // branch that fails to advance `i` would otherwise hang the browser tab.
+  // 20× lines is generous (a real document never re-enters branches that
+  // much) and avoids false positives.
+  const maxIter = lines.length * 20 + 1000;
+  let safety = 0;
   while (i < lines.length) {
+    if (++safety > maxIter) {
+      // eslint-disable-next-line no-console
+      console.error('[markdown] aborted: parser failed to advance at line', i, JSON.stringify(lines[i]));
+      return out.join('\n');
+    }
     const line = lines[i];
     const fence = line.match(/^```(\w*)\s*$/);
     if (fence) {
@@ -168,7 +186,7 @@ export function renderMarkdown(src: string): string {
       continue;
     }
     const para: string[] = [];
-    while (i < lines.length && lines[i].trim() !== '' && !/^(#|```|[-*]\s|\d+\.\s)/.test(lines[i])) {
+    while (i < lines.length && lines[i].trim() !== '' && !PARAGRAPH_BREAK_RE.test(lines[i])) {
       para.push(renderInline(lines[i]));
       i++;
     }
