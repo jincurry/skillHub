@@ -48,7 +48,7 @@ export function Login() {
           <div className="logo-mark" style={{ width: 32, height: 32, fontSize: 18 }}>s</div>
           <div className="logo-text" style={{ fontSize: 20 }}>skill<em>Hub</em></div>
         </div>
-        <h2 style={{ margin: '0 0 18px', fontSize: 18 }}>{t('login.title')}</h2>
+        <h2 style={{ margin: '0 0 18px', fontSize: 18, textAlign: 'center' }}>{t('login.title')}</h2>
 
         <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{t('login.username')}</label>
         <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required
