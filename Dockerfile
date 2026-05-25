@@ -2,6 +2,8 @@
 
 FROM node:20-alpine AS web-build
 WORKDIR /web
+ARG VITE_BASE_PATH=/
+ENV VITE_BASE_PATH=${VITE_BASE_PATH}
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./

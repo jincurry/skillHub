@@ -2,7 +2,7 @@ import type { Achievement, AdminUpdateUserRequest, AdminUser, AIProvider, AIProv
 import { clearAuth, getToken } from './auth';
 import i18n from '../i18n';
 
-const BASE = '/api/v1';
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') + '/api/v1';
 
 let onUnauthorized: (() => void) | null = null;
 export function setUnauthorizedHandler(h: () => void): void {

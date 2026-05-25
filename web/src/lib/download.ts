@@ -23,7 +23,7 @@
 
 import { getToken } from '../api/auth';
 
-const BASE = '/api/v1';
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '') + '/api/v1';
 
 export interface DownloadProgress {
   received: number;
