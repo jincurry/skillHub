@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skillhub
+  namespace: skillhub
+  labels:
+    app.kubernetes.io/name: skillhub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: skillhub
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: skillhub
+    spec:
+      containers:
+        - name: skillhub
+          image: registry-sy.xcloud.lenovo.com/xdba/skillhub:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: SKILLHUB_ADDR
+              value: ":8080"
+            - name: SKILLHUB_DB
+              value: "/app/data/skillhub.db"
+            - name: SKILLHUB_DATA_DIR
+              value: "/app/data"
+            - name: SKILLHUB_WEB_DIR
+              value: "/app/web"
+            - name: SKILLHUB_SEED
+              value: "false"
+            - name: SKILLHUB_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: skillhub-secrets
+                  key: jwt-secret
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: skillhub-data
