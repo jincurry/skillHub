@@ -266,7 +266,7 @@ func (s *Store) ListSkillFilesAtVersion(ns, name, version string) ([]model.Skill
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.Query(`SELECT path, new_content
+	rows, err := s.DB.Query(`SELECT path, new_content, COALESCE(new_blob_hash,'')
 		FROM review_files
 		WHERE review_id = ? AND lower(path) <> 'readme.md'
 		ORDER BY path`, reviewID)
@@ -277,10 +277,15 @@ func (s *Store) ListSkillFilesAtVersion(ns, name, version string) ([]model.Skill
 	out := make([]model.SkillFile, 0)
 	for rows.Next() {
 		var f model.SkillFile
-		if err := rows.Scan(&f.Path, &f.Content); err != nil {
+		if err := rows.Scan(&f.Path, &f.Content, &f.BlobHash); err != nil {
 			return nil, err
 		}
-		f.Size = len(f.Content)
+		// For inline files Size == byte length of content; for blob files
+		// the caller is expected to consult BlobHash and resolve from the
+		// blobstore (which knows the real size).
+		if f.BlobHash == "" {
+			f.Size = len(f.Content)
+		}
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -290,7 +295,7 @@ func (s *Store) ListSkillFilesAtVersion(ns, name, version string) ([]model.Skill
 // ListSkillFiles excludes content to keep listings cheap. Order matches
 // ListSkillFiles so directory traversal is deterministic.
 func (s *Store) ListSkillFilesWithContent(ns, name string) ([]model.SkillFile, error) {
-	rows, err := s.DB.Query(`SELECT path, content, size, updated_at, updated_by
+	rows, err := s.DB.Query(`SELECT path, content, COALESCE(blob_hash,''), size, updated_at, updated_by
 		FROM skill_files
 		WHERE ns=? AND skill_name=? AND lower(path) <> 'readme.md'
 		ORDER BY path`, ns, name)
@@ -301,7 +306,7 @@ func (s *Store) ListSkillFilesWithContent(ns, name string) ([]model.SkillFile, e
 	out := make([]model.SkillFile, 0)
 	for rows.Next() {
 		var f model.SkillFile
-		if err := rows.Scan(&f.Path, &f.Content, &f.Size, &f.UpdatedAt, &f.UpdatedBy); err != nil {
+		if err := rows.Scan(&f.Path, &f.Content, &f.BlobHash, &f.Size, &f.UpdatedAt, &f.UpdatedBy); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -376,22 +381,33 @@ func (s *Store) RollbackToVersion(ns, name, target, reason, actor string) (*mode
 
 	// Pull the snapshot from review_files. Use new_content (the body the
 	// author submitted at that review) as the canonical state of the file
-	// at that version.
-	rows, err := tx.Query(`SELECT path, new_content FROM review_files WHERE review_id = ? AND lower(path) <> 'readme.md'`, reviewID)
+	// at that version. Blob-backed files come back through new_blob_hash
+	// instead of new_content.
+	rows, err := tx.Query(`SELECT path, new_content, COALESCE(new_blob_hash,''), COALESCE(new_size, 0)
+		FROM review_files
+		WHERE review_id = ? AND lower(path) <> 'readme.md'`, reviewID)
 	if err != nil {
 		return nil, err
 	}
 	type snap struct {
-		path, body string
+		path, body, blobHash string
+		size                 int64
 	}
 	var snaps []snap
 	for rows.Next() {
-		var p, b string
-		if err := rows.Scan(&p, &b); err != nil {
+		var p, b, bh string
+		var sz int64
+		if err := rows.Scan(&p, &b, &bh, &sz); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		snaps = append(snaps, snap{p, b})
+		// Older review_files rows (pre-blob) have new_size NULL → the
+		// COALESCE turns it into 0, which is fine because we then derive
+		// the size from the inline body below.
+		if bh == "" {
+			sz = int64(len(b))
+		}
+		snaps = append(snaps, snap{p, b, bh, sz})
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -408,10 +424,22 @@ func (s *Store) RollbackToVersion(ns, name, target, reason, actor string) (*mode
 	}
 	for _, sn := range snaps {
 		if _, err := tx.Exec(`
-			INSERT INTO skill_files(ns, skill_name, path, content, size, updated_by, updated_at)
-			VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP)`,
-			ns, name, sn.path, sn.body, len(sn.body), actor); err != nil {
+			INSERT INTO skill_files(ns, skill_name, path, content, blob_hash, size, updated_by, updated_at)
+			VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`,
+			ns, name, sn.path, sn.body, sn.blobHash, sn.size, actor); err != nil {
 			return nil, err
+		}
+		// Bump ref_count so the blob survives GC even if the rollback
+		// happens after a long gap. INSERT OR IGNORE inside UpsertBlobObject
+		// would be wrong here — we want the increment.
+		if sn.blobHash != "" {
+			if _, err := tx.Exec(`
+				INSERT INTO blob_objects(sha256, size, is_chunked, ref_count)
+				VALUES(?, ?, 0, 1)
+				ON CONFLICT(sha256) DO UPDATE SET ref_count = ref_count + 1`,
+				sn.blobHash, sn.size); err != nil {
+				return nil, err
+			}
 		}
 	}
 

@@ -73,11 +73,15 @@ export function SkillDetail() {
   // Path of the file currently shown in the 文件 tab viewer. Defaults to
   // SKILL.md (or whatever is alphabetically first) once the list arrives.
   const [activePath, setActivePath] = useState<string | null>(null);
+  // Metadata from the list response (has blobHash). Used to skip fetching
+  // blob-backed binary files — their content endpoint returns octet-stream,
+  // not JSON, so calling getFile on them would throw a parse error.
+  const activeFileMeta = displayFiles.find((f) => f.path === activePath);
   const activeFile = useAsync(
-    () => activePath
+    () => activePath && !activeFileMeta?.blobHash
       ? api.getFile(ns, name, activePath)
       : Promise.resolve(null),
-    [ns, name, activePath],
+    [ns, name, activePath, activeFileMeta?.blobHash],
   );
   // Pull SKILL.md content for the overview tab. We don't gate this on
   // tab === 'overview' because the same file is also what the 文件 tab
@@ -485,6 +489,30 @@ export function SkillDetail() {
                     )}
                     {activePath && activeFile.error && (
                       <div style={{ color: 'var(--red-text)', fontSize: 13 }}>{text('Read failed: ', '读取失败：')}{activeFile.error.message}</div>
+                    )}
+                    {activePath && activeFileMeta?.blobHash && (
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, fontSize: 12, color: 'var(--text-faint)' }}>
+                          <IconFile size={12} />
+                          <span className="mono" style={{ color: 'var(--text)', fontSize: 13 }}>{activePath}</span>
+                          <span>·</span>
+                          <span>{activeFileMeta.size} {text('bytes', '字节')}</span>
+                          {activeFileMeta.updatedBy && (
+                            <>
+                              <span>·</span>
+                              <span>@{activeFileMeta.updatedBy} {text('updated ', '更新于 ')}{fmtRelative(activeFileMeta.updatedAt)}</span>
+                            </>
+                          )}
+                        </div>
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          color: 'var(--text-faint)', fontSize: 13, padding: '20px 0',
+                        }}>
+                          <IconFile size={14} />
+                          <span>{text('Binary file — cannot preview in browser.', '二进制文件，无法在浏览器中预览。')}</span>
+                          <span style={{ fontFamily: 'monospace', fontSize: 11 }}>sha256:{activeFileMeta.blobHash.slice(0, 12)}…</span>
+                        </div>
+                      </>
                     )}
                     {activePath && activeFile.data && (
                       <>
@@ -1202,8 +1230,14 @@ function RollbackModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 480 }}>
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: 'var(--bg)', borderRadius: 10, width: 480, maxWidth: '92vw', boxShadow: '0 20px 50px rgba(15,23,42,0.25)', border: '1px solid var(--border)' }}
+      >
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontSize: 15, fontWeight: 600 }}>{text('Rollback', '回滚')} {ns}/{name}</div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>

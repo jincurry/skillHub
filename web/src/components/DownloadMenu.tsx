@@ -3,6 +3,7 @@ import { IconDownload, IconChevronDown, IconCopy, IconCheck } from './Icons';
 import { api } from '../api/client';
 import { useLocaleText } from '../i18n/useLocaleText';
 import { toast } from '../lib/toast';
+import { progressPct, type DownloadProgress } from '../lib/download';
 
 interface Props {
   ns: string;
@@ -14,11 +15,19 @@ interface Props {
  * Split button: clicking the main label downloads the .tar.gz bundle;
  * clicking the chevron opens a popover with the CLI commands so users
  * who installed `skillhub` can pull / activate from the terminal.
+ *
+ * Big bundles (100+ MB) used to look like a frozen button — users would
+ * keep clicking and queue up duplicate downloads. We now hold a single
+ * inflight Promise and show progress in the button label so the second
+ * click is a no-op until the first one finishes (or fails).
  */
 export function DownloadMenu({ ns, name, version }: Props) {
   const { text } = useLocaleText();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<DownloadProgress | null>(null);
+  const inflightRef = useRef<AbortController | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,11 +41,34 @@ export function DownloadMenu({ ns, name, version }: Props) {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
+  // Abort any inflight download when this component unmounts (e.g. user
+  // navigates away mid-download). The Promise rejects with an AbortError
+  // which our catch swallows.
+  useEffect(() => () => inflightRef.current?.abort(), []);
+
   async function doDownload() {
+    // Single-flight guard. Re-entries during a download are no-ops; the
+    // existing fetch keeps going and the busy state in the button label
+    // tells the user something's happening.
+    if (inflightRef.current) return;
+    const ctl = new AbortController();
+    inflightRef.current = ctl;
+    setBusy(true);
+    setProgress({ received: 0, total: 0 });
     try {
-      await api.downloadBundle(ns, name);
+      const filename = await api.downloadBundle(ns, name, {
+        signal: ctl.signal,
+        onProgress: (p) => setProgress(p),
+      });
+      toast.info(text(`Downloaded ${filename}`, `已下载 ${filename}`));
     } catch (e) {
+      // Don't toast on user-initiated abort.
+      if ((e as Error).name === 'AbortError') return;
       toast.error(text('Download failed: ', '下载失败: ') + (e as Error).message);
+    } finally {
+      inflightRef.current = null;
+      setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -60,14 +92,25 @@ export function DownloadMenu({ ns, name, version }: Props) {
   const activateCmd = `skillhub skill activate ${ref}`;
   const getCmd = `skillhub skill get ${ref}`;
 
+  // Compose a label for the busy state. With a known Content-Length we
+  // show "下载中 42%"; without it, just "下载中…".
+  const pct = progressPct(progress);
+  const busyLabel = pct != null
+    ? text(`Downloading ${pct}%`, `下载中 ${pct}%`)
+    : text('Downloading...', '下载中…');
+
   return (
     <div ref={wrapRef} style={{ position: 'relative', display: 'inline-flex' }}>
       <button
         className="btn"
         onClick={doDownload}
-        title={text(`Download the file bundle for ${ref}${version ? ` v${version}` : ''} (.tar.gz)`, `下载 ${ref}${version ? ` v${version}` : ''} 的文件 bundle (.tar.gz)`)}
+        disabled={busy}
+        aria-busy={busy}
+        title={busy
+          ? text('Download in progress', '下载进行中')
+          : text(`Download the file bundle for ${ref}${version ? ` v${version}` : ''} (.tar.gz)`, `下载 ${ref}${version ? ` v${version}` : ''} 的文件 bundle (.tar.gz)`)}
         style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' }}
-      ><IconDownload size={14} /> {text('Download', '下载')}</button>
+      ><IconDownload size={14} /> {busy ? busyLabel : text('Download', '下载')}</button>
       <button
         className="btn"
         onClick={() => setOpen((o) => !o)}
@@ -89,10 +132,11 @@ export function DownloadMenu({ ns, name, version }: Props) {
           <div style={{ fontWeight: 600, marginBottom: 6, color: 'var(--text)' }}>{text('Download Bundle', '下载 Bundle')}</div>
           <button
             className="btn sm"
+            disabled={busy}
             onClick={() => { setOpen(false); void doDownload(); }}
             style={{ width: '100%', justifyContent: 'center' }}
           >
-            <IconDownload size={13} /> {text('Download .tar.gz in browser', '浏览器下载 .tar.gz')}
+            <IconDownload size={13} /> {busy ? busyLabel : text('Download .tar.gz in browser', '浏览器下载 .tar.gz')}
           </button>
 
           <div style={{ borderTop: '1px solid var(--border)', margin: '12px 0 10px' }} />

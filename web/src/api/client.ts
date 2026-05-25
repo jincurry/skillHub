@@ -130,39 +130,26 @@ export const api = {
     }),
   // downloadBundle fetches a tar.gz and triggers a browser download. Returns
   // the suggested filename so the caller can surface a "downloaded X" toast.
+  //
+  // Progress reporting is exposed through `onProgress` so the caller can
+  // render a busy state — without it, a 100+ MB tar.gz looks like a frozen
+  // button for many seconds, prompting users to click again and accidentally
+  // queue up multiple downloads.
   downloadBundle: async (
     ns: string,
     name: string,
-    opts: { tag?: string; version?: string } = {},
+    opts: { tag?: string; version?: string; onProgress?: (p: import('../lib/download').DownloadProgress) => void; signal?: AbortSignal } = {},
   ): Promise<string> => {
-    const tok = getToken();
     const qp = new URLSearchParams();
     if (opts.tag) qp.set('tag', opts.tag);
     else if (opts.version) qp.set('version', opts.version);
     const query = qp.toString() ? `?${qp.toString()}` : '';
-    const res = await fetch(`${BASE}/skills/${ns}/${name}/bundle${query}`, {
-      headers: tok ? { Authorization: `Bearer ${tok}` } : {},
-    });
-    if (!res.ok) {
-      let detail = res.statusText;
-      try {
-        const j = (await res.json()) as { error?: string };
-        if (j?.error) detail = j.error;
-      } catch { /* ignore */ }
-      throw new Error(`${res.status} ${detail}`);
-    }
-    // Parse filename from Content-Disposition; fall back to `${ns}-${name}.tar.gz`.
-    const cd = res.headers.get('Content-Disposition') ?? '';
-    const m = /filename="([^"]+)"/.exec(cd);
-    const filename = m?.[1] ?? `${ns}-${name}.tar.gz`;
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    return filename;
+    const { downloadFromAPI } = await import('../lib/download');
+    return downloadFromAPI(
+      `/skills/${ns}/${name}/bundle${query}`,
+      `${ns}-${name}.tar.gz`,
+      { onProgress: opts.onProgress, signal: opts.signal },
+    );
   },
   myDrafts: () => request<Skill[]>('/me/drafts'),
 
@@ -240,6 +227,19 @@ export const api = {
   putFile: (ns: string, name: string, path: string, content: string) =>
     request<SkillFile>(`/skills/${ns}/${name}/files/${encodeURI(path)}`, {
       method: 'PUT', body: JSON.stringify({ content }),
+    }),
+  /**
+   * Save a file whose body lives in blob storage. The caller MUST upload the
+   * blob (via lib/blob.ts -> uploadBlob) before calling this endpoint —
+   * otherwise the server returns 422.
+   *
+   * Used for files too large or too binary to round-trip through JSON. The
+   * bundle / review / diff paths are aware of blobHash and resolve content
+   * directly from blob storage.
+   */
+  putFileBlob: (ns: string, name: string, path: string, blobHash: string, size: number) =>
+    request<SkillFile>(`/skills/${ns}/${name}/files/${encodeURI(path)}`, {
+      method: 'PUT', body: JSON.stringify({ blobHash, size }),
     }),
   deleteFile: (ns: string, name: string, path: string) =>
     request<void>(`/skills/${ns}/${name}/files/${encodeURI(path)}`, {

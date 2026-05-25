@@ -112,9 +112,27 @@ function DraftCard({ d, meName, onChanged }: {
     }
   }
 
+  // Single-flight guard. A 100+ MB tar.gz takes a few seconds to assemble;
+  // without this, users impatiently click the menu item again and trigger
+  // a second download. The ref is in module-instance scope (one per card)
+  // so two cards can still download concurrently.
+  const downloadingRef = useRef(false);
+  const [downloading, setDownloading] = useState(false);
   async function downloadBundle() {
-    try { await api.downloadBundle(d.ns, d.name); }
-    catch (e) { toast.error(text('Download failed: ', '下载失败: ') + (e as Error).message); }
+    if (downloadingRef.current) return;
+    downloadingRef.current = true;
+    setDownloading(true);
+    try {
+      const filename = await api.downloadBundle(d.ns, d.name);
+      toast.info(text(`Downloaded ${filename}`, `已下载 ${filename}`));
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') {
+        toast.error(text('Download failed: ', '下载失败: ') + (e as Error).message);
+      }
+    } finally {
+      downloadingRef.current = false;
+      setDownloading(false);
+    }
   }
 
   async function deleteDraft() {
@@ -187,8 +205,11 @@ function DraftCard({ d, meName, onChanged }: {
               <DraftMenuItem onClick={() => { setMenuOpen(false); void copyRef(); }}>
                 {text('Copy ns/name', '复制 ns/name')}
               </DraftMenuItem>
-              <DraftMenuItem onClick={() => { setMenuOpen(false); void downloadBundle(); }}>
-                {text('Download bundle', '下载 bundle')}
+              <DraftMenuItem
+                onClick={() => { setMenuOpen(false); void downloadBundle(); }}
+                disabled={downloading}
+              >
+                {downloading ? text('Downloading...', '下载中…') : text('Download bundle', '下载 bundle')}
               </DraftMenuItem>
               <DraftMenuItem
                 onClick={() => { setMenuOpen(false); v.reload(); }}

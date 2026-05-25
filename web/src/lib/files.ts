@@ -35,3 +35,45 @@ export function isRootReadme(path: string): boolean {
 export function shouldDisplaySkillFile(path: string): boolean {
   return !isRootReadme(path);
 }
+
+/** Extensions that the editor is willing to load as inline text (Monaco-
+ *  editable). Anything else uploaded gets routed through the blob protocol
+ *  so we never call file.text() on it (which would corrupt binary data and
+ *  blow up the JS heap on large files). Mirrors `isTextFile` in
+ *  server/internal/store/merge.go plus the few common scripting languages
+ *  the editor knows how to highlight. */
+const INLINE_TEXT_EXTS = new Set([
+  '.md', '.markdown',
+  '.yaml', '.yml',
+  '.json', '.toml',
+  '.sh', '.bash',
+  '.txt',
+  '.py', '.go', '.rs',
+  '.js', '.jsx', '.ts', '.tsx',
+  '.html', '.css',
+  '.sql',
+]);
+
+/** Files at or above this size go through the blob protocol regardless of
+ *  extension, so the upload path can never JSON-encode a multi-MB body and
+ *  blow up the tab. The server's inline cap is 1 MiB; we stay well below
+ *  that to leave headroom for JSON / fetch buffers. */
+export const INLINE_UPLOAD_MAX = 256 * 1024;
+
+/** Decide whether an uploaded File should take the inline (Monaco-editable)
+ *  path or be stored as a blob. The blob path is the safe default; the
+ *  inline path is only chosen when the file is both small AND likely text. */
+export function shouldUploadInline(file: File): boolean {
+  if (file.size > INLINE_UPLOAD_MAX) return false;
+  const lastDot = file.name.lastIndexOf('.');
+  if (lastDot < 0) return false;
+  return INLINE_TEXT_EXTS.has(file.name.slice(lastDot).toLowerCase());
+}
+
+/** Format a byte count for display. Used by the binary-file placeholder. */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}

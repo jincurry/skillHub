@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"database/sql"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jincurry/skillhub/server/internal/audit"
 	"github.com/jincurry/skillhub/server/internal/auth"
+	"github.com/jincurry/skillhub/server/internal/blobstore"
 	"github.com/jincurry/skillhub/server/internal/config"
 	"github.com/jincurry/skillhub/server/internal/i18n"
 	"github.com/jincurry/skillhub/server/internal/middleware"
@@ -28,11 +30,12 @@ import (
 type Server struct {
 	cfg      config.Config
 	store    *store.Store
+	blobs    blobstore.BlobStore
 	notifier *notifier.Dispatcher
 	metrics  *middleware.Registry
 }
 
-func New(cfg config.Config, st *store.Store) *Server {
+func New(cfg config.Config, st *store.Store, blobs blobstore.BlobStore) *Server {
 	// Build notifier dispatcher from config.
 	d := notifier.New()
 	if s := notifier.NewSlack(cfg.SlackWebhookURL); s != nil {
@@ -41,7 +44,7 @@ func New(cfg config.Config, st *store.Store) *Server {
 	if f := notifier.NewFeishu(cfg.FeishuWebhookURL); f != nil {
 		d.Register(f)
 	}
-	return &Server{cfg: cfg, store: st, notifier: d, metrics: middleware.NewRegistry()}
+	return &Server{cfg: cfg, store: st, blobs: blobs, notifier: d, metrics: middleware.NewRegistry()}
 }
 
 func (s *Server) Routes() *gin.Engine {
@@ -190,6 +193,17 @@ func (s *Server) Routes() *gin.Engine {
 		auth.DELETE("/webhooks/:id", s.deleteWebhook)
 		auth.GET("/webhooks/:id/deliveries", s.listWebhookDeliveries)
 		auth.POST("/webhooks/:id/ping", s.pingWebhook)
+
+		// Blob storage — phase 1 (content-addressed upload/download).
+		auth.POST("/blobs/exists", s.blobsExists)
+		auth.PUT("/blobs/:sha256", s.putBlob)
+		auth.POST("/blobs/:sha256/uploads", s.startChunkedUpload)
+		auth.PUT("/blobs/:sha256/uploads/:upload_id/chunks/:index", s.putChunk)
+		auth.POST("/blobs/:sha256/uploads/:upload_id/complete", s.completeChunkedUpload)
+
+		// Push protocol — phase 2 (concurrent push with conflict detection).
+		auth.POST("/skills/:ns/:name/push", s.pushSkill)
+		auth.GET("/skills/:ns/:name/draft-tree", s.getDraftTree)
 	}
 
 	// Admin-only configuration. requireAdmin checks users.is_admin = 1.
@@ -225,6 +239,9 @@ func (s *Server) Routes() *gin.Engine {
 		adminAI.GET("/users", s.listAdminUsers)
 		adminAI.POST("/users", s.createAdminUser)
 		adminAI.PATCH("/users/:username", s.adminUpdateUser)
+
+		// Blob GC: mark-and-sweep unreferenced blobs.
+		adminAI.POST("/blobs/gc", s.adminGCBlobs)
 	}
 
 	if webDir := strings.TrimSpace(os.Getenv("SKILLHUB_WEB_DIR")); webDir != "" {
@@ -1354,10 +1371,8 @@ func (s *Server) getReviewStats(c *gin.Context) {
 }
 
 // canEditSkill reports whether the user can write or delete a skill's files.
-// Author of the skill always wins; otherwise the user must be an owner or
-// maintainer of the owning namespace. This mirrors the rule applied by
-// submitForReview — if you can't submit a bundle, you shouldn't be able to
-// rewrite it either.
+// Author always wins; otherwise any namespace role (owner/maintainer/member)
+// is sufficient for file edits. Only owner/maintainer can approve reviews.
 func (s *Server) canEditSkill(user, ns, name string) (bool, error) {
 	k, err := s.store.GetSkill(ns, name)
 	if err != nil {
@@ -1373,7 +1388,7 @@ func (s *Server) canEditSkill(user, ns, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return role == "owner" || role == "maintainer", nil
+	return role == "owner" || role == "maintainer" || role == "member", nil
 }
 
 // extractFilePath normalises gin's wildcard path (which arrives with a leading
@@ -1417,6 +1432,28 @@ func (s *Server) getSkillFile(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "file not found"})
 		return
 	}
+
+	// If the file has a blob_hash it was stored via the push protocol.
+	// Stream it directly from blob storage (or redirect for S3).
+	if f.BlobHash != "" && s.blobs != nil {
+		if url, _ := s.blobs.PresignedGetURL(c.Request.Context(), f.BlobHash, 15*time.Minute); url != "" {
+			c.Redirect(http.StatusFound, url)
+			return
+		}
+		rc, size, err := s.blobs.Get(c.Request.Context(), f.BlobHash)
+		if err != nil {
+			serverError(c, err)
+			return
+		}
+		defer rc.Close()
+		c.Header("Content-Disposition", `attachment; filename="`+filepath.Base(p)+`"`)
+		c.Header("Content-Length", strconv.FormatInt(size, 10))
+		c.Header("Content-Type", "application/octet-stream")
+		c.Status(http.StatusOK)
+		io.Copy(c.Writer, rc)
+		return
+	}
+
 	c.JSON(200, f)
 }
 
@@ -1441,10 +1478,47 @@ func (s *Server) putSkillFile(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	f, err := s.store.PutSkillFile(ns, name, p, req.Content, user)
-	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+	// Two body shapes are accepted (mutually exclusive):
+	//
+	//   1. {"content": "..."} — inline text upload (legacy path; ≤ 1 MiB).
+	//   2. {"blobHash": "<sha256>", "size": N} — body lives in blob storage,
+	//      uploaded via /api/v1/blobs/* before this PUT. Used by the editor
+	//      for large or binary files so we never JSON-encode the body.
+	//
+	// If both shapes are present we reject — that's a client bug; pick one.
+	var f *model.SkillFile
+	switch {
+	case req.BlobHash != "" && req.Content != "":
+		c.JSON(400, gin.H{"error": "either content or blobHash, not both"})
 		return
+	case req.BlobHash != "":
+		// Verify the blob is actually present so we never persist a row
+		// pointing at a missing object. Cheap O(1) stat against the
+		// blobstore index.
+		if s.blobs == nil {
+			c.JSON(503, gin.H{"error": "blob storage not configured"})
+			return
+		}
+		exists, err := s.blobs.Exists(c.Request.Context(), req.BlobHash)
+		if err != nil {
+			serverError(c, err)
+			return
+		}
+		if !exists {
+			c.JSON(422, gin.H{"error": "blob not uploaded", "blobHash": req.BlobHash})
+			return
+		}
+		f, err = s.store.PutSkillFileBlob(ns, name, p, req.BlobHash, req.Size, user)
+		if err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+	default:
+		f, err = s.store.PutSkillFile(ns, name, p, req.Content, user)
+		if err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	audit.Log(s.store.DB, user, "edit_file", ns+"/"+name+":"+p, "", c.ClientIP())
 	c.JSON(200, f)
@@ -1758,10 +1832,19 @@ func (s *Server) downloadSkillBundle(c *gin.Context) {
 
 	now := time.Now()
 	for _, f := range files {
+		// Resolve the body. Inline files keep using f.Content; blob files
+		// stream straight from blob storage so we never load a multi-MB
+		// binary into a Go string. ListSkillFilesAtVersion sets f.Size for
+		// blob files via the snapshot; for live files it reflects the
+		// skill_files.size column.
+		size := int64(len(f.Content))
+		if f.BlobHash != "" {
+			size = int64(f.Size)
+		}
 		hdr := &tar.Header{
 			Name:    root + "/" + f.Path,
 			Mode:    0o644,
-			Size:    int64(len(f.Content)),
+			Size:    size,
 			ModTime: now,
 		}
 		if !f.UpdatedAt.IsZero() {
@@ -1769,6 +1852,30 @@ func (s *Server) downloadSkillBundle(c *gin.Context) {
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
 			return
+		}
+		if f.BlobHash != "" {
+			if s.blobs == nil {
+				return
+			}
+			rc, blobSize, err := s.blobs.Get(c.Request.Context(), f.BlobHash)
+			if err != nil {
+				return
+			}
+			// Header.Size must match exactly or tar.Writer will refuse the
+			// next entry. If our recorded size disagreed with the blob's
+			// real size, the Get above would still have given us the truth
+			// but the header is already written — bail rather than corrupt
+			// the archive.
+			if blobSize != size {
+				rc.Close()
+				return
+			}
+			if _, err := io.Copy(tw, rc); err != nil {
+				rc.Close()
+				return
+			}
+			rc.Close()
+			continue
 		}
 		if _, err := tw.Write([]byte(f.Content)); err != nil {
 			return

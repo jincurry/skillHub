@@ -910,7 +910,16 @@ func (s *Store) SetSkillLifecycleStatus(ns, name, newStatus, actor, reason strin
 // review for (ns, name) whose status is "approved" or "closed". That covers
 // the lifecycle: a published version is reachable via its old review's
 // snapshot, and never-published skills correctly produce empty base content.
+//
+// Blob-backed files: if a skill_file has a non-empty blob_hash, content is
+// empty and we copy the blob_hash + size into the snapshot instead. The
+// reviewer UI shows a "binary file" placeholder rather than diffing bytes.
 func snapshotReviewFiles(tx *sql.Tx, reviewID int64, ns, name string) error {
+	type fileRef struct {
+		body     string
+		blobHash string
+		size     int64
+	}
 	// Step 1: resolve the previous review id (might be 0 if never approved).
 	var prevID int64
 	err := tx.QueryRow(`
@@ -921,36 +930,45 @@ func snapshotReviewFiles(tx *sql.Tx, reviewID int64, ns, name string) error {
 	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
-	prevContents := map[string]string{}
+	prevContents := map[string]fileRef{}
 	if prevID != 0 {
-		rows, err := tx.Query(`SELECT path, new_content FROM review_files WHERE review_id = ? AND lower(path) <> 'readme.md'`, prevID)
+		rows, err := tx.Query(`SELECT path, new_content, COALESCE(new_blob_hash,''), COALESCE(new_size, 0)
+			FROM review_files
+			WHERE review_id = ? AND lower(path) <> 'readme.md'`, prevID)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
-			var p, c string
-			if err := rows.Scan(&p, &c); err != nil {
+			var p, c, bh string
+			var sz int64
+			if err := rows.Scan(&p, &c, &bh, &sz); err != nil {
 				rows.Close()
 				return err
 			}
-			prevContents[p] = c
+			if bh == "" {
+				sz = int64(len(c))
+			}
+			prevContents[p] = fileRef{body: c, blobHash: bh, size: sz}
 		}
 		rows.Close()
 	}
 
 	// Step 2: pull every file currently in the bundle.
-	curRows, err := tx.Query(`SELECT path, content FROM skill_files WHERE ns = ? AND skill_name = ? AND lower(path) <> 'readme.md'`, ns, name)
+	curRows, err := tx.Query(`SELECT path, content, COALESCE(blob_hash,''), size
+		FROM skill_files
+		WHERE ns = ? AND skill_name = ? AND lower(path) <> 'readme.md'`, ns, name)
 	if err != nil {
 		return err
 	}
-	curContents := map[string]string{}
+	curContents := map[string]fileRef{}
 	for curRows.Next() {
-		var p, c string
-		if err := curRows.Scan(&p, &c); err != nil {
+		var p, c, bh string
+		var sz int64
+		if err := curRows.Scan(&p, &c, &bh, &sz); err != nil {
 			curRows.Close()
 			return err
 		}
-		curContents[p] = c
+		curContents[p] = fileRef{body: c, blobHash: bh, size: sz}
 	}
 	curRows.Close()
 
@@ -971,14 +989,20 @@ func snapshotReviewFiles(tx *sql.Tx, reviewID int64, ns, name string) error {
 			kind = "added"
 		case hadBase && !hasNew:
 			kind = "deleted"
-		case base == newC:
+		case base.blobHash == newC.blobHash && base.body == newC.body:
 			kind = "unchanged"
 		default:
 			kind = "modified"
 		}
-		if _, err := tx.Exec(`INSERT INTO review_files(review_id, path, base_content, new_content, change_kind)
-			VALUES(?,?,?,?,?)`,
-			reviewID, p, base, newC, kind); err != nil {
+		if _, err := tx.Exec(`INSERT INTO review_files(
+				review_id, path, base_content, new_content,
+				base_blob_hash, new_blob_hash, base_size, new_size, change_kind)
+			VALUES(?,?,?,?,?,?,?,?,?)`,
+			reviewID, p,
+			base.body, newC.body,
+			base.blobHash, newC.blobHash,
+			base.size, newC.size,
+			kind); err != nil {
 			return err
 		}
 	}
@@ -989,7 +1013,10 @@ func snapshotReviewFiles(tx *sql.Tx, reviewID int64, ns, name string) error {
 // a valid response (e.g. legacy reviews submitted before the snapshot table
 // existed).
 func (s *Store) ListReviewFiles(reviewID int64) ([]model.ReviewFile, error) {
-	rows, err := s.DB.Query(`SELECT path, base_content, new_content, change_kind
+	rows, err := s.DB.Query(`SELECT path, base_content, new_content,
+			COALESCE(base_blob_hash,''), COALESCE(new_blob_hash,''),
+			COALESCE(base_size, 0), COALESCE(new_size, 0),
+			change_kind
 		FROM review_files
 		WHERE review_id = ? AND lower(path) <> 'readme.md'
 		ORDER BY path`, reviewID)
@@ -1000,7 +1027,10 @@ func (s *Store) ListReviewFiles(reviewID int64) ([]model.ReviewFile, error) {
 	out := []model.ReviewFile{}
 	for rows.Next() {
 		var f model.ReviewFile
-		if err := rows.Scan(&f.Path, &f.BaseContent, &f.NewContent, &f.ChangeKind); err != nil {
+		if err := rows.Scan(&f.Path, &f.BaseContent, &f.NewContent,
+			&f.BaseBlobHash, &f.NewBlobHash,
+			&f.BaseSize, &f.NewSize,
+			&f.ChangeKind); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
