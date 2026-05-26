@@ -11,6 +11,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // blobReadWriter is the minimal BlobStore surface needed during push/merge.
@@ -131,7 +132,7 @@ func createSkillWithTree(tx *sql.Tx, p PushSkillParams) (*PushResult, error) {
 	); err != nil {
 		return nil, err
 	}
-	if err := syncSkillFiles(tx, p.NS, p.Name, p.Files, p.PushedBy); err != nil {
+	if err := syncSkillFiles(context.Background(), tx, p.NS, p.Name, p.Files, p.PushedBy, p.Blobs); err != nil {
 		return nil, err
 	}
 	return &PushResult{TreeHash: treeHash}, nil
@@ -175,7 +176,7 @@ func doFastForward(tx *sql.Tx, p PushSkillParams, treeHash, manifest string) (*P
 	); err != nil {
 		return nil, err
 	}
-	if err := syncSkillFiles(tx, p.NS, p.Name, p.Files, p.PushedBy); err != nil {
+	if err := syncSkillFiles(context.Background(), tx, p.NS, p.Name, p.Files, p.PushedBy, p.Blobs); err != nil {
 		return nil, err
 	}
 	return &PushResult{TreeHash: treeHash}, nil
@@ -184,13 +185,13 @@ func doFastForward(tx *sql.Tx, p PushSkillParams, treeHash, manifest string) (*P
 // doMerge performs a three-way file-level merge between the common base
 // (p.BaseTreeHash), the current server draft, and the incoming push.
 func doMerge(ctx context.Context, tx *sql.Tx, p PushSkillParams, currentHash string) (*PushResult, error) {
-	baseFiles    := loadTreeManifest(tx, *p.BaseTreeHash)
+	baseFiles := loadTreeManifest(tx, *p.BaseTreeHash)
 	currentFiles := loadTreeManifest(tx, currentHash)
-	theirFiles   := filesToMap(p.Files)
+	theirFiles := filesToMap(p.Files)
 
-	var merged    []PushFile
+	var merged []PushFile
 	var conflicts []ConflictDetail
-	var summary   []string
+	var summary []string
 
 	for _, path := range unionPaths(baseFiles, currentFiles, theirFiles) {
 		m, conflict, note := mergeOneFile(ctx, tx, p.Blobs, path, baseFiles[path], currentFiles[path], theirFiles[path])
@@ -220,7 +221,7 @@ func doMerge(ctx context.Context, tx *sql.Tx, p PushSkillParams, currentHash str
 	); err != nil {
 		return nil, err
 	}
-	if err := syncSkillFiles(tx, p.NS, p.Name, merged, p.PushedBy); err != nil {
+	if err := syncSkillFiles(ctx, tx, p.NS, p.Name, merged, p.PushedBy, p.Blobs); err != nil {
 		return nil, err
 	}
 	return &PushResult{TreeHash: mergedHash, Merged: true, MergeSummary: summary}, nil
@@ -305,9 +306,16 @@ func insertTree(tx *sql.Tx, hash, manifest string) error {
 	return err
 }
 
+// maxInlineSize is the threshold below which text blobs are inlined into the
+// content column so the Web editor and file preview can render them without an
+// extra blob-store fetch.
+const maxInlineSize = 1 << 20 // 1 MiB
+
 // syncSkillFiles replaces the current skill_files rows with the new tree.
-// This keeps the existing file API and Web editor consistent without changes.
-func syncSkillFiles(tx *sql.Tx, ns, name string, files []PushFile, pushedBy string) error {
+// For text files below maxInlineSize the blob content is read and stored
+// inline in the content column (blob_hash is left NULL). Larger or binary
+// files keep the blob_hash reference as before.
+func syncSkillFiles(ctx context.Context, tx *sql.Tx, ns, name string, files []PushFile, pushedBy string, blobs blobReadWriter) error {
 	if _, err := tx.Exec(
 		`DELETE FROM skill_files WHERE ns=? AND skill_name=?`, ns, name,
 	); err != nil {
@@ -317,15 +325,39 @@ func syncSkillFiles(tx *sql.Tx, ns, name string, files []PushFile, pushedBy stri
 		if f.Deleted {
 			continue
 		}
+		content, blobHash := "", f.SHA256
+		// Try to inline small text files.
+		if blobs != nil && f.Size > 0 && f.Size <= maxInlineSize {
+			if data, err := readBlob(ctx, blobs, f.SHA256); err == nil {
+				if utf8.Valid(data) {
+					content = string(data)
+					blobHash = "" // inline; no need for blob reference
+				}
+			}
+		}
+		var blobHashPtr interface{} = blobHash
+		if blobHash == "" {
+			blobHashPtr = nil
+		}
 		if _, err := tx.Exec(`
 			INSERT INTO skill_files(ns, skill_name, path, content, blob_hash, size, updated_by)
-			VALUES(?, ?, ?, '', ?, ?, ?)`,
-			ns, name, f.Path, f.SHA256, f.Size, pushedBy,
+			VALUES(?, ?, ?, ?, ?, ?, ?)`,
+			ns, name, f.Path, content, blobHashPtr, f.Size, pushedBy,
 		); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// readBlob reads all bytes for a blob hash from the blob store.
+func readBlob(ctx context.Context, blobs blobReadWriter, sha string) ([]byte, error) {
+	rc, _, err := blobs.Get(ctx, sha)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
 }
 
 func loadTreeManifest(tx *sql.Tx, treeHash string) map[string]*PushFile {
